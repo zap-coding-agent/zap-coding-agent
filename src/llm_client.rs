@@ -37,13 +37,26 @@ impl Message {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Usage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cache_write_tokens: u32,
+}
+
 #[derive(Debug)]
 pub struct ApiResponse {
     pub content: Vec<ContentBlock>,
     pub stop_reason: String,
+    pub usage: Option<Usage>,
 }
 
 // ── Provider trait ────────────────────────────────────────────────────────────
+
+/// Called once, synchronously, immediately before the first output character
+/// is written to stdout. Use this to clear a spinner before streaming begins.
+pub type BeforeOutput = Box<dyn FnOnce() + Send>;
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -52,6 +65,7 @@ pub trait LlmProvider: Send + Sync {
         system: &str,
         messages: &[Message],
         tools: &[serde_json::Value],
+        before_output: Option<BeforeOutput>,
     ) -> Result<ApiResponse>;
 }
 
@@ -142,9 +156,21 @@ impl AnthropicClient {
         event: &serde_json::Value,
         blocks: &mut std::collections::HashMap<usize, BlockAccum>,
         stop_reason: &mut String,
+        before_output: &mut Option<BeforeOutput>,
+        usage: &mut Usage,
     ) {
         let t = event["type"].as_str().unwrap_or("");
         match t {
+            "message_start" => {
+                if let Some(u) = event["message"]["usage"].as_object() {
+                    usage.input_tokens = u.get("input_tokens")
+                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    usage.cache_read_tokens = u.get("cache_read_input_tokens")
+                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    usage.cache_write_tokens = u.get("cache_creation_input_tokens")
+                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                }
+            }
             "content_block_start" => {
                 let idx = event["index"].as_u64().unwrap_or(0) as usize;
                 let cb = &event["content_block"];
@@ -163,9 +189,11 @@ impl AnthropicClient {
                 if let Some(acc) = blocks.get_mut(&idx) {
                     if dtype == "text_delta" {
                         let chunk = delta["text"].as_str().unwrap_or("");
-                        // Stream text to stdout immediately — agent_core must NOT print it again.
-                        print!("{}", chunk);
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                        if !chunk.is_empty() {
+                            if let Some(cb) = before_output.take() { cb(); }
+                            print!("{}", chunk);
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                        }
                         acc.text.push_str(chunk);
                     } else if dtype == "input_json_delta" {
                         acc.input_json
@@ -176,6 +204,10 @@ impl AnthropicClient {
             "message_delta" => {
                 if let Some(reason) = event["delta"]["stop_reason"].as_str() {
                     *stop_reason = reason.to_string();
+                }
+                if let Some(u) = event["usage"].as_object() {
+                    usage.output_tokens = u.get("output_tokens")
+                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 }
             }
             _ => {}
@@ -190,7 +222,9 @@ impl LlmProvider for AnthropicClient {
         system: &str,
         messages: &[Message],
         tools: &[serde_json::Value],
+        before_output: Option<BeforeOutput>,
     ) -> Result<ApiResponse> {
+        let mut before_output = before_output;
         if self.api_key.is_empty() {
             anyhow::bail!("ANTHROPIC_API_KEY is not set");
         }
@@ -226,6 +260,7 @@ impl LlmProvider for AnthropicClient {
         let mut buf = String::new();
         let mut blocks: std::collections::HashMap<usize, BlockAccum> = Default::default();
         let mut stop_reason = "end_turn".to_string();
+        let mut usage_acc = Usage::default();
 
         while let Some(chunk) = stream.next().await {
             let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
@@ -240,7 +275,13 @@ impl LlmProvider for AnthropicClient {
                         break;
                     }
                     if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        Self::process_event(&event, &mut blocks, &mut stop_reason);
+                        Self::process_event(
+                            &event,
+                            &mut blocks,
+                            &mut stop_reason,
+                            &mut before_output,
+                            &mut usage_acc,
+                        );
                     }
                 }
             }
@@ -271,7 +312,10 @@ impl LlmProvider for AnthropicClient {
             }
         }
 
-        Ok(ApiResponse { content, stop_reason })
+        // Stop spinner if no text was streamed (tool-use only response).
+        if let Some(cb) = before_output.take() { cb(); }
+
+        Ok(ApiResponse { content, stop_reason, usage: Some(usage_acc) })
     }
 }
 
@@ -399,7 +443,9 @@ impl LlmProvider for OpenAiClient {
         system: &str,
         messages: &[Message],
         tools: &[serde_json::Value],
+        before_output: Option<BeforeOutput>,
     ) -> Result<ApiResponse> {
+        let mut before_output = before_output;
         let oai_messages = Self::encode_messages(system, messages);
         let oai_tools = Self::encode_tools(tools);
 
@@ -407,6 +453,7 @@ impl LlmProvider for OpenAiClient {
             "model": self.model,
             "messages": oai_messages,
             "stream": true,
+            "stream_options": { "include_usage": true },
         });
         if !oai_tools.is_empty() {
             body["tools"] = serde_json::json!(oai_tools);
@@ -439,6 +486,7 @@ impl LlmProvider for OpenAiClient {
         let mut text_acc = String::new();
         let mut tool_accums: std::collections::HashMap<usize, OaiToolAccum> = Default::default();
         let mut finish_reason = "stop".to_string();
+        let mut usage_acc = Usage::default();
 
         'outer: while let Some(chunk) = stream.next().await {
             let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
@@ -459,6 +507,7 @@ impl LlmProvider for OpenAiClient {
                         // Text delta — stream immediately.
                         if let Some(text) = delta["content"].as_str() {
                             if !text.is_empty() {
+                                if let Some(cb) = before_output.take() { cb(); }
                                 print!("{}", text);
                                 let _ = std::io::Write::flush(&mut std::io::stdout());
                                 text_acc.push_str(text);
@@ -488,6 +537,16 @@ impl LlmProvider for OpenAiClient {
                                 finish_reason = fr.to_string();
                             }
                         }
+
+                        // Usage (arrives in the final chunk when stream_options.include_usage).
+                        if let Some(u) = event["usage"].as_object() {
+                            if let Some(v) = u.get("prompt_tokens").and_then(|v| v.as_u64()) {
+                                usage_acc.input_tokens = v as u32;
+                            }
+                            if let Some(v) = u.get("completion_tokens").and_then(|v| v.as_u64()) {
+                                usage_acc.output_tokens = v as u32;
+                            }
+                        }
                     }
                 }
             }
@@ -496,6 +555,9 @@ impl LlmProvider for OpenAiClient {
         if !text_acc.is_empty() {
             println!();
         }
+
+        // Stop spinner if no text was streamed.
+        if let Some(cb) = before_output.take() { cb(); }
 
         // ── Assemble content blocks ───────────────────────────────────────────
         let mut content: Vec<ContentBlock> = Vec::new();
@@ -516,6 +578,12 @@ impl LlmProvider for OpenAiClient {
             _ => "end_turn".to_string(),
         };
 
-        Ok(ApiResponse { content, stop_reason })
+        let usage = if usage_acc.input_tokens > 0 || usage_acc.output_tokens > 0 {
+            Some(usage_acc)
+        } else {
+            None
+        };
+
+        Ok(ApiResponse { content, stop_reason, usage })
     }
 }

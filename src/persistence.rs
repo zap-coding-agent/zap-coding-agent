@@ -92,6 +92,13 @@ impl Store {
         }
     }
 
+    pub fn delete_memory(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM memory WHERE key = ?1", params![key])
+            .context("failed to delete memory")?;
+        Ok(())
+    }
+
     pub fn all_memory(&self) -> Result<Vec<(String, String)>> {
         let mut stmt = self
             .conn

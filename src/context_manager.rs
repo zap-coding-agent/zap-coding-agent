@@ -87,6 +87,22 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
             .to_string(),
     );
 
+    // ── Agent memory (persistent key-value facts) ─────────────────────────────
+    if let Ok(store) = crate::persistence::init() {
+        if let Ok(entries) = store.all_memory() {
+            if !entries.is_empty() {
+                let facts = entries
+                    .iter()
+                    .map(|(k, v)| format!("- {}: {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                sections.push(format!(
+                    "## Agent Memory\nThese facts were saved in previous sessions:\n{}", facts
+                ));
+            }
+        }
+    }
+
     // ── Project context (CLAUDE.md) ───────────────────────────────────────────
     if let Some(claude_md) = load_claude_md() {
         sections.push(format!("## Project Context\n{}", claude_md));

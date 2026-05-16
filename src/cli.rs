@@ -28,14 +28,35 @@ pub struct Args {
     pub goal: Option<String>,
 }
 
-pub fn print_banner() {
+pub fn print_banner(config: &crate::config::Config) {
+    use crate::config::Provider;
+
+    let provider_label = match config.provider {
+        Provider::Anthropic => "Anthropic".to_string(),
+        Provider::OpenAi => config.base_url.as_deref()
+            .map(|u| {
+                // Strip http(s):// for display
+                let u = u.trim_start_matches("http://").trim_start_matches("https://");
+                format!("LM Studio @ {}", u)
+            })
+            .unwrap_or_else(|| "OpenAI".to_string()),
+    };
+
     println!();
-    println!("  {} {}", "⚡ zap".bright_yellow().bold(), format!("v{}", VERSION).dimmed());
-    println!("  {}", "Fast AI coding agent".dimmed());
-    println!("  {}", "─────────────────────────────".dimmed());
+    println!(
+        "  {}  {}",
+        "⚡ zap".bright_yellow().bold(),
+        format!("v{}", VERSION).dimmed()
+    );
+    println!("  {}", "─────────────────────────────────────────".dimmed());
+    println!(
+        "  {}  {}    {}  {}",
+        "model".dimmed(), config.model.cyan().bold(),
+        "·".dimmed(), provider_label.dimmed()
+    );
     println!(
         "  {}",
-        "Type /help for commands · Ctrl+D to quit".dimmed()
+        "Tab = autocomplete  ↑↓ = history  /help = commands".dimmed()
     );
     println!();
 }
@@ -50,7 +71,7 @@ pub async fn run() -> Result<()> {
             crate::agent_core::run(&goal, &config).await
         }
         None => {
-            print_banner();
+            print_banner(&config);
             tracing::info!(model = %config.model, "interactive REPL mode");
             crate::agent_core::run_repl(&config).await
         }

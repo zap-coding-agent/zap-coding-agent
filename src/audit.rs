@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-const AUDIT_LOG_PATH: &str = "agent_audit.jsonl";
+pub const AUDIT_LOG_PATH: &str = "agent_audit.jsonl";
 
 #[derive(Serialize)]
 struct AuditRecord<'a> {

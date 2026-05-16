@@ -25,3 +25,5 @@ bytes = "1"
 toml = { version = "0.8", features = ["parse"] }
 dirs = "5"
 colored = "2"
+rustyline = { version = "14", features = ["derive"] }
+indicatif = "0.17"
