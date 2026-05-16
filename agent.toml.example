@@ -1,0 +1,33 @@
+# ~/.agent.toml — copy this file to your home directory and edit it.
+#
+# All fields are optional. Environment variables always take precedence
+# over this file (AGENT_PROVIDER, AGENT_MODEL, AGENT_API_KEY, etc.).
+
+# ── Provider ──────────────────────────────────────────────────────────────────
+# "anthropic"  → Anthropic Claude (requires api_key = "sk-ant-...")
+# "openai"     → OpenAI or any OpenAI-compatible server (LM Studio, Ollama …)
+provider = "openai"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+# OpenAI cloud:  "gpt-4o", "gpt-4o-mini"
+# Anthropic:     "claude-opus-4-7", "claude-sonnet-4-6"
+# LM Studio:     use the model ID shown in LM Studio's model list
+model = "gemma-4-e4b-it"
+
+# ── Base URL (leave blank for cloud providers) ────────────────────────────────
+# LM Studio:  "http://192.168.1.17:1234"
+# Ollama:     "http://localhost:11434"
+# OpenAI:     omit this line (defaults to https://api.openai.com)
+base_url = "http://192.168.1.17:1234"
+
+# ── API key ───────────────────────────────────────────────────────────────────
+# Leave empty for local providers (LM Studio, Ollama).
+# For Anthropic: "sk-ant-..."
+# For OpenAI:    "sk-..."
+api_key = ""
+
+# ── Permission mode ───────────────────────────────────────────────────────────
+# "ask"   → prompt before write/shell operations (recommended)
+# "auto"  → approve everything silently
+# "deny"  → read-only, never execute writes
+permission_mode = "ask"
