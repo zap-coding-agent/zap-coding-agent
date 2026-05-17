@@ -1,235 +1,222 @@
-# Task Plan for Secure Rust AI Coding Agent
+# Zap — Task Tracker
 
-## Introduction
-This document defines the implementation tasks for the project. Each task is written in a spec-driven style and grouped by phase. Follow this plan sequentially to avoid adhoc development.
+## Completed ✅
+Phases 1–8: Foundation, MVP agent loop, security/permissions, persistence, REPL, streaming, parallel tools,
+web fetch/search, diff view, auto-compaction, MCP, sub-agents, sessions, skills loader,
+workflow parser, snapshot/undo, provider switching (persistent), banner redesign.
 
-## Skills and Roles
-- **Product/Requirements**: clarify goals, use cases, constraints.
-- **System Architect**: design modular architecture, security boundaries.
-- **Rust Developer**: implement core modules, strong typing, async runtime.
-- **Security Engineer**: define permissions, sandboxing, audit controls.
-- **Prompt Engineer**: design prompt assembly and tool schemas.
-- **DevOps/CI**: add packaging checks and release hygiene.
+Phase 9 (May 2026):
+- ✅ 9.1 Ripgrep search (was already implemented)
+- ✅ 9.3 Stack auto-detection (`detect_stack_skills` in skill_manager.rs)
+- ✅ 9.4 Secret scrubbing (`secret_scanner.rs`, intercept in agent_core before cloud send)
+- ✅ 9.5 Auto skill capture (`/skill capture [name] [--global]`)
+- ✅ 9.6 Workflow execution (`/run`, `/workflow new`, step approval gate)
+- ✅ 9.7 Cost attribution (per-turn: skills Nt · msg ~Nt · ctx ~Nk · total ~$N)
+- ✅ 9.8 Session branching (`/branch`, `/branches`, `/switch`, `/merge`)
 
-## Phase 1 — Foundation
+---
 
-### Task 1.1 — Confirm Requirements
-- Review `requirements.md`.
-- Ensure the project purpose, goals, and non-goals are accepted.
-- Outcome: requirements document is approved.
+## Active: Phase 9 — Differentiating Features
 
-### Task 1.2 — Establish Architecture
-- Review `design.md`.
-- Confirm module breakdown and data flow.
-- Map features to Rust modules.
-- Outcome: design document is approved.
+Priority rule: **differentiating first, quality-of-output second, polish last.**
+Features Goose/Claude Code already have are not here unless they directly unblock a differentiator.
 
-### Task 1.3 — Create Project Skeleton
-- Initialize Rust package.
-- Add `src/main.rs` as CLI entrypoint.
-- Add placeholder modules:
-  - `cli.rs`
-  - `agent_core.rs`
-  - `llm_client.rs`
-  - `tool_registry.rs`
-  - `context_manager.rs`
-  - `permission_manager.rs`
-  - `shell_runner.rs`
-  - `audit.rs`
-  - `persistence.rs`
-  - `config.rs`
-- Outcome: compileable skeleton.
+---
 
-## Phase 2 — Minimal Agent MVP
+### Task 9.1 — Ripgrep-powered search  `[quality]`
+**Why:** Agent currently uses `/usr/bin/grep -rn` — misses gitignored files, no structured output, slow on large repos. Fixes a daily-use quality hole.
+- [ ] In [tool_registry.rs](src/tool_registry.rs): shell to `rg --json`; fall back to `grep -rn` if `rg` not found
+- [ ] New params: `case_insensitive: bool`, `fixed_string: bool`, `file_type: Option<String>`
+- [ ] Structured output per match: `{file, line, match_text, context_before, context_after}`
+- [ ] `.gitignore` respected by default; `include_ignored: bool` override
+- [ ] `cargo check` + manual test: `zap --goal "find all TODO comments in src/"`
 
-### Task 2.1 — Implement CLI and Config
-- Use `clap` to parse a `goal` command.
-- Load feature flags and security config.
-- Outcome: CLI starts and prints configuration.
+**Effort:** 1 day
 
-### Task 2.2 — Build LLM Client Stub
-- Implement `llm_client` abstraction with a stubbed response.
-- Support simple JSON tool request parsing.
-- Outcome: agent can call the LLM client and receive structured data.
+---
 
-### Task 2.3 — Build Tool Registry
-- Implement `Tool` trait.
-- Add initial tools: `read_file`, `write_file`, `search_code`, `run_shell`, `git_status`.
-- Add metadata descriptions.
-- Outcome: registry can resolve tools and execute a stubbed tool call.
+### Task 9.2 — Code map tool (tree-sitter)  `[quality + differentiating]`
+**Why:** Agent reads entire files to find a function. A structural outline (functions, structs, line numbers) cuts context usage 5–10x in large repos. Nothing in Goose today.
+- [ ] Add to [Cargo.toml](Cargo.toml): `tree-sitter = "0.24"`, grammars for Rust + Python + TypeScript + Go
+- [ ] [NEW src/code_index.rs](src/code_index.rs): `build_file_map(path) -> Vec<SymbolDef>` (name, kind, line)
+- [ ] [NEW src/code_index.rs](src/code_index.rs): `build_dir_map(path, depth) -> DirMap` for directory overview
+- [ ] [tool_registry.rs](src/tool_registry.rs): register `CodeMapTool` with params `path`, `max_depth`
+- [ ] Output format: `fn handle_user_turn (line 168)`, `struct Session (line 80)` — compact, usable
+- [ ] Manual test: run `code_map` on `src/agent_core.rs`, verify all public fns appear with correct lines
 
-### Task 2.4 — Implement Agent Core Loop
-- Wire agent loop: prompt → LLM → tool selection → execution → feedback.
-- Add a minimal plan stage.
-- Outcome: end-to-end flow works for one tool call.
+**Effort:** 3–4 days
 
-### Task 2.5 — Define Skill Support
-- Design a `Skill` abstraction layered over tools.
-- Support skill metadata, descriptions, and execution composition.
-- Outcome: the architecture can expose higher-level skill capabilities to the LLM.
+---
 
-## Phase 3 — Security and Context
+### Task 9.3 — Stack auto-detection  `[differentiating]`
+**Why:** Zero-config onboarding. On session start, detect tech stack from project files and auto-activate matching skills — user does nothing. No other agent tool does this.
+- [ ] [skill_manager.rs](src/skill_manager.rs): `fn detect_stack_skills(skills: &[Skill]) -> Vec<&Skill>`
+  - `Cargo.toml` → look for skill named `rust` or tagged `rust`
+  - `package.json` → `typescript` / `node`
+  - `pyproject.toml` / `setup.py` → `python`
+  - `go.mod` → `go`
+- [ ] [agent_core.rs](src/agent_core.rs): call at `Session::new`, merge with user's skills list
+- [ ] Print on startup: `  ◎ auto-skills: rust (stack detected)` — only if something matched
+- [ ] No crash if no skills directory exists
 
-### Task 3.1 — Permission Manager
-- Implement permission modes: `Ask`, `Auto`, `Deny`.
-- Enforce approvals for dangerous tools.
-- Outcome: unsafe actions require explicit confirmation.
+**Effort:** 0.5 days
 
-### Task 3.2 — Shell Runner and Sandbox
-- Add command validation and pattern checks.
-- Enforce resource limits and safe environment variables.
-- Outcome: shell execution is gated and logs commands.
+---
 
-### Task 3.3 — Context Manager and Prompt Builder
-- Load workspace metadata and optional `CLAUDE.md` hints.
-- Assemble a system prompt from templates.
-- Implement context compaction / summary fallback.
-- Outcome: agent prompt includes repository context.
+### Task 9.4 — Secret scrubbing before cloud send  `[differentiating + trust]`
+**Why:** No other agent tool does this. One leaked API key destroys trust permanently. Scan file content for secrets before sending to Anthropic/DeepSeek/OpenAI. Skip for local LM Studio.
+- [ ] [NEW src/secret_scanner.rs](src/secret_scanner.rs): `fn scan(content: &str) -> Vec<SecretMatch>`
+  - Patterns: `sk-ant-`, `sk-`, `ghp_`, `ghs_`, `-----BEGIN`, `api_key\s*=`, `password\s*=`, AWS `AKIA`
+  - Return: `SecretMatch { pattern, line, preview }` (preview = first 20 chars, rest `***`)
+- [ ] [tool_registry.rs](src/tool_registry.rs): call scanner on `read_file` and `edit_file` results when `config.provider != LM Studio`
+- [ ] [agent_core.rs](src/agent_core.rs): if matches found, print warning and prompt `send anyway? [y/N]`; default N
+- [ ] Add `secret_scanning: bool` to `Config` (default true, can disable in `~/.agent.toml`)
 
-### Task 3.4 — Audit Logging
-- Record tool calls, prompts, approvals, and results.
-- Persist logs in append-only format.
-- Outcome: audit trail exists for all agent activity.
+**Effort:** 1 day
 
-## Phase 4 — Persistence and Memory
+---
 
-### Task 4.1 — Session Persistence
-- Implement lightweight storage for sessions and memory.
-- Persist summaries and agent facts.
-- Outcome: the agent can recall prior session state.
+### Task 9.5 — Auto skill capture (`/skill capture`)  `[differentiating]`
+**Why:** Turns one-time user corrections into permanent reusable skills. Unique to zap — sessions become team knowledge assets. No equivalent in Goose or Claude Code.
 
-### Task 4.2 — Memory Consolidation
-- Add a `dream` / summary process to compress old context.
-- Keep summaries under a size threshold.
-- Outcome: session history is compacted for long-running use.
+How it works: user runs `/skill capture my-rules` → zap sends the session to the LLM asking it to extract instructions/preferences → saves as a skill file.
+- [ ] [skill_manager.rs](src/skill_manager.rs): `fn save_captured_skill(name: &str, content: &str, global: bool) -> Result<PathBuf>`
+  - `global=false` → `.zap/skills/<name>.md` (project-local)
+  - `global=true` → `~/.zap/skills/<name>.md`
+- [ ] [agent_core.rs](src/agent_core.rs): handle `/skill capture [name] [--global]`
+  - Build a prompt from last N messages asking LLM to extract instructions
+  - Call LLM (single non-streaming call), save result
+  - Print: `  ✓ skill saved → .zap/skills/my-rules.md  (activate with: /skill list)`
+- [ ] Guard: refuse if fewer than 3 turns (nothing meaningful to capture)
 
-## Phase 5 — Advanced Features
+**Effort:** 1 day
 
-### Task 5.1 — Feature Flag System
-- Implement runtime feature gating.
-- Add flags for `background_mode`, `subagents`, `prompt_cache`, `skill_system`, `mcp_compat`.
-- Outcome: experimental features remain disabled by default.
+---
 
-### Task 5.2 — Subagent Orchestration Skeleton
-- Add abstractions for `Fork`, `Teammate`, and `Worktree` modes.
-- Implement simple delegation flows.
-- Outcome: architecture supports multi-step delegation.
+### Task 9.6 — Workflow execution  `[differentiating]`
+**Why:** `workflow.rs` already parses `.zap/workflows/*.yaml`. The execution engine is missing. Workflows are a team primitive — checked into repos, versioned, shared. Nothing like it in Goose.
+- [ ] [workflow.rs](src/workflow.rs): `pub async fn run_workflow(name: &str, session: &mut Session) -> Result<()>`
+  - Iterate steps sequentially
+  - Per step: inject `step.skill` if set, run `step.prompt` as a user turn
+  - If `requires_approval: true`: print step summary, wait for `[Enter] to continue / q to abort`
+  - Print step progress: `  [1/3] code-review …` / `  [2/3] test-runner …`
+- [ ] [agent_core.rs](src/agent_core.rs): `/run <workflow>` slash command; list available on `/run` alone
+- [ ] [cli.rs](src/cli.rs): `--workflow <name>` flag for headless/CI use
+- [ ] [agent_core.rs](src/agent_core.rs): add `/workflow new <name>` to scaffold a workflow file
+- [ ] Manual test: create a 2-step workflow, run it, verify step injection and approval gate
 
-### Task 5.3 — Planning and Approval Mode
-- Add a multi-stage planning step.
-- Show the intended plan to the user before execution.
-- Outcome: user can approve or reject plans.
+**Effort:** 2 days
 
-### Task 5.4 — Skill and MCP Support
-- Implement a `Skill` registry and dynamic skill resolution.
-- Add an `mcp_adapter` to support MCP-style tool invocation schemas.
-- Outcome: the agent supports reusable skills and can interoperate with MCP-like interfaces.
+---
 
-## Phase 6 — Corporate Hardening
+### Task 9.7 — Token cost attribution per component  `[differentiating]`
+**Why:** Makes the "token efficiency" story visible and verifiable. Users can see exactly what skills/tools cost. No other tool shows this breakdown. Directly proves the value prop.
 
-### Task 6.1 — Packaging and Release Hygiene
-- Add CI-friendly checks for release artifacts.
-- Prevent debug/source map artifacts from shipping.
-- Outcome: safe packaging process.
+After each turn, print:
+```
+  ↳ rust-expert: 820t  context: 1.2k  msg: 45t  tools: 380t  │  total: 2.4k  ~$0.0032
+```
+- [ ] [agent_core.rs](src/agent_core.rs): track `skill_tokens` (sum of matched skill body lengths / 4), `tool_result_tokens` (sum of tool result lengths / 4)
+- [ ] After each turn, print attribution line using existing `format_cost()` + new component breakdown
+- [ ] Only show skill tokens if skills were matched that turn
+- [ ] Keep it on one line; dim the component labels, bright the numbers
 
-### Task 6.2 — Enterprise Config and Policy
-- Add role-based tool permissions.
-- Add configurable corporate security policy.
-- Outcome: the agent can be deployed with corporate guardrails.
+**Effort:** 1 day
 
-### Task 6.3 — Documentation and Review
-- Finalize spec docs.
-- Add a developer onboarding guide.
-- Outcome: project is ready for execution and review.
+---
 
-## Phase 7 — Claude Code Parity
+### Task 9.8 — Session branching  `[differentiating]`
+**Why:** Unique primitive — nothing like it in any coding agent. Fork a conversation, try approach B, return to A. Git-like experimentation for multi-turn sessions.
 
-Derived from a line-by-line comparison of this implementation against the observable
-behaviour of Claude Code (running live). Tasks are ordered: security first, then
-correctness, then UX, then performance.
+Commands: `/branch <name>`, `/branches`, `/switch <name>`, `/merge <name>`
+- [ ] [persistence.rs](src/persistence.rs): new table `branches (id, session_id, name, parent_name, messages_json, created_at)`
+- [ ] [persistence.rs](src/persistence.rs): `save_branch`, `list_branches`, `load_branch`, `delete_branch`
+- [ ] [agent_core.rs](src/agent_core.rs): wire slash commands; show active branch in prompt when not `main`: `[3:try-rewrite] ›`
+- [ ] `/branch <name>` — snapshot current `self.messages` into named branch, continue on new branch
+- [ ] `/switch <name>` — swap `self.messages` to named branch's snapshot
+- [ ] `/merge <name>` — ask LLM for a 3-sentence summary of the branch, append as assistant message to current
+- [ ] `/branches` — list all branches for current session with turn count
 
-### Task 7.1 — Fix Command Injection in Internal Tools
-- `search_code`, `git_status`, and `list_directory` build shell strings via
-  `format!("… '{}' …", user_value)` and pass them to `sh -c`.
-  A single-quote in the value breaks out of the argument.
-- Replace with `shell_runner::run_args(program, &[args…])` that calls
-  `tokio::process::Command::new(program).args(…)` — no shell, no injection.
-- Keep `run_command(cmd: &str)` for the user-facing `shell` tool only.
-- Outcome: internal tools are injection-safe; the shell tool retains its behaviour.
+**Effort:** 2–3 days
 
-### Task 7.2 — Replace Blocklist with Permission-Based Shell Safety
-- The current `BLOCKED_PATTERNS` string-match blocklist is trivially bypassed
-  (`rm  -rf /` with double space, trailing slash, etc.).
-- Remove the blocklist from `shell_runner`.
-- Add a `is_shell_tool(name)` check in `agent_core` so shell/write_file always
-  trigger the permission prompt regardless of mode, and add clear wording to the
-  system prompt: the model must never issue destructive commands without asking.
-- Outcome: safety relies on the permission gate + model instruction, not fragile regex.
+---
 
-### Task 7.3 — Enrich Permission Prompt with Tool Context
-- Current prompt: `Allow tool 'shell' to execute? [y/N]` — user cannot make an
-  informed decision.
-- Add a `context: &str` parameter to `PermissionManager::check()` that renders
-  what is about to happen (the command, the file path + byte count, etc.).
-- Each tool builds a short human-readable summary and passes it through
-  `agent_core` when requesting permission.
-- Outcome: user sees exactly what they are approving.
+## Phase 10 — Infrastructure (unblocks differentiators)
 
-### Task 7.4 — Add Edit Tool (Surgical File Patching)
-- Without Edit, modifying an existing file requires regenerating its entire content
-  through `write_file`, which is token-expensive and error-prone.
-- Implement `edit_file` tool with `path`, `old_string`, `new_string`, `replace_all`.
-- Validate: `old_string` must exist; if it appears more than once and `replace_all`
-  is false, reject with a clear error telling the model to add more context.
-- Outcome: the agent can make surgical edits without rewriting whole files.
+These are not unique but are needed for quality output. Do after Phase 9.
 
-### Task 7.5 — Upgrade Read Tool: offset, limit, line Numbers
-- Current `read_file` loads the entire file — unusable for large source files.
-- Add `offset` (0-based line, default 0) and `limit` (line count, default all).
-- Return output formatted as `{line_num}\t{content}` (same as `cat -n`) so the
-  model can reference line numbers in subsequent `edit_file` calls.
-- Outcome: the agent can navigate large files without exhausting the context window.
+### Task 10.1 — Prompt caching (Anthropic)  `[~free cost savings]`
+- [ ] [llm_client.rs](src/llm_client.rs): add `cache_control: {"type": "ephemeral"}` breakpoints to system prompt and tool definitions when `provider == Anthropic`
+- [ ] Verify in Anthropic dashboard: `cache_read_input_tokens` appears on repeated turns
 
-### Task 7.6 — Expand System Prompt with Full Behavioural Guidance
-- Current system prompt is four sentences; Claude Code's is several thousand tokens.
-- Add sections for: tool-usage policy, when to read before writing, never force-push,
-  concise response style, security rules, environment context (OS, shell, cwd, model).
-- Inject these at runtime so OS/cwd/model values are live, not hard-coded.
-- Outcome: the agent behaves consistently and safely without relying on the model's
-  training defaults.
+**Effort:** 0.5 days
 
-### Task 7.7 — Add Interactive REPL Mode
-- Make `--goal` optional. When absent, enter a readline loop where each line the user
-  types becomes the next user message, continuing the same `messages` history.
-- Keep `--goal` for scripting and CI use.
-- Outcome: the agent supports multi-turn interactive coding sessions.
+---
 
-### Task 7.8 — SSE Streaming for Anthropic Provider
-- Currently the agent blocks until the full API response arrives, then prints it.
-  Long responses (30 s+) show nothing until complete.
-- Implement SSE streaming: add `stream: true` to the Anthropic request, parse
-  `content_block_delta` / `text_delta` events, print text tokens as they arrive.
-- Tool-use blocks are still accumulated before execution (cannot partially execute).
-- Outcome: text responses stream to the terminal in real time.
+### Task 10.2 — Per-session permission memory  `[UX]`
+- [ ] [permission_manager.rs](src/permission_manager.rs): add `session_grants: HashMap<String, bool>`
+- [ ] After first approval of a tool class, skip re-prompting for that class this session
+- [ ] `/permissions reset` clears grants; show active grants in `/config`
 
-### Task 7.9 — Parallel Tool Execution
-- When the model returns multiple tool-use blocks, the current loop runs them
-  sequentially.  Independent reads/searches can run concurrently.
-- Check all permissions sequentially (stdin is single-threaded), then execute
-  all approved tools with `futures::future::join_all`.
-- Add `futures = "0.3"` to Cargo.toml.
-- Outcome: multiple read/search tool calls in one turn run in parallel.
+**Effort:** 0.5 days
 
-### Task 7.10 — CLAUDE.md Directory Hierarchy Traversal
-- Current context manager checks only two hard-coded paths in the current directory.
-- Walk from `cwd` up to `$HOME` (or `/`) loading any `CLAUDE.md` found at each
-  level; also check `~/.claude/CLAUDE.md` for a global user config.
-- Deeper files take precedence (project overrides global).
-- Outcome: project, workspace, and user context are all loaded automatically.
+---
 
-## Execution Notes
-- Each task should be completed with a small, verifiable deliverable.
-- Avoid implementing advanced features before the core secure agent loop is stable.
-- Keep all work traceable back to these task definitions.
-- After every task: re-read the written code, run `cargo check`, fix any issues
-  found before marking complete.
+### Task 10.3 — Token budget flag  `[pairs with 9.7]`
+- [ ] [cli.rs](src/cli.rs): add `--budget N` (token count)
+- [ ] [agent_core.rs](src/agent_core.rs): warn at 80% of budget; hard-stop at 100% with clear message
+
+**Effort:** 0.5 days
+
+---
+
+### Task 10.4 — Multi-edit tool  `[agent reliability]`
+- [ ] [tool_registry.rs](src/tool_registry.rs): `BatchEditTool` — `path` + `edits: [{old_string, new_string}]`; apply sequentially, single diff at end
+
+**Effort:** 0.5 days
+
+---
+
+## Phase 11 — Advanced Differentiators (after Phase 9 ships)
+
+### Task 11.1 — Semantic skill routing (local embeddings)
+**Why:** Skill keyword matching misses intent. Replace with local embedding model (fastembed, ONNX, no cloud). Skills fire on meaning.
+- [ ] [Cargo.toml](Cargo.toml): `fastembed = "4"`
+- [ ] [skill_manager.rs](src/skill_manager.rs): precompute skill embeddings at startup; `match_skills_semantic` with cosine similarity fallback
+- [ ] First-run downloads model (~90MB) to `~/.cache/zap/`; keyword fallback if model unavailable
+
+**Effort:** 2 days
+
+---
+
+### Task 11.2 — Multi-model routing
+**Why:** Use cheap/fast model for tool calls, expensive model for generation. 10x cost reduction on tool-heavy sessions.
+- [ ] [NEW src/router.rs](src/router.rs): load `~/.zap/routing.toml`, `fn select_model(query) -> ModelConfig`
+- [ ] [agent_core.rs](src/agent_core.rs): swap model per turn, show selected model in attribution line
+
+**Effort:** 2 days
+
+---
+
+## Build order summary
+
+```
+Week 1 (differentiating + quality):
+  9.1 ripgrep  →  9.3 stack-detect  →  9.4 secret-scrub  →  9.7 cost-attribution
+
+Week 2 (differentiating features):
+  9.5 skill-capture  →  9.6 workflow-execution  →  9.2 code-map (start)
+
+Week 3:
+  9.2 code-map (finish)  →  9.8 session-branching  →  10.1–10.4 infrastructure
+
+Week 4+:
+  11.1 semantic routing  →  11.2 multi-model routing
+```
+
+---
+
+## Definition of done (every task)
+1. `cargo check` passes with no new warnings
+2. Feature tested manually against a real prompt
+3. Task checkbox ticked here

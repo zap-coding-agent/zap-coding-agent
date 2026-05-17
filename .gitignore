@@ -20,3 +20,11 @@ agent_sessions.db
 
 # Claude Code session files
 .claude/
+
+# Development docs (tracked locally, not for distribution)
+tasks.md
+GAPS.md
+design.md
+requirements.md
+VISION.md
+v2.md

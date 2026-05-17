@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, Provider};
+use crate::config::{Config, OutputFormat, Provider};
 
 const MAX_TOKENS: u32 = 16_000;
 const MAX_RETRIES: u32 = 4;
@@ -16,6 +16,8 @@ pub enum ContentBlock {
     Text { text: String },
     ToolUse { id: String, name: String, input: serde_json::Value },
     ToolResult { tool_use_id: String, content: String },
+    /// Base64-encoded image (jpeg, png, gif, webp). Sent via /attach.
+    Image { media_type: String, data: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,16 +74,19 @@ pub trait LlmProvider: Send + Sync {
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
+    let suppress = config.output_format == OutputFormat::Json;
     match config.provider {
         Provider::Anthropic => Box::new(AnthropicClient::new(
             config.api_key.clone(),
             config.model.clone(),
             config.base_url.clone(),
+            suppress,
         )),
         Provider::OpenAi => Box::new(OpenAiClient::new(
             config.api_key.clone(),
             config.model.clone(),
             config.base_url.clone(),
+            suppress,
         )),
     }
 }
@@ -121,10 +126,37 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 struct AnthropicRequest<'a> {
     model: &'a str,
     max_tokens: u32,
-    system: &'a str,
-    messages: &'a [Message],
-    tools: &'a [serde_json::Value],
+    system: Vec<serde_json::Value>,
+    messages: Vec<serde_json::Value>,
+    tools: Vec<serde_json::Value>,
     stream: bool,
+}
+
+/// Encode our internal messages into the Anthropic wire format.
+/// Handles the nested `source` object required for image blocks.
+fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
+    messages.iter().map(|msg| {
+        let content: Vec<serde_json::Value> = msg.content.iter().map(|block| {
+            match block {
+                ContentBlock::Text { text } =>
+                    serde_json::json!({ "type": "text", "text": text }),
+
+                ContentBlock::ToolUse { id, name, input } =>
+                    serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
+
+                ContentBlock::ToolResult { tool_use_id, content } =>
+                    serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
+
+                ContentBlock::Image { media_type, data } =>
+                    serde_json::json!({
+                        "type": "image",
+                        "source": { "type": "base64", "media_type": media_type, "data": data }
+                    }),
+            }
+        }).collect();
+
+        serde_json::json!({ "role": msg.role, "content": content })
+    }).collect()
 }
 
 /// Per-content-block accumulator while parsing the SSE stream.
@@ -142,14 +174,15 @@ struct AnthropicClient {
     api_key: String,
     model: String,
     url: String,
+    suppress_stream: bool,
 }
 
 impl AnthropicClient {
-    fn new(api_key: String, model: String, base_url: Option<String>) -> Self {
+    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
         let url = base_url
             .map(|b| format!("{}/v1/messages", b.trim_end_matches('/')))
             .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
-        Self { http: reqwest::Client::new(), api_key, model, url }
+        Self { http: reqwest::Client::new(), api_key, model, url, suppress_stream }
     }
 
     fn process_event(
@@ -158,6 +191,8 @@ impl AnthropicClient {
         stop_reason: &mut String,
         before_output: &mut Option<BeforeOutput>,
         usage: &mut Usage,
+        suppress_stream: bool,
+        highlighter: &mut crate::stream_highlighter::StreamHighlighter,
     ) {
         let t = event["type"].as_str().unwrap_or("");
         match t {
@@ -190,9 +225,11 @@ impl AnthropicClient {
                     if dtype == "text_delta" {
                         let chunk = delta["text"].as_str().unwrap_or("");
                         if !chunk.is_empty() {
-                            if let Some(cb) = before_output.take() { cb(); }
-                            print!("{}", chunk);
-                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                            if !suppress_stream {
+                                if let Some(cb) = before_output.take() { cb(); }
+                                highlighter.push(chunk);
+                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                            }
                         }
                         acc.text.push_str(chunk);
                     } else if dtype == "input_json_delta" {
@@ -225,16 +262,35 @@ impl LlmProvider for AnthropicClient {
         before_output: Option<BeforeOutput>,
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
+        let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
         if self.api_key.is_empty() {
             anyhow::bail!("ANTHROPIC_API_KEY is not set");
+        }
+
+        // Build system prompt with cache_control breakpoint for prompt caching.
+        // Anthropic caches system + tools, saving ~90% on repeated turns.
+        let system_blocks = vec![serde_json::json!({
+            "type": "text",
+            "text": system,
+            "cache_control": { "type": "ephemeral" }
+        })];
+
+        // Add cache_control to the last tool definition so the entire tool
+        // block is cached as a unit.
+        let mut cached_tools: Vec<serde_json::Value> = tools.to_vec();
+        if let Some(last) = cached_tools.last_mut() {
+            if let Some(obj) = last.as_object_mut() {
+                obj.insert("cache_control".to_string(),
+                    serde_json::json!({ "type": "ephemeral" }));
+            }
         }
 
         let body = AnthropicRequest {
             model: &self.model,
             max_tokens: MAX_TOKENS,
-            system,
-            messages,
-            tools,
+            system: system_blocks,
+            messages: encode_messages_anthropic(messages),
+            tools: cached_tools,
             stream: true,
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
@@ -281,6 +337,8 @@ impl LlmProvider for AnthropicClient {
                             &mut stop_reason,
                             &mut before_output,
                             &mut usage_acc,
+                            self.suppress_stream,
+                            &mut highlighter,
                         );
                     }
                 }
@@ -292,9 +350,9 @@ impl LlmProvider for AnthropicClient {
         pairs.sort_by_key(|(idx, _)| *idx);
 
         let had_text = pairs.iter().any(|(_, a)| a.kind == "text" && !a.text.is_empty());
-        if had_text {
-            // Streamed text never ends with \n from the model.
-            println!();
+        if had_text && !self.suppress_stream {
+            highlighter.flush();
+            // StreamHighlighter already printed newlines as needed.
         }
 
         let mut content: Vec<ContentBlock> = Vec::new();
@@ -336,13 +394,14 @@ struct OpenAiClient {
     api_key: String,
     model: String,
     url: String,
+    suppress_stream: bool,
 }
 
 impl OpenAiClient {
-    fn new(api_key: String, model: String, base_url: Option<String>) -> Self {
+    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
         let base = base_url.unwrap_or_else(|| OPENAI_DEFAULT_BASE.to_string());
         let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
-        Self { http: reqwest::Client::new(), api_key, model, url }
+        Self { http: reqwest::Client::new(), api_key, model, url, suppress_stream }
     }
 
     /// Convert our internal messages to the OpenAI wire format.
@@ -359,16 +418,33 @@ impl OpenAiClient {
                         .collect();
 
                     if tool_results.is_empty() {
-                        let text = msg
-                            .content
-                            .iter()
-                            .filter_map(|b| {
-                                if let ContentBlock::Text { text } = b { Some(text.as_str()) }
-                                else { None }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        out.push(serde_json::json!({ "role": "user", "content": text }));
+                        // May contain text + image blocks — build multimodal content array.
+                        let parts: Vec<serde_json::Value> = msg.content.iter().filter_map(|b| {
+                            match b {
+                                ContentBlock::Text { text } =>
+                                    Some(serde_json::json!({ "type": "text", "text": text })),
+                                ContentBlock::Image { media_type, data } =>
+                                    Some(serde_json::json!({
+                                        "type": "image_url",
+                                        "image_url": { "url": format!("data:{};base64,{}", media_type, data) }
+                                    })),
+                                _ => None,
+                            }
+                        }).collect();
+
+                        let content = if parts.len() == 1 {
+                            if let serde_json::Value::String(_) = &parts[0] {
+                                parts[0].clone()
+                            } else if let Some(t) = parts[0].get("text").and_then(|v| v.as_str()) {
+                                serde_json::Value::String(t.to_string())
+                            } else {
+                                serde_json::Value::Array(parts)
+                            }
+                        } else {
+                            serde_json::Value::Array(parts)
+                        };
+
+                        out.push(serde_json::json!({ "role": "user", "content": content }));
                     } else {
                         for block in tool_results {
                             if let ContentBlock::ToolResult { tool_use_id, content } = block {
@@ -446,6 +522,7 @@ impl LlmProvider for OpenAiClient {
         before_output: Option<BeforeOutput>,
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
+        let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
         let oai_messages = Self::encode_messages(system, messages);
         let oai_tools = Self::encode_tools(tools);
 
@@ -504,12 +581,14 @@ impl LlmProvider for OpenAiClient {
                         let choice = &event["choices"][0];
                         let delta = &choice["delta"];
 
-                        // Text delta — stream immediately.
+                        // Text delta — stream immediately (unless suppressed).
                         if let Some(text) = delta["content"].as_str() {
                             if !text.is_empty() {
-                                if let Some(cb) = before_output.take() { cb(); }
-                                print!("{}", text);
-                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                                if !self.suppress_stream {
+                                    if let Some(cb) = before_output.take() { cb(); }
+                                    highlighter.push(text);
+                                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                                }
                                 text_acc.push_str(text);
                             }
                         }
@@ -552,8 +631,8 @@ impl LlmProvider for OpenAiClient {
             }
         }
 
-        if !text_acc.is_empty() {
-            println!();
+        if !text_acc.is_empty() && !self.suppress_stream {
+            highlighter.flush();
         }
 
         // Stop spinner if no text was streamed.

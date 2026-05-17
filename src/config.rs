@@ -1,14 +1,12 @@
 use anyhow::Result;
 use serde::Deserialize;
 use std::env;
+use std::io::Write;
 
-#[derive(Debug, Clone)]
-pub struct FeatureFlags {
-    pub background_mode: bool,
-    pub subagents: bool,
-    pub prompt_cache: bool,
-    pub skill_system: bool,
-    pub mcp_compat: bool,
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Clone)]
@@ -28,11 +26,13 @@ pub enum Provider {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub permission_mode: PermissionMode,
-    pub feature_flags: FeatureFlags,
     pub api_key: String,
     pub model: String,
     pub provider: Provider,
     pub base_url: Option<String>,
+    pub output_format: OutputFormat,
+    /// Remaining nesting depth for sub-agents. 0 = spawning disabled.
+    pub agent_depth: u8,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -84,7 +84,7 @@ impl Config {
 
         let provider = match provider_str.to_lowercase().as_str() {
             "anthropic" => Provider::Anthropic,
-            _ => Provider::OpenAi,
+            _           => Provider::OpenAi,
         };
 
         // ── api_key ───────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ impl Config {
         // ── model ─────────────────────────────────────────────────────────────
         let default_model = match provider {
             Provider::Anthropic => "claude-opus-4-7".to_string(),
-            Provider::OpenAi    => "gemma-4-e4b-it".to_string(), // default LM Studio model
+            Provider::OpenAi    => "gemma-4-e4b-it".to_string(),
         };
         let model = env::var("AGENT_MODEL").ok()
             .or(file.model)
@@ -107,7 +107,7 @@ impl Config {
         // ── base_url ──────────────────────────────────────────────────────────
         let default_base_url = match provider {
             Provider::Anthropic => None,
-            Provider::OpenAi    => Some("http://192.168.1.17:1234".to_string()), // default LM Studio
+            Provider::OpenAi    => Some("http://localhost:1234".to_string()),
         };
         let base_url = env::var("AGENT_BASE_URL").ok()
             .or(file.base_url)
@@ -125,21 +125,36 @@ impl Config {
             other  => anyhow::bail!("invalid permission_mode '{}' — use ask / auto / deny", other),
         };
 
-        let feature_flags = FeatureFlags {
-            background_mode: parse_bool_env("AGENT_FEATURE_BACKGROUND_MODE", false),
-            subagents:        parse_bool_env("AGENT_FEATURE_SUBAGENTS", false),
-            prompt_cache:     parse_bool_env("AGENT_FEATURE_PROMPT_CACHE", false),
-            skill_system:     parse_bool_env("AGENT_FEATURE_SKILL_SYSTEM", false),
-            mcp_compat:       parse_bool_env("AGENT_FEATURE_MCP_COMPAT", false),
+        Ok(Self { permission_mode, api_key, model, provider, base_url, output_format: OutputFormat::Text, agent_depth: 3 })
+    }
+
+    /// Write current config back to ~/.agent.toml.
+    pub fn save(&self) -> Result<()> {
+        let path = dirs::home_dir()
+            .map(|h| h.join(".agent.toml"))
+            .ok_or_else(|| anyhow::anyhow!("cannot locate home directory"))?;
+
+        let provider_str = match self.provider {
+            Provider::Anthropic => "anthropic",
+            Provider::OpenAi    => "openai",
+        };
+        let pm_str = match self.permission_mode {
+            PermissionMode::Ask  => "ask",
+            PermissionMode::Auto => "auto",
+            PermissionMode::Deny => "deny",
         };
 
-        Ok(Self { permission_mode, feature_flags, api_key, model, provider, base_url })
+        let mut f = std::fs::File::create(&path)?;
+        writeln!(f, "# ~/.agent.toml — managed by zap /provider")?;
+        writeln!(f, "provider = {:?}", provider_str)?;
+        writeln!(f, "model    = {:?}", self.model)?;
+        if let Some(ref url) = self.base_url {
+            writeln!(f, "base_url = {:?}", url)?;
+        }
+        writeln!(f, "api_key  = {:?}", self.api_key)?;
+        writeln!(f)?;
+        writeln!(f, "permission_mode = {:?}", pm_str)?;
+        Ok(())
     }
 }
 
-fn parse_bool_env(key: &str, default: bool) -> bool {
-    match env::var(key) {
-        Ok(v) => matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"),
-        Err(_) => default,
-    }
-}

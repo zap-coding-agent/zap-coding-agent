@@ -1,0 +1,1438 @@
+/// Core agent session: state, tool loop, and all slash-command handlers.
+use anyhow::Result;
+use colored::Colorize;
+use futures::future::join_all;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+
+use crate::{
+    audit,
+    config::{Config, PermissionMode, Provider},
+    context_manager,
+    llm_client::{create_client, BeforeOutput, ContentBlock, LlmProvider, Message, Usage},
+    permission_manager::PermissionManager,
+    persistence,
+    tools::{SpawnAgentTool, ToolRegistry},
+    ui::{format_cost, tool_icon, ThinkingSpinner},
+};
+
+pub const MAX_TURNS: usize = 50;
+const AUTO_COMPACT_THRESHOLD: usize = 80_000;
+
+// ── Session ───────────────────────────────────────────────────────────────────
+
+pub struct Session {
+    pub client:        Box<dyn LlmProvider>,
+    pub tools:         ToolRegistry,
+    pub permissions:   PermissionManager,
+    pub system:        String,
+    pub tool_defs:     Vec<serde_json::Value>,
+    pub messages:      Vec<Message>,
+    pub model:         String,
+    pub base_url:      Option<String>,
+    pub session_usage: Usage,
+    pub turn_count:    usize,
+    pub tool_count:    usize,
+    pub session_id:    i64,
+    pub config:        Config,
+    /// Images staged with /attach, sent with the next user turn then cleared.
+    pub staged_images: Vec<(String, String)>,
+    pub skills:        Vec<crate::skill_manager::Skill>,
+    pub current_branch: String,
+    pub code_index:    Arc<Mutex<crate::code_index::CodeIndex>>,
+    pub store:         persistence::Store,
+}
+
+impl Session {
+    pub async fn new(config: &Config) -> Result<Self> {
+        let store = persistence::init()?;
+        let session_id = store.save_session("(repl)", &config.model)?;
+
+        let system = context_manager::build_system_prompt(config)?;
+        let mut tools = ToolRegistry::new();
+        tools.register_mcp_servers().await;
+        if config.agent_depth > 0 {
+            tools.register(std::sync::Arc::new(SpawnAgentTool::new(config.clone())));
+        }
+        let tool_defs  = tools.tool_definitions();
+        let tool_count = tool_defs.len();
+
+        let skills = crate::skill_manager::load_all_skills();
+        let stack_skills = crate::skill_manager::detect_stack_skills(&skills);
+        if !skills.is_empty() || !stack_skills.is_empty() {
+            let auto_note = if stack_skills.is_empty() {
+                String::new()
+            } else {
+                let names: Vec<_> = stack_skills.iter().map(|s| s.name.as_str()).collect();
+                format!("  auto: {}", names.join(", ").dimmed())
+            };
+            println!(
+                "  {} {} skill(s) loaded{}",
+                "◎".truecolor(255, 200, 60),
+                skills.len().to_string().cyan(),
+                auto_note,
+            );
+        }
+
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let code_index = match crate::code_index::CodeIndex::open(&cwd) {
+            Ok(mut idx) => {
+                match idx.index_dir(&cwd) {
+                    Ok((0, _)) => {}
+                    Ok((files, syms)) => {
+                        println!(
+                            "  {} indexed {} file(s), {} symbol(s)",
+                            "◎".truecolor(100, 200, 255),
+                            files.to_string().cyan(),
+                            syms.to_string().cyan(),
+                        );
+                    }
+                    Err(e) => tracing::warn!("code index: {}", e),
+                }
+                let arc = Arc::new(Mutex::new(idx));
+                crate::code_index::set_global(arc.clone());
+                arc
+            }
+            Err(e) => {
+                tracing::warn!("code index unavailable: {}", e);
+                Arc::new(Mutex::new(
+                    crate::code_index::CodeIndex::open(&cwd)
+                        .unwrap_or_else(|_| {
+                            crate::code_index::CodeIndex::open(std::path::Path::new("/tmp")).unwrap()
+                        }),
+                ))
+            }
+        };
+
+        Ok(Self {
+            client: create_client(config),
+            tools,
+            permissions: PermissionManager::new(config.permission_mode.clone()),
+            system,
+            tool_defs,
+            messages: Vec::new(),
+            model: config.model.clone(),
+            base_url: config.base_url.clone(),
+            session_usage: Usage::default(),
+            turn_count: 0,
+            tool_count,
+            session_id,
+            config: config.clone(),
+            staged_images: Vec::new(),
+            skills,
+            current_branch: "main".to_string(),
+            code_index,
+            store,
+        })
+    }
+
+    pub fn make_spinner() -> ThinkingSpinner { ThinkingSpinner::new() }
+
+    pub fn estimated_context_tokens(&self) -> usize {
+        let chars: usize = self.messages.iter().map(|m| {
+            m.content.iter().map(|b| match b {
+                ContentBlock::Text { text }           => text.len(),
+                ContentBlock::ToolUse { input, .. }   => input.to_string().len(),
+                ContentBlock::ToolResult { content, .. } => content.len(),
+                ContentBlock::Image { data, .. }      => data.len() / 4,
+            }).sum::<usize>()
+        }).sum();
+        chars / 4
+    }
+
+    // ── Core tool loop ────────────────────────────────────────────────────────
+
+    pub async fn handle_user_turn(&mut self, input: &str) -> Result<()> {
+        let est = self.estimated_context_tokens();
+        if est > AUTO_COMPACT_THRESHOLD {
+            println!(
+                "  {} Context is large (~{}k tokens), auto-compacting…",
+                "⚡".bright_yellow(), est / 1000
+            );
+            self.cmd_compact().await;
+        }
+
+        let matched_skills: Vec<&crate::skill_manager::Skill> =
+            crate::skill_manager::match_skills(input, &self.skills);
+        let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
+
+        let effective_system = if matched_skills.is_empty() {
+            self.system.clone()
+        } else {
+            let skill_summary = crate::skill_manager::skills_summary(&matched_skills);
+            println!(
+                "  {} skills: {}",
+                "↳".truecolor(255, 200, 60),
+                skill_summary.dimmed()
+            );
+            let skill_block = crate::skill_manager::build_skill_prompt(&matched_skills);
+            context_manager::build_system_prompt_with_skills(&self.config, &skill_block)
+                .unwrap_or_else(|_| self.system.clone())
+        };
+
+        let msg_tokens_estimate = input.len() / 4;
+
+        let user_msg = if self.staged_images.is_empty() {
+            Message::user_text(input)
+        } else {
+            let mut blocks: Vec<ContentBlock> = self.staged_images.drain(..)
+                .map(|(mime, data)| ContentBlock::Image { media_type: mime, data })
+                .collect();
+            blocks.push(ContentBlock::Text { text: input.to_string() });
+            Message { role: "user".to_string(), content: blocks }
+        };
+        self.messages.push(user_msg);
+        self.turn_count += 1;
+        audit::record(&format!("user_turn: {}", input))?;
+
+        if self.turn_count == 1 {
+            let short = if input.len() > 80 { &input[..80] } else { input };
+            let _ = self.store.update_session_goal(self.session_id, short);
+        }
+
+        for turn in 0..MAX_TURNS {
+            tracing::info!(turn = turn, "calling LLM");
+
+            let mut spinner = Self::make_spinner();
+            let pb_clone    = spinner.pb_clone();
+            let stop_clone  = spinner.stop_signal();
+            let model_label = self.model.clone();
+            let before_output: BeforeOutput = Box::new(move || {
+                stop_clone.store(true, Ordering::Relaxed);
+                pb_clone.finish_and_clear();
+                println!("  {} {}",
+                    "╭─".truecolor(70, 65, 90),
+                    model_label.truecolor(100, 95, 130));
+            });
+
+            let result = self.client
+                .send(&effective_system, &self.messages, &self.tool_defs, Some(before_output))
+                .await;
+            spinner.finish_and_clear();
+            let response = result?;
+
+            if let Some(ref u) = response.usage {
+                self.session_usage.input_tokens       += u.input_tokens;
+                self.session_usage.output_tokens      += u.output_tokens;
+                self.session_usage.cache_read_tokens  += u.cache_read_tokens;
+                self.session_usage.cache_write_tokens += u.cache_write_tokens;
+
+                let cost_str = format_cost(u, &self.model);
+                let mut parts: Vec<String> = Vec::new();
+                if skill_tokens_this_turn > 0 {
+                    parts.push(format!("skills {}t", skill_tokens_this_turn));
+                }
+                if msg_tokens_estimate > 0 {
+                    parts.push(format!("msg ~{}t", msg_tokens_estimate));
+                }
+                let ctx_t = self.estimated_context_tokens();
+                parts.push(format!("ctx ~{}k", (ctx_t / 1000).max(1)));
+
+                if parts.is_empty() {
+                    println!("  {} {}", "╰─".truecolor(70, 65, 90), cost_str.truecolor(100, 95, 130));
+                } else {
+                    println!("  {}", "╰─".truecolor(70, 65, 90));
+                    println!("  {} {}  {}  {}",
+                        "↳".truecolor(255, 200, 60),
+                        parts.join("  ").truecolor(100, 95, 130),
+                        "·".truecolor(70, 65, 90),
+                        cost_str.truecolor(100, 95, 130));
+                }
+            }
+
+            audit::record(&format!(
+                "llm_response turn={} stop_reason={}", turn, response.stop_reason
+            ))?;
+
+            let tool_calls: Vec<&ContentBlock> = response.content.iter()
+                .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
+                .collect();
+
+            if tool_calls.is_empty() { break; }
+
+            self.messages.push(Message {
+                role:    "assistant".to_string(),
+                content: response.content.clone(),
+            });
+
+            // Phase 1: check permissions sequentially.
+            struct ApprovedCall {
+                id:    String,
+                name:  String,
+                input: serde_json::Value,
+                ctx:   String,
+            }
+            let mut approved:     Vec<ApprovedCall>   = Vec::new();
+            let mut tool_results: Vec<ContentBlock>   = Vec::new();
+
+            for block in &tool_calls {
+                let ContentBlock::ToolUse { id, name, input } = block else { continue };
+                tracing::info!(tool = %name, "tool use requested");
+                audit::record(&format!("tool_request name={} id={}", name, id))?;
+
+                let ctx = self.tools.get(name)
+                    .map(|t| t.permission_context(input))
+                    .unwrap_or_default();
+                let allowed = self.permissions.check(name, &ctx)?;
+
+                if !allowed {
+                    audit::record(&format!("tool_denied name={} id={}", name, id))?;
+                    tool_results.push(ContentBlock::ToolResult {
+                        tool_use_id: id.clone(),
+                        content:     "Permission denied by user.".to_string(),
+                    });
+                } else {
+                    approved.push(ApprovedCall {
+                        id:    id.clone(),
+                        name:  name.clone(),
+                        input: input.clone(),
+                        ctx,
+                    });
+                }
+            }
+
+            // Phase 2: execute approved tools in parallel.
+            let exec_futures = approved.into_iter().map(|call| {
+                let tool = self.tools.get(&call.name);
+                async move {
+                    let icon = tool_icon(&call.name);
+                    let cancel_hint = if call.name == "shell" {
+                        format!("  {}", "Ctrl+C to cancel".truecolor(110, 105, 130))
+                    } else {
+                        String::new()
+                    };
+                    let ctx_display = if call.ctx.len() > 52 {
+                        format!("{}…", &call.ctx[..51])
+                    } else {
+                        call.ctx.clone()
+                    };
+                    println!(
+                        "  {} {} {}  {}{}",
+                        "╭─".truecolor(70, 65, 90),
+                        icon,
+                        call.name.truecolor(100, 210, 255).bold(),
+                        ctx_display.truecolor(130, 120, 155),
+                        cancel_hint,
+                    );
+                    let t0 = std::time::Instant::now();
+                    match tool {
+                        Some(t) => {
+                            let _ = audit::record(&format!(
+                                "tool_execute name={} input={}",
+                                call.name,
+                                serde_json::to_string(&call.input).unwrap_or_default()
+                            ));
+                            match t.execute(call.input).await {
+                                Ok(output) => {
+                                    let _ = audit::record(&format!("tool_success name={}", call.name));
+                                    let ms = t0.elapsed().as_millis();
+                                    println!("  {} {}  {}",
+                                        "╰─".truecolor(70, 65, 90),
+                                        "✓".truecolor(80, 210, 120),
+                                        format!("{}ms", ms).truecolor(90, 85, 110));
+                                    ContentBlock::ToolResult { tool_use_id: call.id, content: output }
+                                }
+                                Err(e) => {
+                                    let _ = audit::record(&format!("tool_error name={} err={}", call.name, e));
+                                    let ms = t0.elapsed().as_millis();
+                                    println!("  {} {}  {}",
+                                        "╰─".truecolor(70, 65, 90),
+                                        "✗".truecolor(220, 80, 80),
+                                        format!("{}ms", ms).truecolor(90, 85, 110));
+                                    ContentBlock::ToolResult {
+                                        tool_use_id: call.id,
+                                        content:     format!("{} {}", "Error:", e),
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            let _ = audit::record(&format!("tool_unknown name={}", call.name));
+                            println!("  {} {} unknown tool",
+                                "╰─".truecolor(70, 65, 90), "✗".truecolor(220, 80, 80));
+                            ContentBlock::ToolResult {
+                                tool_use_id: call.id,
+                                content:     format!("Unknown tool: {}", call.name),
+                            }
+                        }
+                    }
+                }
+            });
+            let new_results = join_all(exec_futures).await;
+
+            // Reindex any written/edited files.
+            for block in &tool_calls {
+                if let ContentBlock::ToolUse { name, input, .. } = block {
+                    if matches!(name.as_str(), "write_file" | "edit_file" | "batch_edit") {
+                        let path_str = input["path"].as_str().unwrap_or("");
+                        if !path_str.is_empty() {
+                            crate::code_index::global_reindex_file(std::path::Path::new(path_str));
+                        }
+                    }
+                }
+            }
+
+            tool_results.extend(new_results);
+
+            // Warn before sending potential secrets to cloud.
+            if matches!(self.config.provider, Provider::Anthropic)
+                || self.config.base_url.as_deref().map(|u| {
+                    !u.contains("192.168.") && !u.contains("localhost") && !u.contains("127.0.0.1")
+                }).unwrap_or(false)
+            {
+                for result in &tool_results {
+                    if let ContentBlock::ToolResult { content, .. } = result {
+                        let hits = crate::secret_scanner::scan(content);
+                        if !hits.is_empty() {
+                            println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
+                            for h in &hits { println!("    {}", h.to_string().yellow()); }
+                            print!("  send anyway? [y/N] ");
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                            let mut ans = String::new();
+                            std::io::stdin().read_line(&mut ans).ok();
+                            if !ans.trim().eq_ignore_ascii_case("y") {
+                                println!("  {} aborted by user — secrets not sent", "✗".red());
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.messages.push(Message::tool_results(tool_results));
+        }
+
+        // Persist conversation after every turn.
+        if let Ok(json) = serde_json::to_string(&self.messages) {
+            let _ = self.store.save_messages(self.session_id, &json);
+        }
+
+        Ok(())
+    }
+
+    // ── Slash command handlers ────────────────────────────────────────────────
+
+    pub fn cmd_help(&self) {
+        let w = 52usize;
+        println!();
+        println!("  {} {}  {}",
+            "◆".truecolor(255, 210, 50),
+            "zap".truecolor(255, 210, 50).bold(),
+            "slash commands".truecolor(100, 95, 130));
+        println!("  {}", "─".repeat(w).truecolor(60, 55, 80));
+        let groups: &[(&str, &[(&str, &str)])] = &[
+            ("session", &[
+                ("/help",                    "show this help"),
+                ("/config",                  "show provider, model, URL"),
+                ("/cost",                    "token usage and estimated cost"),
+                ("/history",                 "show message count"),
+                ("/clear",                   "clear conversation history"),
+                ("/compact",                 "summarize and compress history"),
+                ("/sessions [N]",            "browse and resume old sessions"),
+                ("/exit",                    "quit"),
+            ]),
+            ("model & provider", &[
+                ("/model <id>",              "switch model for this session"),
+                ("/models",                  "list models on server"),
+                ("/provider",                "switch provider interactively"),
+                ("/permissions ask|auto|deny","change permission mode"),
+            ]),
+            ("code", &[
+                ("/index [path|stats]",      "reindex AST code symbols"),
+                ("/undo [file]",             "undo last file edit"),
+                ("/init",                    "create CLAUDE.md for this project"),
+                ("/run <workflow>",          "run a workflow from .zap/workflows/"),
+            ]),
+            ("media", &[
+                ("/attach <path>",           "stage an image for next message"),
+                ("/paste",                   "paste image from clipboard"),
+            ]),
+            ("memory & skills", &[
+                ("/memory list",             "list memory entries"),
+                ("/memory get <key>",        "read a memory entry"),
+                ("/memory set <k> <v>",      "write a memory entry"),
+                ("/memory del <key>",        "delete a memory entry"),
+                ("/skill list",              "list available skills"),
+                ("/skill show <name>",       "preview a skill"),
+                ("/skill create <name>",     "create a skill file"),
+                ("/audit [N]",               "show last N audit log lines"),
+            ]),
+        ];
+        for (group, cmds) in groups {
+            println!();
+            println!("  {} {}", "▸".truecolor(255, 210, 50), group.truecolor(150, 140, 170).bold());
+            for (cmd, desc) in *cmds {
+                println!("    {:<32} {}",
+                    cmd.truecolor(100, 210, 255),
+                    desc.truecolor(100, 95, 130));
+            }
+        }
+        println!();
+        println!("  {}", "─".repeat(w).truecolor(60, 55, 80));
+        println!("  {} {}", "tip:".truecolor(100, 95, 130),
+            "press / on empty input to open the command picker".truecolor(100, 95, 130));
+        println!();
+    }
+
+    pub fn cmd_config(&self) {
+        let provider_label = match self.config.provider {
+            Provider::Anthropic => "Anthropic API",
+            Provider::OpenAi    => "OpenAI-compatible",
+        };
+        let url  = self.base_url.as_deref().unwrap_or("https://api.anthropic.com");
+        let mode = match self.permissions.mode {
+            PermissionMode::Ask  => "ask",
+            PermissionMode::Auto => "auto",
+            PermissionMode::Deny => "deny",
+        };
+        let depth_label = if self.config.agent_depth > 0 {
+            format!("enabled (depth {})", self.config.agent_depth)
+        } else {
+            "disabled".to_string()
+        };
+
+        println!();
+        println!("  {} {}", "◆".truecolor(255, 210, 50), "configuration".truecolor(150, 140, 170).bold());
+        println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+        let kv = |k: &str, v: &str| {
+            println!("  {:<20} {}", k.truecolor(100, 95, 130), v.truecolor(100, 210, 255).bold());
+        };
+        kv("provider",           provider_label);
+        kv("model",              &self.model);
+        kv("base_url",           url);
+        kv("permissions",        mode);
+        kv("sub-agents",         &depth_label);
+        kv("turns this session", &self.turn_count.to_string());
+        println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+        println!();
+    }
+
+    pub fn cmd_history(&self) {
+        println!("  {} messages in history", self.messages.len().to_string().cyan());
+    }
+
+    pub fn cmd_clear(&mut self) {
+        self.messages.clear();
+        println!("  {} History cleared.", "✓".green());
+    }
+
+    pub fn cmd_cost(&self) {
+        use crate::ui::cost_per_million;
+        println!();
+        println!("  {}", "Session token usage".bold());
+        println!("  {}", "──────────────────────────────────────────".dimmed());
+        println!("  {:<18} {}", "input".dimmed(),  self.session_usage.input_tokens.to_string().cyan());
+        println!("  {:<18} {}", "output".dimmed(), self.session_usage.output_tokens.to_string().cyan());
+        if self.session_usage.cache_read_tokens > 0 {
+            println!("  {:<18} {}", "cache read".dimmed(),
+                self.session_usage.cache_read_tokens.to_string().bright_blue());
+            println!("  {:<18} {}", "cache write".dimmed(),
+                self.session_usage.cache_write_tokens.to_string().bright_blue());
+        }
+        let (cost_in, cost_out) = cost_per_million(&self.model);
+        if cost_in > 0.0 {
+            let total = (self.session_usage.input_tokens  as f64 * cost_in
+                       + self.session_usage.output_tokens as f64 * cost_out)
+                       / 1_000_000.0;
+            println!("  {:<18} ${:.4}", "est. cost".dimmed(), total);
+        }
+        println!();
+    }
+
+    pub fn cmd_permissions(&mut self, arg: &str) {
+        let new_mode = match arg.trim().to_lowercase().as_str() {
+            "ask"  => PermissionMode::Ask,
+            "auto" => PermissionMode::Auto,
+            "deny" => PermissionMode::Deny,
+            _ => {
+                println!("  {} Usage: /permissions ask|auto|deny", "✗".red());
+                return;
+            }
+        };
+        self.permissions.mode = new_mode;
+        println!("  {} Permission mode set to {}", "✓".green(), arg.trim().cyan().bold());
+    }
+
+    pub async fn cmd_compact(&mut self) {
+        if self.messages.is_empty() {
+            println!("  {} Nothing to compact.", "✗".red());
+            return;
+        }
+        let mut spinner = Self::make_spinner();
+        let mut temp = self.messages.clone();
+        temp.push(Message::user_text(
+            "Please provide a concise summary of this conversation so far, \
+             including the key decisions, changes made, and current state. \
+             This will replace the conversation history.",
+        ));
+
+        let result = self.client.send(
+            "You are a helpful assistant. Summarize the conversation concisely.",
+            &temp, &[], None,
+        ).await;
+        spinner.finish_and_clear();
+
+        match result {
+            Ok(resp) => {
+                let summary = resp.content.iter()
+                    .filter_map(|b| if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                    .collect::<Vec<_>>().join("\n");
+
+                let turn_count = self.messages.len();
+                self.messages.clear();
+                self.messages.push(Message::user_text(format!(
+                    "[Conversation compacted from {} messages]\n\n{}", turn_count, summary
+                )));
+                self.messages.push(Message {
+                    role:    "assistant".to_string(),
+                    content: vec![ContentBlock::Text {
+                        text: "Understood. I have the context from our previous conversation.".to_string(),
+                    }],
+                });
+                if let Some(u) = resp.usage {
+                    self.session_usage.input_tokens  += u.input_tokens;
+                    self.session_usage.output_tokens += u.output_tokens;
+                }
+                let _ = audit::record(&format!(
+                    "compact: {} messages → 2 (summary) model={}", turn_count, self.config.model
+                ));
+                println!("  {} Compacted {} messages into a summary.", "✓".green(), turn_count);
+            }
+            Err(e) => println!("  {} Compact failed: {}", "✗".red(), e),
+        }
+    }
+
+    pub fn cmd_paste(&mut self) {
+        let tmp = "/tmp/zap_clipboard_paste.png";
+        let ok = std::process::Command::new("pngpaste")
+            .arg(tmp).status().map(|s| s.success()).unwrap_or(false);
+        let ok = ok || {
+            let script = format!(
+                r#"try
+  set d to (the clipboard as «class PNGf»)
+  set f to open for access POSIX file "{}" with write permission
+  set eof f to 0
+  write d to f
+  close access f
+  return true
+on error
+  return false
+end try"#,
+                tmp
+            );
+            std::process::Command::new("osascript")
+                .args(["-e", &script])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
+                .unwrap_or(false)
+        };
+
+        if ok && std::path::Path::new(tmp).exists() {
+            self.cmd_attach(tmp);
+        } else {
+            println!("  {} No image in clipboard. Copy a screenshot first, then run /paste.", "✗".red());
+            println!("  {} You can also use {} to stage a file directly.", "·".dimmed(), "/attach <path>".cyan());
+        }
+    }
+
+    pub fn cmd_attach(&mut self, path: &str) {
+        let path = path.trim();
+        if path.is_empty() {
+            println!("  Usage: /attach <image-path>");
+            return;
+        }
+        let mime = match std::path::Path::new(path)
+            .extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref()
+        {
+            Some("png")            => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("gif")            => "image/gif",
+            Some("webp")           => "image/webp",
+            _ => {
+                println!("  {} Unsupported format. Use png / jpg / gif / webp.", "✗".red());
+                return;
+            }
+        };
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                use base64::Engine;
+                let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                let kb   = bytes.len() / 1024;
+                println!("  {} Attached {} ({} KB, {})", "✓".green(), path.cyan(), kb, mime.dimmed());
+                self.staged_images.push((mime.to_string(), data));
+            }
+            Err(e) => println!("  {} Could not read '{}': {}", "✗".red(), path, e),
+        }
+    }
+
+    pub fn cmd_init(&self) -> Option<String> {
+        let claude_md = std::path::Path::new("CLAUDE.md");
+        if claude_md.exists() {
+            println!("  {} CLAUDE.md already exists.", "✗".red());
+            return None;
+        }
+        let project_type = detect_project_type();
+        let template     = generate_claude_md_template(project_type);
+        match std::fs::write("CLAUDE.md", &template) {
+            Ok(_) => {
+                println!("  {} Created CLAUDE.md for {} project.", "✓".green(), project_type.cyan());
+                println!("  {} Asking the agent to analyse the repo and fill it in…", "⚡".bright_yellow());
+                Some(
+                    "I just created CLAUDE.md with a template. Please read the project \
+                     source files and fill in every section of CLAUDE.md accurately: \
+                     Overview, Build & Test commands, Code Style conventions, Architecture, \
+                     Important Files, and Do Not Touch sections. Use edit_file to update CLAUDE.md \
+                     in place with real information from the repo."
+                        .to_string(),
+                )
+            }
+            Err(e) => { println!("  {} Could not write CLAUDE.md: {}", "✗".red(), e); None }
+        }
+    }
+
+    pub fn cmd_sessions(&mut self, _arg: &str) {
+        let rows = match self.store.recent_sessions(20) {
+            Ok(r) if r.is_empty() => { println!("  No sessions found."); return; }
+            Ok(r) => r,
+            Err(e) => { println!("  {} {}", "✗".red(), e); return; }
+        };
+
+        use inquire::{ui::{Attributes, Color, RenderConfig, StyleSheet}, Select};
+        let cfg = RenderConfig::default()
+            .with_prompt_prefix(inquire::ui::Styled::new("  ◆").with_fg(Color::LightYellow))
+            .with_highlighted_option_prefix(inquire::ui::Styled::new(" ❯").with_fg(Color::LightYellow))
+            .with_selected_option(Some(StyleSheet::new().with_fg(Color::LightCyan).with_attr(Attributes::BOLD)))
+            .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
+
+        let entries: Vec<String> = rows.iter().map(|(id, goal, model, ts)| {
+            let date       = ts.get(..10).unwrap_or(ts.as_str());
+            let goal_short = if goal.len() > 50 { format!("{}…", &goal[..49]) } else { goal.clone() };
+            format!("#{:<4} {:<52} [{:<20}] {}", id, goal_short, model, date)
+        }).collect();
+
+        let result = Select::new("Resume session:", entries.clone())
+            .with_render_config(cfg)
+            .with_help_message("↑↓ navigate   type to filter   Enter load   Esc cancel")
+            .with_page_size(12)
+            .prompt_skippable();
+
+        let chosen_idx = match result {
+            Ok(Some(line)) => entries.iter().position(|e| e == &line),
+            _ => None,
+        };
+
+        if let Some(idx) = chosen_idx {
+            let (session_id, goal, model, _) = &rows[idx];
+            match self.store.load_messages(*session_id) {
+                Ok(Some(json)) => match serde_json::from_str::<Vec<Message>>(&json) {
+                    Ok(msgs) => {
+                        self.messages   = msgs;
+                        self.turn_count = self.messages.iter().filter(|m| m.role == "user").count();
+                        println!("  {} Loaded session #{} — {} messages, model was {}",
+                            "✓".green(), session_id, self.messages.len().to_string().cyan(), model.dimmed());
+                        println!("  {} {}", "◌".dimmed(), goal.dimmed());
+                    }
+                    Err(e) => println!("  {} Could not parse messages: {}", "✗".red(), e),
+                },
+                Ok(None) => println!("  {} No message history saved for that session.", "✗".red()),
+                Err(e)   => println!("  {} {}", "✗".red(), e),
+            }
+        }
+    }
+
+    pub fn cmd_provider(&mut self, config: &Config) {
+        use inquire::{ui::{Attributes, Color, RenderConfig, StyleSheet}, Select, Text};
+
+        #[derive(Clone)]
+        struct ProviderDef {
+            name:        &'static str,
+            hint:        &'static str,
+            kind:        ProviderKind,
+            models:      &'static [&'static str],
+            base_url:    Option<&'static str>,
+            needs_key:   bool,
+            coming_soon: bool,
+        }
+        #[derive(Clone)]
+        enum ProviderKind { Anthropic, OpenAi }
+
+        let providers: Vec<ProviderDef> = vec![
+            ProviderDef { name: "LM Studio",                  hint: "local · OpenAI-compatible",                kind: ProviderKind::OpenAi,    models: &["gemma-4-e4b-it", "qwen2.5-coder-7b-instruct", "mistral-7b-instruct", "Other…"],    base_url: Some("http://localhost:1234"),                                    needs_key: false, coming_soon: false },
+            ProviderDef { name: "Ollama",                     hint: "local · OpenAI-compatible",                kind: ProviderKind::OpenAi,    models: &["llama3.2", "llama3.1:70b", "codellama", "qwen2.5-coder", "Other…"],                 base_url: Some("http://localhost:11434"),                                   needs_key: false, coming_soon: false },
+            ProviderDef { name: "Anthropic",                  hint: "claude-sonnet-4-6 / claude-opus-4-7",      kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", "Other…"],               base_url: None,                                                            needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Claude Code (Pro/Max API)",  hint: "full API via subscription · after 16 Jun 2026", kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7"],                                     base_url: None,                                                            needs_key: false, coming_soon: true  },
+            ProviderDef { name: "OpenAI",                     hint: "gpt-4o / gpt-4o-mini / o3",               kind: ProviderKind::OpenAi,    models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini", "Other…"],                                 base_url: None,                                                            needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Google Gemini",              hint: "gemini-2.5-pro / gemini-2.0-flash",       kind: ProviderKind::OpenAi,    models: &["gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash", "Other…"],                 base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai"), needs_key: true,  coming_soon: false },
+            ProviderDef { name: "DeepSeek",                   hint: "deepseek-chat / deepseek-reasoner",        kind: ProviderKind::OpenAi,    models: &["deepseek-chat", "deepseek-reasoner", "Other…"],                                     base_url: Some("https://api.deepseek.com"),                                needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Groq",                       hint: "llama-3.3-70b · fastest inference",        kind: ProviderKind::OpenAi,    models: &["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "Other…"], base_url: Some("https://api.groq.com/openai"),                             needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Mistral",                    hint: "mistral-large / codestral",                kind: ProviderKind::OpenAi,    models: &["mistral-large-latest", "codestral-latest", "mistral-small-latest", "Other…"],       base_url: Some("https://api.mistral.ai/v1"),                               needs_key: true,  coming_soon: false },
+            ProviderDef { name: "xAI (Grok)",                 hint: "grok-3 / grok-3-mini",                    kind: ProviderKind::OpenAi,    models: &["grok-3", "grok-3-mini", "grok-2", "Other…"],                                       base_url: Some("https://api.x.ai/v1"),                                     needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Together AI",                hint: "Llama / Qwen / Mistral open models",       kind: ProviderKind::OpenAi,    models: &["meta-llama/Llama-3-70b-chat-hf", "Qwen/Qwen2.5-72B-Instruct-Turbo", "Other…"],    base_url: Some("https://api.together.xyz/v1"),                             needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Perplexity",                 hint: "sonar-pro · web-grounded answers",         kind: ProviderKind::OpenAi,    models: &["sonar-pro", "sonar", "sonar-reasoning", "Other…"],                                  base_url: Some("https://api.perplexity.ai"),                               needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Cohere",                     hint: "command-r-plus",                           kind: ProviderKind::OpenAi,    models: &["command-r-plus", "command-r", "Other…"],                                            base_url: Some("https://api.cohere.ai/compatibility/v1"),                  needs_key: true,  coming_soon: false },
+            ProviderDef { name: "Custom (OpenAI-compatible)", hint: "any OpenAI-compatible endpoint",           kind: ProviderKind::OpenAi,    models: &["Other…"],                                                                           base_url: None,                                                            needs_key: false, coming_soon: false },
+        ];
+
+        let labels: Vec<String> = providers.iter().map(|p| {
+            if p.coming_soon { format!("{:<26}· {}  ◷ coming 16 Jun 2026", p.name, p.hint) }
+            else             { format!("{:<26}· {}", p.name, p.hint) }
+        }).collect();
+
+        let cfg = RenderConfig::default()
+            .with_prompt_prefix(inquire::ui::Styled::new("  ◆").with_fg(Color::LightYellow))
+            .with_highlighted_option_prefix(inquire::ui::Styled::new(" ❯").with_fg(Color::LightYellow))
+            .with_selected_option(Some(StyleSheet::new().with_fg(Color::LightCyan).with_attr(Attributes::BOLD)))
+            .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
+
+        let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+        let chosen = match Select::new("Switch provider:", label_refs)
+            .with_render_config(cfg.clone())
+            .with_help_message("↑↓ navigate   Enter select   Esc cancel")
+            .with_page_size(14)
+            .prompt_skippable()
+        {
+            Ok(Some(s)) => s.to_string(),
+            _ => return,
+        };
+
+        let idx = labels.iter().position(|l| l == &chosen).unwrap_or(0);
+        let def = &providers[idx];
+
+        if def.coming_soon {
+            println!();
+            println!("  {} {}", "◷".truecolor(255, 210, 50), "Claude Code (Pro/Max API)".truecolor(255, 210, 50).bold());
+            println!("  {}", "─".repeat(52).truecolor(60, 55, 80));
+            println!("  Anthropic is adding Agent SDK credits to Pro/Max plans");
+            println!("  on {} — enabling direct API access without an API key.", "16 Jun 2026".truecolor(100, 210, 255).bold());
+            println!();
+            println!("  {} Use {} today for Pro/Max access with an API key.",
+                "tip:".truecolor(100, 95, 130), "Anthropic".truecolor(100, 210, 255));
+            println!();
+            return;
+        }
+
+        let base_url = if def.name == "Custom (OpenAI-compatible)" {
+            match Text::new("Base URL (e.g. http://localhost:8080/v1):").prompt_skippable() {
+                Ok(Some(u)) if !u.trim().is_empty() => Some(u.trim().to_string()),
+                _ => { println!("  Cancelled."); return; }
+            }
+        } else {
+            def.base_url.map(str::to_string)
+        };
+
+        let api_key = if def.needs_key {
+            match Text::new("API key (leave blank to keep existing):")
+                .with_render_config(cfg.clone())
+                .with_help_message("Saved to ~/.agent.toml")
+                .prompt_skippable()
+            {
+                Ok(Some(k)) if !k.trim().is_empty() => k.trim().to_string(),
+                _ => config.api_key.clone(),
+            }
+        } else {
+            String::new()
+        };
+
+        let model_input = {
+            match Select::new("Model:", def.models.to_vec())
+                .with_render_config(cfg.clone())
+                .with_help_message("↑↓ navigate   Enter select   Esc = keep current")
+                .with_page_size(10)
+                .prompt_skippable()
+            {
+                Ok(Some(m)) if m == "Other…" => {
+                    match Text::new("Enter model name:").with_render_config(cfg).prompt_skippable() {
+                        Ok(Some(m)) if !m.trim().is_empty() => m.trim().to_string(),
+                        _ => def.models[0].to_string(),
+                    }
+                }
+                Ok(Some(m)) => m.to_string(),
+                _ => def.models[0].to_string(),
+            }
+        };
+
+        let mut new_config   = config.clone();
+        new_config.provider  = match def.kind { ProviderKind::Anthropic => Provider::Anthropic, ProviderKind::OpenAi => Provider::OpenAi };
+        new_config.model     = model_input.clone();
+        new_config.base_url  = base_url;
+        new_config.api_key   = api_key;
+
+        self.client   = crate::llm_client::create_client(&new_config);
+        self.model    = model_input.clone();
+        self.base_url = new_config.base_url.clone();
+        self.config   = new_config.clone();
+
+        match new_config.save() {
+            Ok(_)  => println!("  {} Switched to {} · {}  {}", "✓".green(), def.name.cyan().bold(), model_input.cyan(), "(saved to ~/.agent.toml)".dimmed()),
+            Err(e) => println!("  {} Switched to {} · {}  {} {}", "✓".green(), def.name.cyan().bold(), model_input.cyan(), "warn: could not save:".yellow(), e),
+        }
+    }
+
+    pub fn cmd_memory(&self, args: &str) {
+        let parts: Vec<&str> = args.splitn(3, ' ').collect();
+        let subcmd = parts.first().copied().unwrap_or("list");
+
+        match subcmd {
+            "list" | "" => match self.store.all_memory() {
+                Ok(entries) if entries.is_empty() => println!("  No memory entries."),
+                Ok(entries) => {
+                    println!();
+                    println!("  {}", "Agent memory".bold());
+                    println!("  {}", "──────────────────────────────────────────".dimmed());
+                    for (k, v) in &entries { println!("  {} = {}", k.cyan(), v); }
+                    println!();
+                }
+                Err(e) => println!("  {} {}", "✗".red(), e),
+            },
+            "get" => {
+                let key = parts.get(1).copied().unwrap_or("");
+                if key.is_empty() { println!("  Usage: /memory get <key>"); return; }
+                match self.store.get_memory(key) {
+                    Ok(Some(v)) => println!("  {} = {}", key.cyan(), v),
+                    Ok(None)    => println!("  {} Key '{}' not found.", "✗".red(), key),
+                    Err(e)      => println!("  {} {}", "✗".red(), e),
+                }
+            }
+            "set" => {
+                let key = parts.get(1).copied().unwrap_or("");
+                let val = parts.get(2).copied().unwrap_or("");
+                if key.is_empty() || val.is_empty() { println!("  Usage: /memory set <key> <value>"); return; }
+                match self.store.set_memory(key, val) {
+                    Ok(_)  => println!("  {} {}", "✓".green(), format!("{} = {}", key, val).cyan()),
+                    Err(e) => println!("  {} {}", "✗".red(), e),
+                }
+            }
+            "del" | "delete" | "rm" => {
+                let key = parts.get(1).copied().unwrap_or("");
+                if key.is_empty() { println!("  Usage: /memory del <key>"); return; }
+                match self.store.delete_memory(key) {
+                    Ok(_)  => println!("  {} Deleted '{}'.", "✓".green(), key.cyan()),
+                    Err(e) => println!("  {} {}", "✗".red(), e),
+                }
+            }
+            other => println!("  {} Unknown memory subcommand '{}'. Try list/get/set/del.", "✗".red(), other),
+        }
+    }
+
+    pub fn cmd_audit(&self, arg: &str) {
+        let n: usize = arg.trim().parse().unwrap_or(20).max(1).min(500);
+        match std::fs::read_to_string(audit::AUDIT_LOG_PATH) {
+            Ok(content) => {
+                let lines: Vec<&str> = content.lines().collect();
+                let start = lines.len().saturating_sub(n);
+                println!();
+                println!("  {} (last {} entries)", "Audit log".bold(), n);
+                println!("  {}", "──────────────────────────────────────────".dimmed());
+                for line in &lines[start..] {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        println!("  {} {}", v["timestamp"].as_str().unwrap_or("").dimmed(), v["event"].as_str().unwrap_or(line).cyan());
+                    } else {
+                        println!("  {}", line.dimmed());
+                    }
+                }
+                println!();
+            }
+            Err(_) => println!("  {} No audit log found.", "✗".red()),
+        }
+    }
+
+    pub async fn cmd_models(&self) {
+        let url = match &self.base_url {
+            Some(b) => format!("{}/v1/models", b.trim_end_matches('/')),
+            None => {
+                println!("  {} /models only works with OpenAI-compatible servers.", "✗".red());
+                return;
+            }
+        };
+        let client = reqwest::Client::new();
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(json) => {
+                        println!();
+                        println!("  {}", "Available models".bold());
+                        println!("  {}", "──────────────────────────────────────────".dimmed());
+                        if let Some(arr) = json["data"].as_array() {
+                            for m in arr {
+                                let id     = m["id"].as_str().unwrap_or("?");
+                                let active = if id == self.model { " ◀ active".green().to_string() } else { String::new() };
+                                println!("  {} {}{}", "·".dimmed(), id.cyan(), active);
+                            }
+                        }
+                        println!();
+                        println!("  {}", "Use /model <id> to switch.".dimmed());
+                        println!();
+                    }
+                    Err(e) => println!("  {} Failed to parse response: {}", "✗".red(), e),
+                }
+            }
+            Ok(resp) => println!("  {} Server returned {}", "✗".red(), resp.status()),
+            Err(e)   => println!("  {} Could not reach server: {}", "✗".red(), e),
+        }
+    }
+
+    pub fn cmd_model(&mut self, name: &str, config: &Config) {
+        self.model = name.to_string();
+        let mut new_config = config.clone();
+        new_config.model   = name.to_string();
+        self.client = crate::llm_client::create_client(&new_config);
+        println!("  {} Switched to {}", "✓".green(), name.cyan().bold());
+    }
+
+    pub async fn cmd_skill(&mut self, args: &str) {
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let subcmd = parts.first().copied().unwrap_or("list");
+        let name   = parts.get(1).copied().unwrap_or("").trim();
+
+        match subcmd {
+            "list" | "" => {
+                let skills = crate::skill_manager::load_all_skills();
+                if skills.is_empty() {
+                    println!("  No skills found.");
+                    println!("  Create one: {} or add .md files to .zap/skills/", "/skill create <name>".cyan());
+                    return;
+                }
+                println!();
+                println!("  {} {}", "Skills".bold(), format!("({} total)", skills.len()).dimmed());
+                println!("  {}", "──────────────────────────────────────────".dimmed());
+                for s in &skills {
+                    let src = match s.source {
+                        crate::skill_manager::SkillSource::Project => "[project]".green().to_string(),
+                        crate::skill_manager::SkillSource::Global  => "[global]".dimmed().to_string(),
+                        crate::skill_manager::SkillSource::Bundled => "[built-in]".truecolor(120, 120, 120).to_string(),
+                    };
+                    let triggers = if s.triggers.is_empty() { "(no triggers)".to_string() } else { s.triggers.join(", ") };
+                    println!("  {} {}  {}  triggers: {}", "·".dimmed(), s.name.cyan().bold(), src, triggers.dimmed());
+                }
+                println!();
+            }
+            "show" => {
+                if name.is_empty() { println!("  Usage: /skill show <name>"); return; }
+                match crate::skill_manager::load_all_skills().into_iter().find(|s| s.name == name) {
+                    Some(s) => {
+                        println!();
+                        println!("  {} — (~{}t)  triggers: {}", s.name.cyan().bold(), s.tokens(), s.triggers.join(", ").dimmed());
+                        println!("  {}", "──────────────────────────────────────────".dimmed());
+                        for line in s.content.lines() { println!("  {}", line); }
+                        println!();
+                    }
+                    None => println!("  {} Skill '{}' not found.", "✗".red(), name),
+                }
+            }
+            "create" => {
+                if name.is_empty() { println!("  Usage: /skill create <name>"); return; }
+                match crate::skill_manager::create_skill(name, true) {
+                    Ok(path) => {
+                        println!("  {} Created: {}", "✓".green(), path.display().to_string().cyan());
+                        self.skills = crate::skill_manager::load_all_skills();
+                    }
+                    Err(e) => println!("  {} {}", "✗".red(), e),
+                }
+            }
+            "capture" => {
+                let (skill_name, global) = if name.ends_with("--global") {
+                    (name.trim_end_matches("--global").trim(), true)
+                } else {
+                    (name, false)
+                };
+                if skill_name.is_empty() { println!("  usage: /skill capture <name> [--global]"); return; }
+                if self.messages.len() < 6 { println!("  {} need at least 3 turns to capture a skill", "✗".red()); return; }
+
+                let convo_text: String = self.messages.iter()
+                    .filter_map(|m| {
+                        let text: String = m.content.iter().filter_map(|b| {
+                            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                        }).collect::<Vec<_>>().join(" ");
+                        if text.trim().is_empty() { None } else { Some(format!("[{}] {}", m.role, text.trim())) }
+                    }).collect::<Vec<_>>().join("\n");
+
+                let capture_prompt = format!(
+                    "Extract all instructions, preferences, rules, and corrections the user \
+                     gave during this conversation. Write them as a concise skill markdown file \
+                     with YAML frontmatter. Use this format:\n\
+                     ---\nname: {name}\ntrigger: [\"keyword1\", \"keyword2\"]\ntokens: ~500\n---\n\
+                     [instructions here]\n\nConversation:\n{convo_text}",
+                    name = skill_name, convo_text = convo_text
+                );
+
+                println!("  {} Capturing skill from conversation…", "◌".dimmed());
+                let mut spinner = Self::make_spinner();
+                let pb_clone   = spinner.pb_clone();
+                let stop_clone = spinner.stop_signal();
+                let before: BeforeOutput = Box::new(move || {
+                    stop_clone.store(true, Ordering::Relaxed);
+                    pb_clone.finish_and_clear();
+                });
+                let resp = self.client.send(
+                    "You extract reusable instructions from conversations into skill files.",
+                    &[Message::user_text(&capture_prompt)], &[], Some(before),
+                ).await;
+                spinner.finish_and_clear();
+
+                match resp {
+                    Ok(r) => {
+                        let content = r.content.iter()
+                            .filter_map(|b| if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                            .collect::<Vec<_>>().join("\n");
+                        match crate::skill_manager::save_captured_skill(skill_name, &content, global) {
+                            Ok(path) => {
+                                println!("  {} skill saved → {}", "✓".green(), path.display().to_string().cyan());
+                                self.skills = crate::skill_manager::load_all_skills();
+                            }
+                            Err(e) => println!("  {} could not save: {}", "✗".red(), e),
+                        }
+                    }
+                    Err(e) => println!("  {} capture failed: {}", "✗".red(), e),
+                }
+            }
+            _ => println!("  {} /skill list | show <name> | create <name> | capture <name> [--global]", "✗".red()),
+        }
+    }
+
+    pub fn cmd_index(&mut self, arg: &str) {
+        let cwd    = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let target = if arg.is_empty() { cwd.clone() } else { std::path::PathBuf::from(arg) };
+
+        if arg == "stats" || arg == "status" {
+            let (files, syms) = crate::code_index::global_stats();
+            println!("  {} {} file(s) indexed, {} symbol(s)", "◎".truecolor(100, 200, 255), files, syms);
+            let db = cwd.join(".zap").join("code.db");
+            if db.exists() {
+                if let Ok(meta) = std::fs::metadata(&db) {
+                    println!("  {} db: {} KB", "·".dimmed(), meta.len() / 1024);
+                }
+            }
+            return;
+        }
+
+        println!("  {} Indexing {}…", "◎".truecolor(100, 200, 255), target.display().to_string().cyan());
+        if let Ok(mut guard) = self.code_index.lock() {
+            match guard.index_dir(&target) {
+                Ok((files, syms)) => {
+                    println!("  {} indexed {} file(s), {} symbol(s)",
+                        "✓".green(), files.to_string().cyan(), syms.to_string().cyan());
+                    let (total_f, total_s) = guard.total_stats().unwrap_or((0, 0));
+                    println!("  {} total: {} file(s), {} symbol(s)", "·".dimmed(), total_f, total_s);
+                }
+                Err(e) => println!("  {} index error: {}", "✗".red(), e),
+            }
+        } else {
+            println!("  {} index is locked (reindexing in progress?)", "✗".red());
+        }
+    }
+
+    pub async fn cmd_run_workflow(&mut self, name: &str) -> anyhow::Result<()> {
+        let workflow = crate::workflow::load_workflow(name)?;
+        println!();
+        println!("  {} {} — {}",
+            "⚡".bright_yellow(),
+            format!("workflow: {}", workflow.name).bold(),
+            workflow.description.dimmed());
+        println!("  {} {} step(s)", "◌".dimmed(), workflow.steps.len());
+        println!();
+
+        for (i, step) in workflow.steps.iter().enumerate() {
+            println!("  {} step {}/{}{}",
+                "▶".cyan(), i + 1, workflow.steps.len(),
+                if step.skill.is_empty() { String::new() }
+                else { format!("  [skill: {}]", step.skill).dimmed().to_string() });
+
+            if step.requires_approval {
+                use std::io::Write;
+                print!("  Continue? [y/N] ");
+                std::io::stdout().flush()?;
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+                    println!("  {} Stopped at step {}.", "✗".red(), i + 1);
+                    return Ok(());
+                }
+            }
+
+            let prompt = if step.skill.is_empty() { step.prompt.clone() }
+                         else { format!("[Using skill: {}]\n{}", step.skill, step.prompt) };
+
+            if let Err(e) = self.handle_user_turn(&prompt).await {
+                println!("  {} step {} failed: {}", "✗".red(), i + 1, e);
+                return Err(e);
+            }
+        }
+        println!("  {} workflow '{}' complete.", "✓".green(), workflow.name.cyan());
+        Ok(())
+    }
+
+    // ── Branch commands ───────────────────────────────────────────────────────
+
+    pub async fn cmd_branch(&mut self, name: &str) {
+        if name.is_empty() { println!("  usage: /branch <name>"); return; }
+        let json = match serde_json::to_string(&self.messages) {
+            Ok(j) => j, Err(e) => { println!("  {} {}", "✗".red(), e); return; }
+        };
+        match self.store.save_branch(self.session_id, name, &self.current_branch, &json, self.turn_count) {
+            Ok(_) => {
+                let old = self.current_branch.clone();
+                self.current_branch = name.to_string();
+                println!("  {} branched from {} → {}", "✓".green(), old.dimmed(), name.cyan().bold());
+                println!("  {} conversation forked — changes stay on '{}' until you /switch", "·".dimmed(), name.cyan());
+            }
+            Err(e) => println!("  {} {}", "✗".red(), e),
+        }
+    }
+
+    pub fn cmd_branches(&self) {
+        match self.store.list_branches(self.session_id) {
+            Ok(branches) if branches.is_empty() => {
+                println!("  No branches (only main). Create one with /branch <name>");
+            }
+            Ok(branches) => {
+                println!();
+                for (name, parent, turns, _) in &branches {
+                    let marker = if name == &self.current_branch { " ← current".green().to_string() } else { String::new() };
+                    println!("  {}  {}  {} turns  from: {}{}", "·".dimmed(), name.cyan().bold(), turns, parent.dimmed(), marker);
+                }
+                println!();
+            }
+            Err(e) => println!("  {} {}", "✗".red(), e),
+        }
+    }
+
+    pub async fn cmd_switch(&mut self, name: &str) {
+        if name.is_empty() { println!("  usage: /switch <branch-name>"); return; }
+        let target = name.to_string();
+
+        // Save current branch state first.
+        if let Ok(json) = serde_json::to_string(&self.messages) {
+            let _ = self.store.save_branch(self.session_id, &self.current_branch, "main", &json, self.turn_count);
+        }
+
+        if target == "main" {
+            match self.store.load_messages(self.session_id) {
+                Ok(Some(json)) => {
+                    if let Ok(msgs) = serde_json::from_str(&json) {
+                        let old = self.current_branch.clone();
+                        self.messages       = msgs;
+                        self.turn_count     = self.messages.iter().filter(|m| m.role == "user").count();
+                        self.current_branch = "main".to_string();
+                        println!("  {} switched {} → main", "✓".green(), old.dimmed());
+                    }
+                }
+                _ => println!("  {} main branch state not found", "✗".red()),
+            }
+        } else {
+            match self.store.load_branch(self.session_id, &target) {
+                Ok(Some((json, turns))) => {
+                    if let Ok(msgs) = serde_json::from_str(&json) {
+                        let old = self.current_branch.clone();
+                        self.messages       = msgs;
+                        self.turn_count     = turns;
+                        self.current_branch = target.clone();
+                        println!("  {} switched {} → {}", "✓".green(), old.dimmed(), target.cyan().bold());
+                    }
+                }
+                Ok(None) => println!("  {} branch '{}' not found", "✗".red(), target),
+                Err(e)   => println!("  {} {}", "✗".red(), e),
+            }
+        }
+    }
+
+    pub async fn cmd_merge(&mut self, name: &str) {
+        if name.is_empty() { println!("  usage: /merge <branch-name>"); return; }
+
+        let branch_msgs: Vec<Message> = match self.store.load_branch(self.session_id, name) {
+            Ok(Some((json, _))) => match serde_json::from_str(&json) {
+                Ok(m) => m,
+                Err(e) => { println!("  {} could not parse branch: {}", "✗".red(), e); return; }
+            },
+            Ok(None) => { println!("  {} branch '{}' not found", "✗".red(), name); return; }
+            Err(e)   => { println!("  {} {}", "✗".red(), e); return; }
+        };
+
+        let branch_text: String = branch_msgs.iter()
+            .filter_map(|m| {
+                let t: String = m.content.iter().filter_map(|b| {
+                    if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                }).collect::<Vec<_>>().join(" ");
+                if t.trim().is_empty() { None } else { Some(format!("[{}] {}", m.role, t.trim())) }
+            }).collect::<Vec<_>>().join("\n");
+
+        let prompt = format!("Summarize this conversation branch in 3 sentences, focusing on conclusions and decisions made:\n\n{}", branch_text);
+
+        println!("  {} summarizing branch '{}'…", "◌".dimmed(), name);
+        let mut spinner = Self::make_spinner();
+        let pb_clone   = spinner.pb_clone();
+        let stop_clone = spinner.stop_signal();
+        let before: BeforeOutput = Box::new(move || {
+            stop_clone.store(true, Ordering::Relaxed);
+            pb_clone.finish_and_clear();
+        });
+        let resp = self.client.send(
+            "You summarize conversations concisely.",
+            &[Message::user_text(&prompt)], &[], Some(before),
+        ).await;
+        spinner.finish_and_clear();
+
+        match resp {
+            Ok(r) => {
+                let summary = r.content.iter()
+                    .filter_map(|b| if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                    .collect::<Vec<_>>().join("\n");
+                let merge_msg = format!("[merged from branch '{}']\n{}", name, summary);
+                self.messages.push(Message {
+                    role:    "assistant".to_string(),
+                    content: vec![ContentBlock::Text { text: merge_msg }],
+                });
+                println!("  {} merged '{}' into '{}'", "✓".green(), name.cyan(), self.current_branch.cyan().bold());
+                println!("  {}", summary.dimmed());
+            }
+            Err(e) => println!("  {} merge summary failed: {}", "✗".red(), e),
+        }
+    }
+
+    // ── Slash dispatcher ──────────────────────────────────────────────────────
+
+    /// Returns true if the session should end.
+    pub async fn handle_slash(&mut self, line: &str, config: &Config) -> bool {
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        let cmd = parts[0];
+        let arg = parts.get(1).copied().unwrap_or("").trim();
+
+        match cmd {
+            "/help"        => self.cmd_help(),
+            "/config"      => self.cmd_config(),
+            "/history"     => self.cmd_history(),
+            "/clear"       => self.cmd_clear(),
+            "/cost"        => self.cmd_cost(),
+            "/models"      => self.cmd_models().await,
+            "/sessions"    => self.cmd_sessions(arg),
+            "/provider"    => self.cmd_provider(config),
+            "/memory"      => self.cmd_memory(arg),
+            "/audit"       => self.cmd_audit(arg),
+            "/compact"     => self.cmd_compact().await,
+            "/attach"      => self.cmd_attach(arg),
+            "/paste"       => self.cmd_paste(),
+            "/skill"       => self.cmd_skill(arg).await,
+            "/run"         => {
+                if arg.is_empty() {
+                    let workflows = crate::workflow::discover_workflows();
+                    if workflows.is_empty() {
+                        println!("  No workflows found. Create .zap/workflows/<name>.yaml");
+                    } else {
+                        println!("  Available workflows:");
+                        for (name, _) in &workflows { println!("    {} {}", "◌".dimmed(), name.cyan()); }
+                        println!("  Run with: {}", "/run <name>".dimmed());
+                    }
+                } else if let Err(e) = self.cmd_run_workflow(arg).await {
+                    println!("  {} workflow error: {}", "✗".red(), e);
+                }
+            }
+            "/workflow"    => {
+                if arg.starts_with("new ") || arg.starts_with("new\t") {
+                    let name = arg[4..].trim();
+                    if name.is_empty() {
+                        println!("  usage: /workflow new <name>");
+                    } else {
+                        match crate::workflow::scaffold_workflow(name) {
+                            Ok(p)  => println!("  {} created {}", "✓".green(), p.display().to_string().cyan()),
+                            Err(e) => println!("  {} {}", "✗".red(), e),
+                        }
+                    }
+                } else {
+                    println!("  usage: /workflow new <name>   create a workflow scaffold");
+                }
+            }
+            "/index"       => self.cmd_index(arg),
+            "/branch"      => self.cmd_branch(arg).await,
+            "/branches"    => self.cmd_branches(),
+            "/switch"      => self.cmd_switch(arg).await,
+            "/merge"       => self.cmd_merge(arg).await,
+            "/undo"        => {
+                let path = if arg.is_empty() { "list" } else { arg };
+                if path == "list" {
+                    let snaps = crate::snapshot::list_snapshots();
+                    if snaps.is_empty() {
+                        println!("  No undo history this session.");
+                    } else {
+                        println!("  Undo available:");
+                        for s in snaps { println!("    {}", s.cyan()); }
+                    }
+                } else {
+                    match crate::snapshot::restore_snapshot(path) {
+                        Ok(content) => println!("  {} Reverted '{}' ({} bytes)", "✓".green(), path.cyan(), content.len()),
+                        Err(e)      => println!("  {} {}", "✗".red(), e),
+                    }
+                }
+            }
+            "/init" => {
+                if let Some(prompt) = self.cmd_init() {
+                    if let Err(e) = self.handle_user_turn(&prompt).await {
+                        println!("  {} agent error: {}", "✗".red(), e);
+                    }
+                }
+            }
+            "/permissions" => self.cmd_permissions(arg),
+            "/model"       => {
+                if arg.is_empty() { println!("  Usage: /model <model-id>"); }
+                else              { self.cmd_model(arg, config); }
+            }
+            "/exit" | "/quit" => return true,
+            other => println!("  {} Unknown command {}. Try {}.",
+                "✗".red(), other.yellow(), "/help".cyan()),
+        }
+        false
+    }
+}
+
+// ── /init helpers (project-local, no Session dependency) ─────────────────────
+
+fn detect_project_type() -> &'static str {
+    if std::path::Path::new("Cargo.toml").exists()   { return "rust"; }
+    if std::path::Path::new("go.mod").exists()        { return "go"; }
+    if std::path::Path::new("package.json").exists()  { return "node"; }
+    if std::path::Path::new("pyproject.toml").exists()
+        || std::path::Path::new("setup.py").exists()  { return "python"; }
+    if std::path::Path::new("pom.xml").exists()       { return "java/maven"; }
+    if std::path::Path::new("build.gradle").exists()  { return "java/gradle"; }
+    "generic"
+}
+
+fn generate_claude_md_template(project_type: &str) -> String {
+    let (build_cmd, test_cmd, lint_cmd) = match project_type {
+        "rust"        => ("cargo build",     "cargo test",  "cargo clippy"),
+        "go"          => ("go build ./...",  "go test ./...", "golint ./..."),
+        "node"        => ("npm run build",   "npm test",    "npm run lint"),
+        "python"      => ("pip install -e .", "pytest",     "ruff check ."),
+        "java/maven"  => ("mvn compile",     "mvn test",   "mvn checkstyle:check"),
+        "java/gradle" => ("./gradlew build", "./gradlew test", "./gradlew lint"),
+        _             => ("make",            "make test",  "make lint"),
+    };
+    format!(
+        r#"# Project Instructions
+
+## Overview
+<!-- Describe what this project does in 1-3 sentences. -->
+
+## Build & Test
+```
+{build}
+{test}
+{lint}
+```
+
+## Code Style
+<!-- List any conventions zap must follow: naming, formatting, imports, etc. -->
+
+## Architecture
+<!-- Briefly describe the module layout and main data-flow so zap has context. -->
+
+## Important Files
+<!-- List key files or directories zap should know about. -->
+
+## Do Not Touch
+<!-- List files, directories, or patterns that must not be modified without explicit approval. -->
+
+## Notes
+<!-- Anything else that would help zap work correctly in this repo. -->
+"#,
+        build = build_cmd, test = test_cmd, lint = lint_cmd,
+    )
+}

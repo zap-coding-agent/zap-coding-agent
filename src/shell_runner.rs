@@ -3,7 +3,9 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-const COMMAND_TIMEOUT_SECS: u64 = 30;
+/// Default timeout for foreground commands. Long-running tasks should use
+/// background processes (`nohup cmd > /dev/null 2>&1 &`) and return immediately.
+const COMMAND_TIMEOUT_SECS: u64 = 60;
 
 pub struct ShellOutput {
     pub stdout: String,
@@ -39,14 +41,23 @@ pub async fn run_args_in(program: &str, args: &[&str], dir: &str) -> Result<Shel
 }
 
 async fn run_with_timeout(cmd: &mut Command) -> Result<ShellOutput> {
-    let output = timeout(Duration::from_secs(COMMAND_TIMEOUT_SECS), cmd.output())
-        .await
-        .context("command timed out after 30s")?
-        .context("failed to spawn command")?;
+    // kill_on_drop(true): if this future is cancelled (e.g. Ctrl+C in the REPL),
+    // tokio sends SIGKILL to the child so it doesn't linger.
+    let child = cmd
+        .kill_on_drop(true)
+        .output(); // returns a future; child is owned inside it
 
-    Ok(ShellOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        exit_code: output.status.code().unwrap_or(-1),
-    })
+    match timeout(Duration::from_secs(COMMAND_TIMEOUT_SECS), child).await {
+        Ok(Ok(output)) => Ok(ShellOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+        }),
+        Ok(Err(e)) => Err(e).context("command execution failed"),
+        Err(_) => Err(anyhow::anyhow!(
+            "command timed out after {}s\n\
+             Tip: for long-running processes use: nohup <cmd> > /tmp/out.log 2>&1 &",
+            COMMAND_TIMEOUT_SECS
+        )),
+    }
 }

@@ -20,10 +20,25 @@ impl Store {
                 model      TEXT    NOT NULL,
                 created_at TEXT    NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS session_messages (
+                session_id INTEGER PRIMARY KEY,
+                content    TEXT    NOT NULL,
+                updated_at TEXT    NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS memory (
                 key        TEXT PRIMARY KEY,
                 value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS branches (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id   INTEGER NOT NULL,
+                name         TEXT    NOT NULL,
+                parent_name  TEXT    NOT NULL DEFAULT 'main',
+                messages_json TEXT   NOT NULL,
+                turn_count   INTEGER NOT NULL DEFAULT 0,
+                created_at   TEXT    NOT NULL,
+                UNIQUE(session_id, name)
             );",
         )
         .context("failed to initialise schema")?;
@@ -43,6 +58,14 @@ impl Store {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn update_session_goal(&self, session_id: i64, goal: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET goal = ?1 WHERE id = ?2",
+            params![goal, session_id],
+        ).context("failed to update session goal")?;
+        Ok(())
+    }
+
     pub fn recent_sessions(&self, limit: usize) -> Result<Vec<(i64, String, String, String)>> {
         let mut stmt = self
             .conn
@@ -60,6 +83,31 @@ impl Store {
 
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("failed to collect sessions")
+    }
+
+    // ── Message history (per session) ─────────────────────────────────────────
+
+    pub fn save_messages(&self, session_id: i64, messages_json: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO session_messages (session_id, content, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET content = ?2, updated_at = ?3",
+            params![session_id, messages_json, Utc::now().to_rfc3339()],
+        ).context("failed to save messages")?;
+        Ok(())
+    }
+
+    pub fn load_messages(&self, session_id: i64) -> Result<Option<String>> {
+        let mut stmt = self.conn
+            .prepare("SELECT content FROM session_messages WHERE session_id = ?1")
+            .context("failed to prepare load_messages")?;
+
+        let mut rows = stmt.query(params![session_id]).context("failed to query messages")?;
+        if let Some(row) = rows.next().context("failed to read row")? {
+            Ok(Some(row.get(0).context("failed to get content")?))
+        } else {
+            Ok(None)
+        }
     }
 
     // ── Agent memory (key-value facts) ────────────────────────────────────────
@@ -111,6 +159,53 @@ impl Store {
 
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("failed to collect memory")
+    }
+
+    // ── Branches ──────────────────────────────────────────────────────────────
+
+    pub fn save_branch(
+        &self,
+        session_id: i64,
+        name: &str,
+        parent_name: &str,
+        messages_json: &str,
+        turn_count: usize,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO branches (session_id, name, parent_name, messages_json, turn_count, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(session_id, name) DO UPDATE
+               SET messages_json = ?4, turn_count = ?5, created_at = ?6",
+            params![session_id, name, parent_name, messages_json, turn_count as i64, Utc::now().to_rfc3339()],
+        ).context("failed to save branch")?;
+        Ok(())
+    }
+
+    pub fn load_branch(&self, session_id: i64, name: &str) -> Result<Option<(String, usize)>> {
+        let mut stmt = self.conn
+            .prepare("SELECT messages_json, turn_count FROM branches WHERE session_id=?1 AND name=?2")
+            .context("failed to prepare load_branch")?;
+        let mut rows = stmt.query(params![session_id, name]).context("failed to query branch")?;
+        if let Some(row) = rows.next().context("failed to read branch row")? {
+            let json: String = row.get(0).context("failed to get messages_json")?;
+            let turns: i64 = row.get(1).unwrap_or(0);
+            Ok(Some((json, turns as usize)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns (name, parent_name, turn_count, created_at) for all branches in session.
+    pub fn list_branches(&self, session_id: i64) -> Result<Vec<(String, String, usize, String)>> {
+        let mut stmt = self.conn
+            .prepare("SELECT name, parent_name, turn_count, created_at FROM branches WHERE session_id=?1 ORDER BY created_at")
+            .context("failed to prepare list_branches")?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as usize, row.get(3)?))
+            })
+            .context("failed to query branches")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().context("failed to collect branches")
     }
 }
 

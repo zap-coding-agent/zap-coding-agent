@@ -2,6 +2,12 @@ use anyhow::Result;
 use crate::config::Config;
 
 pub fn build_system_prompt(config: &Config) -> Result<String> {
+    build_system_prompt_with_skills(config, "")
+}
+
+/// Build the system prompt, optionally injecting pre-matched skill content.
+pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Result<String> {
+
     let mut sections: Vec<String> = Vec::new();
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -26,6 +32,27 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
          - CWD      : {}",
         platform, shell, cwd
     ));
+
+    // ── Code navigation strategy ──────────────────────────────────────────────
+    sections.push(
+        "## Code Navigation Strategy (use in this order)\n\
+         \n\
+         The agent has a persistent AST-based code index (tree-sitter + SQLite) that \
+         is much faster and more accurate than grep. Always prefer it:\n\
+         \n\
+         1. **`code_map`** — get the structural outline of a file or directory \
+            (functions, structs, classes, line numbers). Use this first to orient yourself.\n\
+         2. **`find_definition`** — jump directly to where a symbol is defined. \
+            Backed by the AST index; returns exact file + line number.\n\
+         3. **`search_code`** — pattern search across the codebase (ripgrep). \
+            Use when the symbol name is unknown or for non-definition searches.\n\
+         4. **`read_file` with `offset`/`limit`** — read only the lines you need \
+            after you know the file and line number from the above tools.\n\
+         \n\
+         Never read an entire large file when `code_map` or `find_definition` \
+         can give you the location first."
+            .to_string(),
+    );
 
     // ── Tool usage policy ─────────────────────────────────────────────────────
     sections.push(
@@ -52,9 +79,14 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
            understands what the command will do before approving it.\n\
          - Never run commands that modify the system outside the working directory \
            without explicit user instruction.\n\
+         - **Background processes:** When starting a long-running server, watcher, \
+           or any process that doesn't exit on its own, ALWAYS use:\n\
+           `nohup <cmd> > /tmp/<name>.log 2>&1 &`\n\
+           Never use `cmd 2>&1 &` — that keeps the stdout pipe open and blocks zap \
+           until the 60s timeout. Use nohup + redirect to a log file instead.\n\
          \n\
          **Search:**\n\
-         - Use `search_code` to find where a symbol is defined before editing it.\n\
+         - Use `find_definition` or `code_map` (AST index) before `search_code`.\n\
          - Use `list_directory` to understand project layout before diving into files."
             .to_string(),
     );
@@ -115,6 +147,11 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
         }
     }
 
+    // ── Active skills (lazy-injected, only when triggered) ────────────────────
+    if !skill_block.is_empty() {
+        sections.push(skill_block.to_string());
+    }
+
     Ok(sections.join("\n\n"))
 }
 
@@ -171,10 +208,27 @@ fn load_claude_md() -> Option<String> {
 }
 
 fn git_status_summary() -> Option<String> {
-    let out = std::process::Command::new("git")
+    let mut child = std::process::Command::new("git")
         .args(["status", "--short"])
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
+
+    // Kill and skip if git takes more than 2 seconds (large repo).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                return None;
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+
+    let out = child.wait_with_output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() { None } else { Some(text) }
 }
