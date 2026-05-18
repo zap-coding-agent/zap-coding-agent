@@ -128,6 +128,90 @@ impl Tool for GitStatusTool {
     }
 }
 
+// ── git_pull ──────────────────────────────────────────────────────────────────
+
+pub(super) struct GitPullTool;
+
+#[async_trait]
+impl Tool for GitPullTool {
+    fn name(&self) -> &str { "git_pull" }
+    fn description(&self) -> &str {
+        "Run `git pull` to fetch and merge the latest changes from the remote. \
+         Use when the user asks to pull, sync, update, or get latest changes."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Repo directory (default: current dir)." },
+                "rebase": { "type": "boolean", "description": "Use --rebase instead of merge." }
+            }
+        })
+    }
+    fn permission_context(&self, input: &serde_json::Value) -> String {
+        let dir = input["path"].as_str().unwrap_or(".");
+        let flag = if input["rebase"].as_bool().unwrap_or(false) { " --rebase" } else { "" };
+        format!("git pull{} in '{}'", flag, dir)
+    }
+    async fn execute(&self, input: serde_json::Value) -> Result<String> {
+        let dir = input["path"].as_str().unwrap_or(".");
+        let rebase = input["rebase"].as_bool().unwrap_or(false);
+        let args: &[&str] = if rebase { &["pull", "--rebase"] } else { &["pull"] };
+        let out = crate::shell_runner::run_args_in("git", args, dir).await?;
+        let combined = format!("{}{}", out.stdout, out.stderr).trim().to_string();
+        if out.exit_code != 0 {
+            Ok(format!("{}\n[exit code: {}]", combined, out.exit_code))
+        } else {
+            Ok(if combined.is_empty() { "Already up to date.".to_string() } else { combined })
+        }
+    }
+}
+
+// ── git_diff ──────────────────────────────────────────────────────────────────
+
+pub(super) struct GitDiffTool;
+
+#[async_trait]
+impl Tool for GitDiffTool {
+    fn name(&self) -> &str { "git_diff" }
+    fn description(&self) -> &str {
+        "Show a git diff. Supports unstaged changes, staged changes, or diff between refs/branches."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path":   { "type": "string", "description": "Repo directory (default: current dir)." },
+                "staged": { "type": "boolean", "description": "Show staged (--cached) diff." },
+                "ref":    { "type": "string",  "description": "Ref, branch, or range e.g. 'main' or 'HEAD~3..HEAD'." }
+            }
+        })
+    }
+    fn permission_context(&self, input: &serde_json::Value) -> String {
+        let r = input["ref"].as_str().unwrap_or("");
+        let staged = input["staged"].as_bool().unwrap_or(false);
+        if staged { "git diff --cached".to_string() }
+        else if !r.is_empty() { format!("git diff {}", r) }
+        else { "git diff".to_string() }
+    }
+    async fn execute(&self, input: serde_json::Value) -> Result<String> {
+        let dir = input["path"].as_str().unwrap_or(".");
+        let staged = input["staged"].as_bool().unwrap_or(false);
+        let refspec = input["ref"].as_str().unwrap_or("");
+
+        let mut args = vec!["diff"];
+        if staged { args.push("--cached"); }
+        if !refspec.is_empty() { args.push(refspec); }
+
+        let out = crate::shell_runner::run_args_in("git", &args, dir).await?;
+        if out.stdout.trim().is_empty() && out.stderr.trim().is_empty() {
+            Ok("No differences.".to_string())
+        } else {
+            Ok(format!("{}{}", out.stdout, out.stderr))
+        }
+    }
+}
+
 // ── list_directory ────────────────────────────────────────────────────────────
 
 pub(super) struct ListDirectoryTool;

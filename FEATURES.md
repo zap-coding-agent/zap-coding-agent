@@ -120,6 +120,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `undo_edit` | restore from pre-edit snapshot |
 | `shell` | with permission check; description required |
 | `git_status` | status + recent log |
+| `git_pull` | fetch + merge; `rebase` flag; triggered by "pull / sync / get latest" |
+| `git_diff` | unstaged, staged (--cached), or between refs |
 | `search_code` | ripgrep (grep fallback), file-type filter |
 | `list_directory` | ls -la |
 | `glob_read` | list/preview files matching a pattern |

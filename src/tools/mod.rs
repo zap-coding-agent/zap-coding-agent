@@ -41,7 +41,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, UndoEditTool, WriteFileTool};
         use search::{CodeMapTool, FindDefinitionTool, FindReferencesTool, SearchCodeTool};
-        use shell::{GitStatusTool, ListDirectoryTool, ShellTool};
+        use shell::{GitDiffTool, GitPullTool, GitStatusTool, ListDirectoryTool, ShellTool};
         use web::{WebFetchTool, WebSearchTool};
 
         let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new() };
@@ -52,6 +52,8 @@ impl ToolRegistry {
         r.register(Arc::new(UndoEditTool));
         r.register(Arc::new(ShellTool));
         r.register(Arc::new(GitStatusTool));
+        r.register(Arc::new(GitPullTool));
+        r.register(Arc::new(GitDiffTool));
         r.register(Arc::new(SearchCodeTool));
         r.register(Arc::new(FindDefinitionTool));
         r.register(Arc::new(FindReferencesTool));
