@@ -1,0 +1,21 @@
+#!/bin/sh
+# Blocks a commit if src/*.rs files changed but FEATURES.md was not updated.
+# Install: scripts/install-hooks.sh
+
+src_staged=$(git diff --cached --name-only | grep '^src/.*\.rs$')
+features_staged=$(git diff --cached --name-only | grep '^FEATURES\.md$')
+
+if [ -n "$src_staged" ] && [ -z "$features_staged" ]; then
+    echo ""
+    echo "  ✗ FEATURES.md not staged — src/ files changed:"
+    echo "$src_staged" | sed 's/^/      /'
+    echo ""
+    echo "  Update FEATURES.md (Implemented or Planned), then:"
+    echo "    git add FEATURES.md"
+    echo ""
+    echo "  To skip this check: git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+exit 0

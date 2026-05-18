@@ -1,0 +1,209 @@
+# zap — Feature Registry
+
+Living reference of what's implemented, where it lives, and what's planned.
+Update this file whenever a feature ships or a plan changes — no code scanning needed.
+
+---
+
+## Implemented ✅
+
+### Task planner (src/task_planner.rs)
+| Feature | File | Notes |
+|---|---|---|
+| Mode picker | `src/task_planner.rs:pick_session_mode` | inquire Select at REPL startup: Vibe / Task |
+| Goal prompt | `src/task_planner.rs:run_task_planning` | freeform "what do you want to build?" |
+| Clarifying questions | `src/task_planner.rs:fetch_clarifying_questions` | LLM call → JSON array of 2-3 Qs |
+| Structured plan | `src/task_planner.rs:fetch_task_plan` | LLM call → JSON: tasks + suggested_skill + verify |
+| Skill matching | `src/task_planner.rs:parse_task_plan` | LLM suggests skill from available list |
+| Missing skill resolution | `src/task_planner.rs:resolve_missing_skills` | prompts user → creates stub skill if needed |
+| Stub skill creation | `src/task_planner.rs:create_skill_stub` | calls `skill_manager::create_skill` + appends context |
+| tasks.md writer | `src/task_planner.rs:write_tasks_md` | `.zap/tasks/<slug>/tasks.md` with skill annotations |
+| Plan summary | `src/task_planner.rs:print_plan_summary` | numbered task list with skill tags in terminal |
+| Session pre-load | `src/agent_core.rs:run_repl` | plan goal sent as first user turn after task mode |
+
+### Core agent loop
+| Feature | File | Notes |
+|---|---|---|
+| REPL (interactive) | `src/agent_core.rs:run_repl` | rustyline, tab completion, slash picker |
+| Single-shot mode | `src/agent_core.rs:run` | `--goal "..."` flag |
+| Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables |
+| Parallel tool execution | `src/session.rs:handle_user_turn` | `join_all` after permission phase |
+| Ctrl+C cancellation | `src/session.rs` | `tokio::select!` around turn loop |
+| Turn counter in prompt | `src/agent_core.rs` | `[N:branch] ❯` |
+| Session branching | `src/session.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |
+| Auto-compact | `src/session.rs:handle_user_turn` | fires at 80k estimated tokens |
+| `/compact` | `src/session.rs:cmd_compact` | summarises history in-place |
+
+### Skill system
+| Feature | File | Notes |
+|---|---|---|
+| Skill loader | `src/skill_manager.rs:load_all_skills` | bundled → global → project, same-name override |
+| Always-on skills | `src/skill_manager.rs:always_on_skills` | no `trigger:` field = always injected |
+| Triggered skills | `src/skill_manager.rs:match_skills` | keyword match per turn |
+| Stack auto-detection | `src/skill_manager.rs:detect_stack_skills` | Cargo.toml/go.mod/package.json/pyproject |
+| Skill prompt builder | `src/skill_manager.rs:build_skill_prompt` | for triggered skills per turn |
+| Always-on prompt builder | `src/skill_manager.rs:build_always_on_prompt` | baked into base system at session start |
+| `source_label()` | `src/skill_manager.rs:source_label` | built-in / global / project display |
+| `/skill list` | `src/session.rs:cmd_skill` | grouped: always-on / triggered; source glyph |
+| `/skill show` | `src/session.rs:cmd_skill` | description, license, content preview |
+| `/skill create` | `src/session.rs:cmd_skill` | scaffolds frontmatter template |
+| `/skill capture` | `src/session.rs:cmd_skill` | LLM extracts session rules → skill file |
+| Frontmatter: name, description, license, trigger, tokens | `src/skill_manager.rs:parse_frontmatter` | SKILL.md standard + zap extensions |
+
+### Built-in skills (src/default_skills/)
+| Skill | Type | Triggers |
+|---|---|---|
+| `karpathy-guidelines` | always-on | every turn — Karpathy's 4 coding principles (MIT) |
+| `rust` | triggered | rust, cargo, crate, fn, struct, clippy… |
+| `python` | triggered | python, pip, pytest, dataclass… |
+| `typescript` | triggered | typescript, tsx, interface, npm… |
+| `react` | triggered | react, component, jsx, hook, useState… |
+| `go` | triggered | go, goroutine, chan, go.mod… |
+| `git` | triggered | commit, branch, merge, pull request… |
+| `code-review` | triggered | review, pr review, lgtm, critique… |
+| `debugging` | triggered | debug, error, crash, panic, stacktrace… |
+| `security` | triggered | auth, password, token, jwt, xss, injection… |
+
+### Providers & LLM client
+| Feature | File | Notes |
+|---|---|---|
+| Anthropic (native) | `src/llm_client.rs` | SSE streaming, tool use, prompt caching |
+| OpenAI-compatible | `src/llm_client.rs` | LM Studio, Ollama, Gemini, DeepSeek, Groq, Mistral, xAI, Together, Perplexity, Cohere |
+| Provider switching | `src/session.rs:cmd_provider` | interactive picker, saved to `~/.agent.toml` |
+| Model switching | `src/session.rs:cmd_model` | `/model <id>` mid-session |
+| `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models |
+| Config from file | `src/config.rs` | `~/.agent.toml` |
+| Config from env | `src/config.rs` | `AGENT_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
+
+### Tools (src/tools/ or tool_registry.rs)
+| Tool | Notes |
+|---|---|
+| `read_file` | offset/limit, line-numbered output |
+| `edit_file` | find-and-replace, rejects ambiguous matches |
+| `batch_edit` | multiple edits to one file, single diff |
+| `write_file` | create or overwrite |
+| `undo_edit` | restore from pre-edit snapshot |
+| `shell` | with permission check; description required |
+| `git_status` | status + recent log |
+| `search_code` | ripgrep (grep fallback), file-type filter |
+| `list_directory` | ls -la |
+| `glob_read` | list/preview files matching a pattern |
+| `code_map` | AST structural outline (tree-sitter) |
+| `find_definition` | AST index → ripgrep fallback |
+| `find_references` | all call sites in codebase |
+| `web_fetch` | fetch URL, strip HTML |
+| `web_search` | DuckDuckGo, no API key |
+| `spawn_agent` | parallel sub-agent with own tool loop |
+
+### Code index
+| Feature | File | Notes |
+|---|---|---|
+| Tree-sitter AST index | `src/code_index.rs` | Rust, Python, TS, JS, Go, Java |
+| SQLite persistence | `src/code_index.rs` | `.zap/code.db`, incremental re-parse |
+| Global index singleton | `src/code_index.rs:set_global` | shared across tool calls |
+| Auto-reindex on write/edit | `src/session.rs:handle_user_turn` | fires after `write_file`/`edit_file`/`batch_edit` |
+| `/index [path|stats]` | `src/session.rs:cmd_index` | manual reindex or stats |
+
+### Security & permissions
+| Feature | File | Notes |
+|---|---|---|
+| Permission modes (ask/auto/deny) | `src/permission_manager.rs` | per-tool, per-session |
+| Secret scanner | `src/secret_scanner.rs` | fires before cloud send on tool results |
+| Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
+| Audit log | `src/audit.rs` | every event → `agent_audit.jsonl` (JSONL) |
+| `/audit [N]` | `src/session.rs:cmd_audit` | last N entries |
+
+### Session & persistence
+| Feature | File | Notes |
+|---|---|---|
+| SQLite session store | `src/persistence.rs` | `agent_sessions.db` |
+| Message persistence | `src/persistence.rs:save_messages` | serialised after every turn |
+| Session resume | `src/session.rs:cmd_sessions` | fuzzy picker via inquire |
+| Key-value memory | `src/persistence.rs` | `/memory list/get/set/del` |
+| Branch storage | `src/persistence.rs:save_branch` | per session, in SQLite |
+
+### Context
+| Feature | File | Notes |
+|---|---|---|
+| System prompt builder | `src/context_manager.rs` | identity, env, code nav, tool policy, security rules |
+| CLAUDE.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
+| Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
+| Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
+
+### Workflows
+| Feature | File | Notes |
+|---|---|---|
+| Workflow parser | `src/workflow.rs:load_workflow` | YAML, `.zap/workflows/*.yaml` |
+| Workflow execution | `src/session.rs:cmd_run_workflow` | sequential steps, approval gate |
+| Workflow discovery | `src/workflow.rs:discover_workflows` | listed by `/run` with no args |
+| Workflow scaffold | `src/workflow.rs:scaffold_workflow` | `/workflow new <name>` |
+
+### UI & UX
+| Feature | File | Notes |
+|---|---|---|
+| Thinking spinner | `src/ui.rs:ThinkingSpinner` | indicatif progress bar while LLM streams |
+| Colored diff on edit | `src/ui.rs` | similar crate, red/green |
+| Token + cost display | `src/session.rs:handle_user_turn` | per-turn: skills t, msg t, ctx k, est. $ |
+| Tab completion | `src/ui.rs:ZapHelper` | slash commands |
+| Slash command picker | `src/ui.rs:show_command_picker` | `/` on empty line opens inquire picker |
+| Image attach | `src/session.rs:cmd_attach` | staged until next message |
+| Clipboard paste | `src/session.rs:cmd_paste` | pngpaste or AppleScript |
+| `/help` | `src/session.rs:cmd_help` | grouped command reference |
+| `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
+| `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
+| MCP | `src/mcp.rs` | stdio JSON-RPC 2.0 via `.mcp.json` |
+| `/init` | `src/session.rs:cmd_init` | creates CLAUDE.md + agent fills it in |
+
+---
+
+## Planned 🗓
+
+### Bet A — Skill ecosystem (priority order)
+
+| Feature | What it does | Effort |
+|---|---|---|
+| `/skill install github:user/repo/path` | fetch skill from GitHub raw URL → `~/.zap/skills/` | 1 day |
+| Skill `extends:` composition | inherit another skill's content, then add rules | 1 day |
+| Semantic skill routing | fastembed local embeddings instead of keyword match | 2 days |
+| Public skill directory | `zap.sh/skills` — browse, search, install community skills | 1 week |
+| Cross-agent compat test | verify skill files work in Claude Code and Cursor | 0.5 day |
+| Stack detection expansion | Ruby (Gemfile), Swift (Package.swift), Kotlin (build.gradle.kts), C++ (CMakeLists.txt) | 1 day |
+
+### Quality & foundations
+
+| Feature | What it does | Effort |
+|---|---|---|
+| Integration test suite | skill loader, permission flow, session round-trip | 2 days |
+| Break up session.rs | split slash handlers into separate modules | 1 day |
+| Multi-model routing | cheap model for tool calls, capable model for generation | 2 days |
+| Token budget flag | `--budget N` warns at 80%, stops at 100% | 0.5 day |
+| Prompt caching breakpoints | `cache_control: ephemeral` on Anthropic for ~90% cost reduction on repeated turns | 0.5 day |
+| Per-session permission memory | re-prompt only once per tool class per session | 0.5 day |
+
+---
+
+## Cut / deferred ✗
+
+| Feature | Why cut |
+|---|---|
+| Syntax highlighting (syntect) | 4MB+ dep, polish not substance |
+| Session replay / export | nice-to-have, not a reason to choose zap |
+| `find_definition` as standalone module | `code_map` + ripgrep covers 80% for free |
+| "200 token baseline" marketing claim | real baseline with karpathy-guidelines is ~1.8k; update messaging to be accurate |
+
+---
+
+## Baseline token budget (honest numbers)
+
+| Component | Tokens |
+|---|---|
+| Identity + environment section | ~120 |
+| Code nav strategy | ~280 |
+| Tool usage policy | ~380 |
+| Security rules | ~160 |
+| Response style | ~120 |
+| CLAUDE.md (if present) | varies |
+| Agent memory (if any entries) | varies |
+| `karpathy-guidelines` (always-on) | ~600 |
+| **Total baseline (no CLAUDE.md, no memory)** | **~1,660 tokens** |
+| Per triggered skill (avg) | +400–800 |

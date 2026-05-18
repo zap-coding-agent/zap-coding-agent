@@ -1,0 +1,128 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build matrix ─────────────────────────────────────────────────────────────
+  build:
+    name: build (${{ matrix.artifact }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest          # GitHub ARM runner (M-series)
+            target: aarch64-apple-darwin
+            artifact: zap-macos-arm64
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl   # static binary — runs anywhere on Linux
+            artifact: zap-linux-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y musl-tools
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        run: cp target/${{ matrix.target }}/release/zap ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          retention-days: 14
+
+  # ── Publish "latest" release ─────────────────────────────────────────────────
+  release:
+    name: publish latest
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4       # needed for commit metadata
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Get version from Cargo.toml
+        id: ver
+        run: |
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Delete existing latest tag (so we can recreate it)
+        run: |
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+
+      - name: Create / update "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "zap v${{ steps.ver.outputs.version }} (latest · ${{ steps.sha.outputs.short }})"
+          prerelease: true
+          body: |
+            **Latest build** — automatically published on every push to `main`.
+
+            | Platform | Binary |
+            |---|---|
+            | macOS Apple Silicon (ARM) | `zap-macos-arm64` |
+            | Linux x86_64 (static musl) | `zap-linux-x86_64` |
+
+            **Commit:** `${{ github.sha }}`
+            **Version:** v${{ steps.ver.outputs.version }}
+
+            ---
+            ### Install
+
+            **macOS (Apple Silicon)**
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/latest/zap-macos-arm64 -o zap
+            chmod +x zap && mv zap ~/.local/bin/zap
+            codesign --sign - ~/.local/bin/zap   # required on macOS Tahoe (26.x)
+            ```
+
+            **Linux x86_64**
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/latest/zap-linux-x86_64 -o zap
+            chmod +x zap && mv zap ~/.local/bin/zap
+            ```
+          files: |
+            artifacts/zap-macos-arm64/zap-macos-arm64
+            artifacts/zap-linux-x86_64/zap-linux-x86_64

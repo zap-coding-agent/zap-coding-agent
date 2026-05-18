@@ -23,38 +23,82 @@
 
 ## What makes zap different
 
-### 1. Skill-First Approach — No Heavy System Prompts
+### 1. Skill-First Approach — Context That Earns Its Place
 
-Most AI coding agents front-load a massive system prompt: language conventions, architecture notes, team rules, API patterns, deployment steps — all of it, every request, whether it's relevant or not. You pay for those tokens every turn, and the model's attention gets diluted by context it doesn't need right now.
+Most AI coding agents front-load a massive system prompt every request — language conventions, architecture notes, team rules, API patterns, all of it, whether it's relevant or not. zap replaces that wall with a **skill system**: markdown files that are injected surgically, only when your message triggers them.
 
-**zap has replaced most of its own system prompt with skills.** Instead of a wall of static instructions, zap ships built-in skills — `rust`, `python`, `typescript`, `react`, `go`, `git`, `code-review`, etc. — compiled directly into the binary. On startup, zap detects your project stack (from `Cargo.toml`, `go.mod`, `package.json`, etc.) and automatically activates the matching skill. No configuration needed.
+**Two kinds of skills:**
 
-Then, on every message, zap checks your input against each skill's trigger keywords. Only the skills that match get injected into that request. Everything else stays out of the prompt.
-
-**Example** — a project with three skills loaded: `rust`, `git`, and a custom `api-conventions`:
-
-| You type | Skills injected | Est. prompt tokens |
+| Kind | When injected | Example |
 |---|---|---|
-| `"refactor this async fn to use channels"` | `rust` | ~820 tokens |
-| `"commit these changes"` | `git` | ~340 tokens |
-| `"add a new REST endpoint"` | `api-conventions` | ~600 tokens |
-| `"explain what this function does"` | *(none)* | ~120 tokens |
+| **Always-on** | Every turn, baked into the base system prompt | `karpathy-guidelines` — Andrej Karpathy's 4 coding principles |
+| **Triggered** | Only when your message matches keywords | `rust` fires on "cargo", "fn ", "trait "; `git` fires on "commit", "push" |
 
-Without this approach, all three skill documents would pad every prompt — including when you're just asking the model to explain a function.
+**Built-in skills** (compiled into the binary, zero config):
 
-**User-created skills are fully supported and override built-in ones.** Write a skill once and zap injects it automatically whenever it's relevant:
+| Skill | Type | Triggers on |
+|---|---|---|
+| `karpathy-guidelines` | always-on | every turn |
+| `rust` | triggered | rust, cargo, crate, async fn, clippy… |
+| `python` | triggered | python, pip, pytest, dataclass… |
+| `typescript` | triggered | typescript, tsx, interface, npm… |
+| `react` | triggered | react, component, jsx, hook, useState… |
+| `go` | triggered | go, goroutine, chan, go.mod… |
+| `git` | triggered | commit, branch, merge, pull request… |
+| `code-review` | triggered | review, pr review, lgtm, critique… |
+| `debugging` | triggered | debug, error, crash, panic, stacktrace… |
+| `security` | triggered | auth, password, token, jwt, xss, sql injection… |
+
+Stack auto-detection fires the right language skill on startup — Rust project with `Cargo.toml` gets the `rust` skill loaded automatically.
+
+**Example** — a Rust project, custom `api-conventions` skill also loaded:
+
+| You type | Skills injected | Base + skills |
+|---|---|---|
+| `"refactor this async fn to use channels"` | karpathy + rust | ~2.4k tokens |
+| `"commit these changes"` | karpathy + git | ~2.0k tokens |
+| `"add a new REST endpoint"` | karpathy + api-conventions | ~2.2k tokens |
+| `"explain what this function does"` | karpathy only | ~1.8k tokens |
+
+> **Honest baseline:** the always-on karpathy-guidelines skill and the base system prompt together run ~1.8k tokens — much leaner than Claude Code (~10k) or Gemini CLI (~8k), but not the "200 token" figure you might see in older docs.
+
+**Custom skills override built-in ones** of the same name. Write a skill once and zap injects it exactly when needed:
 
 ```markdown
 ---
 name: api-conventions
+description: REST endpoint conventions for this project.
 trigger: ["endpoint", "route", "handler", "REST"]
-tokens: 600
+tokens: ~400
 ---
 All endpoints must validate input with ValidateRequest(), return structured
 errors as {"error": "...", "code": N}, and use snake_case JSON keys.
 ```
 
-Place custom skills in `~/.zap/skills/` (global) or `.zap/skills/` (project-local). Project skills take the highest priority, overriding global and built-in skills of the same name. Use `/skill list` to see what's active and `/skill show <name>` to inspect any skill.
+**Always-on skill** (no `trigger:` field — injected every turn):
+
+```markdown
+---
+name: our-principles
+description: Team engineering principles.
+---
+We ship small, reversible changes. Every PR needs a test. No console.log in prod.
+```
+
+**Where to put them:**
+
+| Path | Scope | Priority |
+|---|---|---|
+| `.zap/skills/` | project — check into git, team-shared | highest |
+| `~/.zap/skills/` | personal — all projects | middle |
+| binary | built-in defaults | lowest |
+
+```
+/skill list              # see all skills with source and always-on/triggered label
+/skill show <name>       # preview content + description + license
+/skill create <name>     # scaffold a new skill in .zap/skills/
+/skill capture <name>    # extract instructions from this session into a reusable skill
+```
 
 ---
 
@@ -136,15 +180,18 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, git, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
 | **Languages** | AST index: Rust, Python, TypeScript, JavaScript, Go, Java |
 | **Permission modes** | `ask` (prompt per op), `auto` (approve all), `deny` (read-only) |
+| **Skills** | 10 built-in; always-on + keyword-triggered; user skills in `~/.zap/skills/` or `.zap/skills/`; SKILL.md standard |
+| **Skill capture** | `/skill capture <name>` — extract session rules into a reusable skill file |
 | **Context mgmt** | Skill injection, `/compact` in-place summarisation, Anthropic prompt caching |
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
 | **Branching** | `/branch` forks a conversation like a git branch; `/switch` to move between them |
 | **Sub-agents** | `spawn_agent` runs parallel sub-agents, each with its own tool loop |
 | **MCP** | Standard Model Context Protocol support via `.mcp.json` (stdio JSON-RPC 2.0) |
-| **Workflows** | Declarative YAML multi-step pipelines in `.zap/workflows/` |
+| **Workflows** | Declarative YAML multi-step pipelines in `.zap/workflows/` — versioned with your repo |
 | **Images** | `/attach <path>` or `/paste` clipboard — multimodal on supported models |
 | **Audit log** | Every tool call written to `agent_audit.jsonl` |
-| **Secret scanner** | Blocks secrets from being sent to cloud LLMs |
+| **Secret scanner** | Blocks API keys, tokens, and passwords from being sent to cloud LLMs |
+| **Cost display** | Token breakdown per turn — skills, message, context, estimated $ cost |
 
 ---
 
@@ -320,21 +367,50 @@ Run `/init` to create a template the agent fills in automatically by reading you
 
 ## Skills
 
-Skills inject project-specific instructions into the system prompt only when triggered by keywords in your message. The system prompt stays lean — context is added surgically, not by default.
+Skills are markdown files (`.md`) with YAML frontmatter. They follow the [SKILL.md standard](https://github.com/multica-ai/andrej-karpathy-skills) — compatible with Claude Code, Cursor, and other agents.
+
+**Triggered skill** — injected only when keywords match:
 
 ```markdown
 ---
 name: conventional-commits
+description: Enforce Conventional Commits format on all git operations.
 trigger: ["commit", "git log", "stage", "push"]
-tokens: 800
+tokens: ~400
 ---
 Always use Conventional Commits format: <type>(<scope>): <description>
 Types: feat, fix, docs, style, refactor, perf, test, chore
 ```
 
-Place skill files in:
-- `~/.zap/skills/` — global, shared across all projects
-- `.zap/skills/` — project-local, highest priority
+**Always-on skill** — no `trigger:` field, injected every session:
+
+```markdown
+---
+name: team-principles
+description: Engineering principles applied to every task.
+---
+Ship small. Write tests first. No magic numbers. Document the why, not the what.
+```
+
+**Where to place skills:**
+
+```
+~/.zap/skills/          personal, applies to all projects
+.zap/skills/            project-local, check into git for team sharing
+```
+
+**Commands:**
+
+```
+/skill list                      list all skills (grouped: always-on / triggered)
+/skill show <name>               preview content, description, license
+/skill create <name>             scaffold a new skill in .zap/skills/
+/skill create <name> --global    scaffold in ~/.zap/skills/
+/skill capture <name>            extract rules from this session into a skill file
+/skill capture <name> --global   save captured skill globally
+```
+
+Same-name skills override lower-priority ones: `.zap/skills/` > `~/.zap/skills/` > built-in.
 
 ---
 
@@ -375,6 +451,23 @@ Every conversation is persisted locally. Use `/sessions` to browse and resume an
 ## Sub-agents
 
 When `agent_depth > 0` (default: 3), the model can call `spawn_agent` to delegate independent tasks. Multiple spawns within a single LLM turn run in parallel, each with its own message history and tool access.
+
+---
+
+## Roadmap — Skill Ecosystem
+
+zap's bet is on **skills as a platform**, not on being a better terminal agent. The goal: turn team knowledge into code, make it shareable, composable, and cross-compatible with other agents.
+
+| # | Feature | Status | What it enables |
+|---|---|---|---|
+| `/skill install github:user/repo/path` | Pull a skill from any GitHub path | planned | One-command community skill install |
+| Skill extends / composition | `extends: [rust, code-review]` in frontmatter | planned | Composable skill layers |
+| Semantic skill routing | Embedding similarity instead of keyword match | planned | Intent-based matching, no keyword guessing |
+| Public skill directory | `zap.sh/skills` — browse, search, install | planned | Discoverable ecosystem |
+| Stack auto-detection expansion | Detect more stacks: Ruby, Swift, Kotlin, C++ | planned | Zero-config for more users |
+| Cross-agent compatibility | Test skill files against Claude Code, Cursor | planned | Write once, use anywhere |
+
+The skill format is already compatible with Claude Code (`CLAUDE.md`-style) and the [multica-ai SKILL.md standard](https://github.com/multica-ai/andrej-karpathy-skills). Skills you write for zap work in other agents today.
 
 ---
 

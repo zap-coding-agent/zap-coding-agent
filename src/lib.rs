@@ -14,6 +14,7 @@ pub mod shell_runner;
 pub mod skill_manager;
 pub mod snapshot;
 pub mod stream_highlighter;
+pub mod task_planner;
 pub mod tools;
 pub mod ui;
 pub mod workflow;

@@ -48,7 +48,7 @@ impl Session {
         let store = persistence::init()?;
         let session_id = store.save_session("(repl)", &config.model)?;
 
-        let system = context_manager::build_system_prompt(config)?;
+        let mut system = context_manager::build_system_prompt(config)?;
         let mut tools = ToolRegistry::new();
         tools.register_mcp_servers().await;
         if config.agent_depth > 0 {
@@ -57,20 +57,35 @@ impl Session {
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
 
-        let skills = crate::skill_manager::load_all_skills();
+        let skills      = crate::skill_manager::load_all_skills();
+        let always_on   = crate::skill_manager::always_on_skills(&skills);
         let stack_skills = crate::skill_manager::detect_stack_skills(&skills);
-        if !skills.is_empty() || !stack_skills.is_empty() {
-            let auto_note = if stack_skills.is_empty() {
-                String::new()
-            } else {
+
+        // Bake always-on skills into the base system prompt once at startup.
+        if !always_on.is_empty() {
+            let block = crate::skill_manager::build_always_on_prompt(&always_on);
+            system.push_str("\n\n");
+            system.push_str(&block);
+        }
+
+        if !skills.is_empty() {
+            let mut notes: Vec<String> = Vec::new();
+            if !always_on.is_empty() {
+                let names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
+                notes.push(format!("always-on: {}", names.join(", ")));
+            }
+            if !stack_skills.is_empty() {
                 let names: Vec<_> = stack_skills.iter().map(|s| s.name.as_str()).collect();
-                format!("  auto: {}", names.join(", ").dimmed())
+                notes.push(format!("auto: {}", names.join(", ")));
+            }
+            let note = if notes.is_empty() { String::new() } else {
+                format!("  {}", notes.join("  ·  ").dimmed())
             };
             println!(
                 "  {} {} skill(s) loaded{}",
                 "◎".truecolor(255, 200, 60),
                 skills.len().to_string().cyan(),
-                auto_note,
+                note,
             );
         }
 
@@ -438,6 +453,7 @@ impl Session {
                 ("/permissions ask|auto|deny","change permission mode"),
             ]),
             ("code", &[
+                ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),
                 ("/index [path|stats]",      "reindex AST code symbols"),
                 ("/undo [file]",             "undo last file edit"),
                 ("/init",                    "create CLAUDE.md for this project"),
@@ -971,6 +987,121 @@ end try"#,
         }
     }
 
+    pub async fn cmd_tasks(&mut self) {
+        use inquire::{
+            ui::{Attributes, Color, RenderConfig, StyleSheet},
+            Select,
+        };
+
+        let cfg = RenderConfig::default()
+            .with_prompt_prefix(inquire::ui::Styled::new("  ◆").with_fg(Color::LightYellow))
+            .with_highlighted_option_prefix(inquire::ui::Styled::new(" ❯").with_fg(Color::LightYellow))
+            .with_selected_option(Some(StyleSheet::new().with_fg(Color::LightCyan).with_attr(Attributes::BOLD)))
+            .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
+
+        let task_files = crate::task_planner::discover_task_files();
+
+        if task_files.is_empty() {
+            println!("  {} No task sessions found.", "✗".red());
+            println!("  {} Start one by selecting {} mode at startup.", "·".dimmed(), "Task".cyan());
+            println!("  {} Task files live in {}", "·".dimmed(), ".zap/tasks/<session>/tasks.md".cyan());
+            return;
+        }
+
+        // ── Step 1: pick task folder ─────────────────────────────────────────
+        let folder_labels: Vec<String> = task_files.iter().map(|tf| {
+            let done  = tf.done_count();
+            let total = tf.tasks.len();
+            let bar   = if total == 0 { String::new() } else {
+                let filled = (done * 10) / total;
+                format!("[{}{}]", "█".repeat(filled), "░".repeat(10 - filled))
+            };
+            format!("{:<40} {}/{} done  {}  {}",
+                tf.folder,
+                done, total,
+                bar,
+                tf.path.display(),
+            )
+        }).collect();
+
+        let chosen_folder = match Select::new("Task session:", folder_labels.iter().map(|s| s.as_str()).collect())
+            .with_render_config(cfg.clone())
+            .with_help_message("↑↓ navigate   Enter select   Esc cancel")
+            .with_page_size(10)
+            .prompt_skippable()
+        {
+            Ok(Some(s)) => s.to_string(),
+            _ => return,
+        };
+
+        let tf_idx = match folder_labels.iter().position(|l| l == &chosen_folder) {
+            Some(i) => i,
+            None    => return,
+        };
+        let tf = &task_files[tf_idx];
+
+        // ── Step 2: show tasks in this session ───────────────────────────────
+        println!();
+        println!(
+            "  {} {}  {}/{}  {}",
+            "◆".truecolor(255,210,50),
+            tf.goal.truecolor(255,210,50).bold(),
+            tf.done_count(), tf.tasks.len(),
+            tf.path.display().to_string().truecolor(100,95,130),
+        );
+        println!("  {}", "─".repeat(56).truecolor(60,55,80));
+
+        let task_labels: Vec<String> = tf.tasks.iter().map(|t| {
+            let icon    = if t.is_done() { "✓".green().to_string() } else { "○".truecolor(150,145,170).to_string() };
+            let skill   = t.skill_name.as_deref()
+                .map(|s| format!("  [{}]", s))
+                .unwrap_or_default();
+            let done_steps = t.steps.iter().filter(|(c,_)| *c).count();
+            let total_steps = t.steps.len();
+            format!("{} {}. {}{}  {}/{}",
+                icon,
+                t.number,
+                t.title,
+                skill.truecolor(100,95,130).to_string(),
+                done_steps, total_steps,
+            )
+        }).collect();
+
+        // Add a "back" option
+        let mut options: Vec<&str> = task_labels.iter().map(|s| s.as_str()).collect();
+        options.push("← back");
+
+        let chosen_task = match Select::new("Select task to execute:", options)
+            .with_render_config(cfg)
+            .with_help_message("↑↓ navigate   Enter execute   Esc cancel")
+            .with_page_size(12)
+            .prompt_skippable()
+        {
+            Ok(Some(s)) if s != "← back" => s.to_string(),
+            _ => return,
+        };
+
+        let task_idx = match task_labels.iter().position(|l| l == &chosen_task) {
+            Some(i) => i,
+            None    => return,
+        };
+        let task = &tf.tasks[task_idx];
+
+        if task.is_done() {
+            println!("  {} Task {} is already done. Re-run anyway? [y/N] ", "·".dimmed(), task.number);
+            let mut ans = String::new();
+            std::io::stdin().read_line(&mut ans).ok();
+            if !ans.trim().eq_ignore_ascii_case("y") { return; }
+        }
+
+        // ── Step 3: execute the selected task ────────────────────────────────
+        println!();
+        println!("  {} Executing task {}…", "▶".cyan().bold(), task.number);
+        if let Err(e) = self.handle_user_turn(&task.execution_prompt()).await {
+            println!("  {} {}", "✗".red(), e);
+        }
+    }
+
     pub fn cmd_model(&mut self, name: &str, config: &Config) {
         self.model = name.to_string();
         let mut new_config = config.clone();
@@ -994,16 +1125,51 @@ end try"#,
                 }
                 println!();
                 println!("  {} {}", "Skills".bold(), format!("({} total)", skills.len()).dimmed());
-                println!("  {}", "──────────────────────────────────────────".dimmed());
-                for s in &skills {
-                    let src = match s.source {
-                        crate::skill_manager::SkillSource::Project => "[project]".green().to_string(),
-                        crate::skill_manager::SkillSource::Global  => "[global]".dimmed().to_string(),
-                        crate::skill_manager::SkillSource::Bundled => "[built-in]".truecolor(120, 120, 120).to_string(),
-                    };
-                    let triggers = if s.triggers.is_empty() { "(no triggers)".to_string() } else { s.triggers.join(", ") };
-                    println!("  {} {}  {}  triggers: {}", "·".dimmed(), s.name.cyan().bold(), src, triggers.dimmed());
+                println!("  {}", "──────────────────────────────────────────────────────────".dimmed());
+                // Group: always-on first, then triggered.
+                let (always_on, triggered): (Vec<_>, Vec<_>) =
+                    skills.iter().partition(|s| s.is_always_on());
+                for group_label in &["Always-on", "Triggered"] {
+                    let group = if *group_label == "Always-on" { &always_on } else { &triggered };
+                    if group.is_empty() { continue; }
+                    println!("  {} {}", "▸".truecolor(255, 210, 50), group_label.truecolor(150, 140, 170).bold());
+                    for s in group {
+                        let (glyph, src_color) = match s.source {
+                            crate::skill_manager::SkillSource::Project =>
+                                ("▶", s.name.truecolor(100, 230, 130).bold()),
+                            crate::skill_manager::SkillSource::Global  =>
+                                ("●", s.name.truecolor(100, 210, 255).bold()),
+                            crate::skill_manager::SkillSource::Bundled =>
+                                ("◆", s.name.truecolor(200, 195, 220).bold()),
+                        };
+                        let src_tag = format!(
+                            "[{}]", crate::skill_manager::source_label(&s.source)
+                        );
+                        let detail = if s.is_always_on() {
+                            "always-on".truecolor(255, 200, 60).to_string()
+                        } else {
+                            s.triggers.join(", ").truecolor(100, 95, 130).to_string()
+                        };
+                        let desc = if s.description.is_empty() { String::new() }
+                                   else { format!("  {}", s.description.truecolor(120, 115, 140)) };
+                        println!("    {} {}  {}  ~{}t  {}{}",
+                            glyph.truecolor(150, 145, 170),
+                            src_color,
+                            src_tag.truecolor(100, 95, 130),
+                            s.tokens(),
+                            detail,
+                            desc,
+                        );
+                    }
+                    println!();
                 }
+                println!("  {} {} | {} | {} | {}",
+                    "tip:".truecolor(100, 95, 130),
+                    "◆ built-in".truecolor(200, 195, 220),
+                    "● global (~/.zap/skills/)".truecolor(100, 210, 255),
+                    "▶ project (.zap/skills/)".truecolor(100, 230, 130),
+                    "/skill create <name>".cyan(),
+                );
                 println!();
             }
             "show" => {
@@ -1011,7 +1177,23 @@ end try"#,
                 match crate::skill_manager::load_all_skills().into_iter().find(|s| s.name == name) {
                     Some(s) => {
                         println!();
-                        println!("  {} — (~{}t)  triggers: {}", s.name.cyan().bold(), s.tokens(), s.triggers.join(", ").dimmed());
+                        let trigger_display = if s.is_always_on() {
+                            "always-on".to_string()
+                        } else {
+                            format!("triggers: {}", s.triggers.join(", "))
+                        };
+                        println!("  {}  [{}]  ~{}t  {}",
+                            s.name.cyan().bold(),
+                            crate::skill_manager::source_label(&s.source).truecolor(100, 95, 130),
+                            s.tokens(),
+                            trigger_display.dimmed(),
+                        );
+                        if !s.description.is_empty() {
+                            println!("  {}", s.description.truecolor(120, 115, 140));
+                        }
+                        if let Some(ref lic) = s.license {
+                            println!("  license: {}", lic.dimmed());
+                        }
                         println!("  {}", "──────────────────────────────────────────".dimmed());
                         for line in s.content.lines() { println!("  {}", line); }
                         println!();
@@ -1340,6 +1522,7 @@ end try"#,
                     println!("  usage: /workflow new <name>   create a workflow scaffold");
                 }
             }
+            "/tasks"       => self.cmd_tasks().await,
             "/index"       => self.cmd_index(arg),
             "/branch"      => self.cmd_branch(arg).await,
             "/branches"    => self.cmd_branches(),

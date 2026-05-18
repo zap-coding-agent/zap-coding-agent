@@ -54,6 +54,37 @@ pub async fn run_repl(config: &Config) -> Result<()> {
     println!("  {} Loading…", "◌".bright_yellow());
     let mut session = Session::new(config).await?;
 
+    // ── Mode picker ───────────────────────────────────────────────────────────
+    let mode = crate::task_planner::pick_session_mode();
+    if mode == crate::task_planner::SessionMode::Task {
+        match crate::task_planner::run_task_planning(
+            session.client.as_ref(),
+            &session.model,
+            &session.skills,
+        )
+        .await
+        {
+            Ok(Some(plan)) => {
+                // Pre-load the goal as first user message so the agent has context.
+                let intro = format!(
+                    "I'm starting a task session. Goal: {}\n\n\
+                     The tasks.md has been created at .zap/tasks/{}/tasks.md\n\
+                     Please read it and confirm you understand the plan before we start.",
+                    plan.goal, plan.folder_name
+                );
+                if let Err(e) = session.handle_user_turn(&intro).await {
+                    println!("  {} {}", "✗".red(), e);
+                }
+            }
+            Ok(None) => {
+                // User aborted planning — continue as Vibe.
+            }
+            Err(e) => {
+                println!("  {} Planning failed: {} — continuing in Vibe mode.", "⚠".yellow(), e);
+            }
+        }
+    }
+
     let tool_w = session.tool_count;
     let depth_note = if session.config.agent_depth > 0 {
         format!("  ·  sub-agents ×{}", session.config.agent_depth)

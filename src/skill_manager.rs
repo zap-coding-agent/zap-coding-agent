@@ -21,11 +21,13 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct Skill {
-    pub name: String,
-    pub triggers: Vec<String>,
+    pub name:           String,
+    pub description:    String,
+    pub license:        Option<String>,
+    pub triggers:       Vec<String>,
     pub token_estimate: usize,
-    pub content: String,
-    pub source: SkillSource,
+    pub content:        String,
+    pub source:         SkillSource,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +38,11 @@ pub enum SkillSource {
 }
 
 impl Skill {
+    /// Skills with no triggers are injected on every turn (meta-guidance).
+    pub fn is_always_on(&self) -> bool {
+        self.triggers.is_empty()
+    }
+
     /// Returns true if any trigger keyword appears in the query (case-insensitive).
     pub fn matches(&self, query: &str) -> bool {
         let lower = query.to_lowercase();
@@ -49,6 +56,15 @@ impl Skill {
         } else {
             self.content.len() / 4
         }
+    }
+}
+
+/// Short display label for a skill's source tier.
+pub fn source_label(source: &SkillSource) -> &'static str {
+    match source {
+        SkillSource::Bundled => "built-in",
+        SkillSource::Global  => "global",
+        SkillSource::Project => "project",
     }
 }
 
@@ -152,6 +168,23 @@ pub fn skills_summary(skills: &[&Skill]) -> String {
         .join(", ")
 }
 
+/// Skills with no triggers — injected once into the base system prompt at session start.
+pub fn always_on_skills(skills: &[Skill]) -> Vec<&Skill> {
+    skills.iter().filter(|s| s.is_always_on()).collect()
+}
+
+/// Build the always-on block that gets baked into the base system prompt.
+pub fn build_always_on_prompt(skills: &[&Skill]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let mut parts = vec!["## Always-Active Guidelines".to_string()];
+    for skill in skills {
+        parts.push(format!("### {}\n{}", skill.name, skill.content.trim()));
+    }
+    parts.join("\n\n")
+}
+
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
 fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill> {
@@ -162,52 +195,71 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
         .unwrap_or("unknown")
         .to_string();
 
-    // Split frontmatter from body.
     if let Some(content_after_fence) = raw.strip_prefix("---") {
         if let Some(end_idx) = content_after_fence.find("\n---") {
-            let frontmatter = &content_after_fence[..end_idx];
+            let fm   = parse_frontmatter(&content_after_fence[..end_idx]);
             let body = content_after_fence[end_idx + 4..].trim_start().to_string();
-            let (triggers, token_estimate) = parse_frontmatter(frontmatter);
-            return Ok(Skill { name, triggers, token_estimate, content: body, source });
+            return Ok(Skill {
+                name,
+                description:    fm.description,
+                license:        fm.license,
+                triggers:       fm.triggers,
+                token_estimate: fm.tokens,
+                content:        body,
+                source,
+            });
         }
     }
 
-    // No frontmatter — treat entire file as skill body, no triggers.
+    // No frontmatter — treat entire file as skill body, always-on (no triggers).
     Ok(Skill {
         name,
-        triggers: Vec::new(),
+        description:    String::new(),
+        license:        None,
+        triggers:       Vec::new(),
         token_estimate: 0,
-        content: raw,
+        content:        raw,
         source,
     })
 }
 
-fn parse_frontmatter(fm: &str) -> (Vec<String>, usize) {
-    let mut triggers = Vec::new();
-    let mut tokens = 0usize;
+struct ParsedFrontmatter {
+    description: String,
+    license:     Option<String>,
+    triggers:    Vec<String>,
+    tokens:      usize,
+}
+
+fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
+    let mut description = String::new();
+    let mut license     = None;
+    let mut triggers    = Vec::new();
+    let mut tokens      = 0usize;
 
     for line in fm.lines() {
         let line = line.trim();
-        if line.starts_with("trigger:") {
-            // trigger: ["commit", "git log", "push"]
+        if line.starts_with("description:") {
+            description = line.trim_start_matches("description:")
+                .trim().trim_matches('"').trim_matches('\'').to_string();
+        } else if line.starts_with("license:") {
+            let lic = line.trim_start_matches("license:")
+                .trim().trim_matches('"').trim_matches('\'').to_string();
+            if !lic.is_empty() { license = Some(lic); }
+        } else if line.starts_with("trigger:") {
             let val = line.trim_start_matches("trigger:").trim();
-            // Strip outer [ ] and split on commas, removing quotes.
             let inner = val.trim_matches(|c| c == '[' || c == ']');
             for part in inner.split(',') {
                 let t = part.trim().trim_matches('"').trim_matches('\'').to_string();
-                if !t.is_empty() {
-                    triggers.push(t);
-                }
+                if !t.is_empty() { triggers.push(t); }
             }
         } else if line.starts_with("tokens:") {
             let val = line.trim_start_matches("tokens:").trim();
-            // Handle "~800" or "800"
             let clean: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
             tokens = clean.parse().unwrap_or(0);
         }
     }
 
-    (triggers, tokens)
+    ParsedFrontmatter { description, license, triggers, tokens }
 }
 
 // ── Bundled default skills ────────────────────────────────────────────────────
@@ -215,31 +267,34 @@ fn parse_frontmatter(fm: &str) -> (Vec<String>, usize) {
 /// Skills shipped with the binary. User skills of the same name override these.
 fn bundled_skills() -> Vec<Skill> {
     const BUNDLED: &[(&str, &str)] = &[
+        // Always-on meta-skills (no triggers — injected every session)
+        ("karpathy-guidelines", include_str!("default_skills/karpathy-guidelines.md")),
+        // Language skills (trigger on stack detection or keywords)
         ("rust",         include_str!("default_skills/rust.md")),
         ("react",        include_str!("default_skills/react.md")),
         ("typescript",   include_str!("default_skills/typescript.md")),
         ("python",       include_str!("default_skills/python.md")),
         ("go",           include_str!("default_skills/go.md")),
+        // Practice skills (trigger on task keywords)
         ("git",          include_str!("default_skills/git.md")),
         ("code-review",  include_str!("default_skills/code-review.md")),
+        ("debugging",    include_str!("default_skills/debugging.md")),
+        ("security",     include_str!("default_skills/security.md")),
     ];
 
-    BUNDLED.iter().filter_map(|(name, content)| {
-        // Re-use the same frontmatter parser — bundled skills have full frontmatter.
-        let path = std::path::Path::new(name); // fake path just for the name
-        let _ = path; // unused
-        let raw = *content;
+    BUNDLED.iter().filter_map(|(name, raw)| {
         if let Some(after_fence) = raw.strip_prefix("---") {
             if let Some(end_idx) = after_fence.find("\n---") {
-                let frontmatter = &after_fence[..end_idx];
+                let fm   = parse_frontmatter(&after_fence[..end_idx]);
                 let body = after_fence[end_idx + 4..].trim_start().to_string();
-                let (triggers, token_estimate) = parse_frontmatter(frontmatter);
                 return Some(Skill {
-                    name: name.to_string(),
-                    triggers,
-                    token_estimate,
-                    content: body,
-                    source: SkillSource::Bundled,
+                    name:           name.to_string(),
+                    description:    fm.description,
+                    license:        fm.license,
+                    triggers:       fm.triggers,
+                    token_estimate: fm.tokens,
+                    content:        body,
+                    source:         SkillSource::Bundled,
                 });
             }
         }
