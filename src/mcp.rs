@@ -35,6 +35,8 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+    /// Optional human-readable summary shown in the system prompt before the server is connected.
+    pub description: Option<String>,
 }
 
 /// Load `.mcp.json` from the current directory (if present).

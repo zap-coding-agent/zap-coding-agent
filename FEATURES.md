@@ -190,7 +190,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
-| MCP | `src/mcp.rs` | stdio JSON-RPC 2.0 via `.mcp.json` |
+| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers discovered at startup, processes spawned on first use via `mcp_connect` tool |
+| Lazy MCP loader | `src/tools/mod.rs:load_mcp_lazy` | stores configs without spawning; `mcp_connect` synthetic tool in LLM tool list until connected |
+| On-demand connect | `src/tools/mod.rs:connect_mcp` | spawn + `initialize` + `tools/list`; rebuilds `tool_defs` so next LLM turn sees real tools |
+| MCP manifest in prompt | `src/session/mod.rs:Session::new` | server names+descriptions injected into system prompt; zero tool-schema tokens until connected |
+| Server description field | `src/mcp.rs:McpServerConfig` | optional `"description"` in `.mcp.json` shown to LLM before connect |
 | `/init` | `src/session.rs:cmd_init` | creates CLAUDE.md + agent fills it in |
 
 ---
