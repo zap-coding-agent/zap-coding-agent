@@ -1,6 +1,9 @@
 /// MCP (Model Context Protocol) client — stdio transport, JSON-RPC 2.0.
 ///
-/// Reads `.mcp.json` in the current directory to discover configured servers.
+/// Discovers servers from two locations (merged, project wins on conflict):
+///   ~/.zap/mcp.json  — global user-level servers (Jira, GitHub, etc.)
+///   .mcp.json        — project-level servers in cwd
+///
 /// Format (Claude Code–compatible):
 /// ```json
 /// {
@@ -78,22 +81,45 @@ fn validate_mcp_command(cfg: &McpServerConfig) -> Result<()> {
     Ok(())
 }
 
-/// Load `.mcp.json` from the current directory (if present).
-pub fn load_config() -> McpConfig {
-    let path = std::path::Path::new(".mcp.json");
-    if !path.exists() {
-        return McpConfig::default();
-    }
+/// Load a single `.mcp.json` file, returning an empty config on any error.
+fn load_file(path: &std::path::Path) -> McpConfig {
     match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            crate::zap_warn!("could not parse .mcp.json: {}", e);
+            crate::zap_warn!("could not parse {}: {}", path.display(), e);
             McpConfig::default()
         }),
         Err(e) => {
-            crate::zap_warn!("could not read .mcp.json: {}", e);
+            crate::zap_warn!("could not read {}: {}", path.display(), e);
             McpConfig::default()
         }
     }
+}
+
+/// Load MCP config by merging two locations (project entries override global):
+///   1. `~/.zap/mcp.json`  — global user-level servers (Jira, GitHub, etc.)
+///   2. `.mcp.json`        — project-level servers in cwd
+pub fn load_config() -> McpConfig {
+    let global_path = dirs::home_dir()
+        .map(|h| h.join(".zap").join("mcp.json"));
+
+    let mut merged = McpConfig::default();
+
+    // Layer 1: global
+    if let Some(ref p) = global_path {
+        if p.exists() {
+            let cfg = load_file(p);
+            merged.servers.extend(cfg.servers);
+        }
+    }
+
+    // Layer 2: project (overrides global if same name)
+    let project_path = std::path::Path::new(".mcp.json");
+    if project_path.exists() {
+        let cfg = load_file(project_path);
+        merged.servers.extend(cfg.servers);
+    }
+
+    merged
 }
 
 // ── Tool definition returned by tools/list ────────────────────────────────────
