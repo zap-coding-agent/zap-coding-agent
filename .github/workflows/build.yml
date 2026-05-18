@@ -100,9 +100,10 @@ jobs:
       - name: Create / update "latest" release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: "zap v${{ steps.ver.outputs.version }} (latest · ${{ steps.sha.outputs.short }})"
-          prerelease: true
+          tag_name: "v${{ steps.ver.outputs.version }}"
+          name: "zap v${{ steps.ver.outputs.version }}"
+          prerelease: false
+          make_latest: true
           body: |
             **Latest build** — automatically published on every push to `main`.
 
