@@ -3,6 +3,39 @@ use async_trait::async_trait;
 
 use super::Tool;
 
+// ── Dangerous command patterns (blocked even in auto mode) ────────────────────
+
+/// Substrings that indicate a destructive or exfiltration-prone command.
+/// These are rejected before the command runs regardless of permission mode.
+const BLOCKED_PATTERNS: &[&str] = &[
+    "rm -rf /",
+    "rm -rf ~",
+    "rm -rf $HOME",
+    ":(){ :|:&};:",   // fork bomb
+    "mkfs",
+    "dd if=",
+    "> /dev/sd",
+    "| sh\n", "| sh ",  "| sh\"", "|sh",
+    "| bash\n","| bash ","| bash\"","|bash",
+    "| zsh\n", "| zsh ", "| zsh\"", "|zsh",
+    "curl | ", "wget | ",
+    "curl|",   "wget|",
+];
+
+fn guard_shell(command: &str) -> Result<()> {
+    let lower = command.to_lowercase();
+    for pat in BLOCKED_PATTERNS {
+        if lower.contains(pat) {
+            anyhow::bail!(
+                "shell: command contains a blocked pattern '{}'. \
+                 Destructive or pipe-to-shell commands cannot run automatically.",
+                pat.trim()
+            );
+        }
+    }
+    Ok(())
+}
+
 // ── shell ─────────────────────────────────────────────────────────────────────
 
 pub(super) struct ShellTool;
@@ -37,6 +70,7 @@ impl Tool for ShellTool {
         let command = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("shell: 'command' must be a string"))?;
+        guard_shell(command)?;
 
         let out = crate::shell_runner::run_command(command).await?;
         let mut result = String::new();

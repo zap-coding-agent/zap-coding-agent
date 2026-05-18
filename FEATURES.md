@@ -213,6 +213,9 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
 | MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers discovered at startup, processes spawned on first use via `mcp_connect` tool |
+| MCP command validation | `src/mcp.rs:validate_mcp_command` | blocks non-absolute paths (allowlist: node/python/npx/deno/…), shell metacharacters, `..` traversal |
+| Shell dangerous-command guard | `src/tools/shell.rs:guard_shell` | blocks `rm -rf /~`, fork bomb, `mkfs`, `dd`, `curl\|sh`, `wget\|sh` — applies even in Auto mode |
+| `--budget N` token cap | `src/cli.rs`, `src/config.rs`, `src/session/mod.rs` | overrides model context limit for fill-% tracking; warns at 80%, hard-stops at 100% |
 | Lazy MCP loader | `src/tools/mod.rs:load_mcp_lazy` | stores configs without spawning; `mcp_connect` synthetic tool in LLM tool list until connected |
 | On-demand connect | `src/tools/mod.rs:connect_mcp` | spawn + `initialize` + `tools/list`; rebuilds `tool_defs` so next LLM turn sees real tools |
 | MCP manifest in prompt | `src/session/mod.rs:Session::new` | server names+descriptions injected into system prompt; zero tool-schema tokens until connected |

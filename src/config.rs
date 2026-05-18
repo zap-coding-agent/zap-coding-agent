@@ -52,6 +52,9 @@ pub struct Config {
     pub tls_skip_verify: bool,
     /// HTTP request timeout in seconds (default 120).
     pub timeout_secs: u64,
+    /// Optional token budget cap. When set, overrides the model's default context
+    /// window for fill-% calculation. Warns at 80%, refuses at 100%.
+    pub budget: Option<u32>,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -178,6 +181,7 @@ impl Config {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
+            budget: None,
         })
     }
 

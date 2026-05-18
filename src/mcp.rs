@@ -39,6 +39,45 @@ pub struct McpServerConfig {
     pub description: Option<String>,
 }
 
+/// Validate an MCP server config before spawning its process.
+/// Accepts known interpreter names and absolute paths; rejects shell metacharacters
+/// and path traversal in the command field.
+fn validate_mcp_command(cfg: &McpServerConfig) -> Result<()> {
+    let cmd = &cfg.command;
+
+    const ALLOWED: &[&str] = &[
+        "node", "python", "python3", "npx", "uvx", "deno",
+        "ruby", "java", "dotnet", "bun",
+    ];
+
+    let is_absolute = std::path::Path::new(cmd).is_absolute();
+    let is_known    = ALLOWED.contains(&cmd.as_str());
+
+    if !is_absolute && !is_known {
+        anyhow::bail!(
+            "mcp: command '{}' is neither an absolute path nor a known interpreter {:?}. \
+             Use an absolute path or one of the allowed interpreter names.",
+            cmd, ALLOWED
+        );
+    }
+
+    // Reject shell metacharacters that could enable injection.
+    for ch in ['|', '&', ';', '$', '`', '(', ')', '<', '>'] {
+        if cmd.contains(ch) {
+            anyhow::bail!(
+                "mcp: command '{}' contains shell metacharacter '{}' — not allowed.",
+                cmd, ch
+            );
+        }
+    }
+
+    if cmd.contains("..") {
+        anyhow::bail!("mcp: command '{}' contains path traversal '..'", cmd);
+    }
+
+    Ok(())
+}
+
 /// Load `.mcp.json` from the current directory (if present).
 pub fn load_config() -> McpConfig {
     let path = std::path::Path::new(".mcp.json");
@@ -97,6 +136,7 @@ impl McpServer {
     /// Spawn a server subprocess, run the MCP initialisation handshake,
     /// and return the server handle together with its tool list.
     pub async fn connect(cfg: &McpServerConfig) -> Result<(Self, Vec<McpToolDef>)> {
+        validate_mcp_command(cfg)?;
         let mut child = tokio::process::Command::new(&cfg.command)
             .args(&cfg.args)
             .envs(&cfg.env)

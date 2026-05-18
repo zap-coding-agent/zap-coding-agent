@@ -289,10 +289,13 @@ impl Session {
         chars / 4
     }
 
-    /// Context fill as 0–100 percentage against the model's known context window.
+    /// Context fill as 0–100 percentage.
+    /// Uses --budget if set, otherwise falls back to the model's default context window.
     pub fn context_fill_pct(&self) -> u8 {
         let tokens = self.estimated_context_tokens();
-        let limit  = model_context_limit(&self.model);
+        let limit  = self.config.budget
+            .map(|b| b as usize)
+            .unwrap_or_else(|| model_context_limit(&self.model));
         ((tokens * 100) / limit).min(100) as u8
     }
 
@@ -324,8 +327,19 @@ impl Session {
 
         // ── Context pressure handling ─────────────────────────────────────────
         let ctx_pct = self.context_fill_pct();
-        let ctx_limit_k = model_context_limit(&self.model) / 1000;
+        let ctx_limit_k = self.config.budget
+            .map(|b| b as usize)
+            .unwrap_or_else(|| model_context_limit(&self.model)) / 1000;
         let ctx_used_k  = (self.estimated_context_tokens() / 1000).max(1);
+
+        // --budget hard stop: refuse new turns when at 100%.
+        if self.config.budget.is_some() && ctx_pct >= 100 {
+            println!(
+                "  {} Token budget exhausted (~{}k tokens). Start a new session or use /compact.",
+                "✗".red().bold(), ctx_used_k
+            );
+            return Ok(());
+        }
         if ctx_pct >= 95 {
             println!(
                 "  {} Context {}% full (~{}k/{}k) — compacting automatically…",

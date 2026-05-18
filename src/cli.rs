@@ -37,6 +37,12 @@ pub struct Args {
     #[arg(long, short = 'y')]
     pub auto: bool,
 
+    /// Token budget: warn at 80% of N tokens and refuse new turns at 100%.
+    /// Overrides the model's default context window for budget tracking.
+    /// Example: --budget 50000
+    #[arg(long)]
+    pub budget: Option<u32>,
+
     /// SDK / headless mode: read newline-delimited prompts from stdin, run each as
     /// a conversation turn, output the agent's text reply to stdout as JSON.
     /// Implies --auto. Useful for scripting, remote control, and GitLab CI.
@@ -267,6 +273,10 @@ pub async fn run() -> Result<()> {
     // --auto / --sdk both imply auto permission mode.
     if args.auto || args.sdk {
         config.permission_mode = crate::config::PermissionMode::Auto;
+    }
+
+    if let Some(b) = args.budget {
+        config.budget = Some(b);
     }
 
     if args.sdk {
