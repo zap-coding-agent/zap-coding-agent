@@ -417,12 +417,24 @@ impl Session {
         for turn in 0..MAX_TURNS {
             tracing::info!(turn = turn, "calling LLM");
 
-            let mut spinner = Self::make_spinner();
-            let pb_clone    = spinner.pb_clone();
-            let stop_clone  = spinner.stop_signal();
-            let model_label = self.model.clone();
+            let mut spinner  = Self::make_spinner();
+            let pb_clone     = spinner.pb_clone();
+            let stop_clone   = spinner.stop_signal();
+            let stopped_clone = spinner.stopped_signal();
+            let model_label  = self.model.clone();
             let before_output: BeforeOutput = Box::new(move || {
-                stop_clone.store(true, Ordering::Relaxed);
+                // Signal the spinner thread to stop and wait for it to fully
+                // exit before clearing the bar. Without this, indicatif can
+                // redraw after finish_and_clear() and erase streaming text
+                // (especially visible on Windows).
+                stop_clone.store(true, Ordering::Release);
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_millis(200);
+                while !stopped_clone.load(Ordering::Acquire)
+                    && std::time::Instant::now() < deadline
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
                 pb_clone.finish_and_clear();
                 println!("  {} {}",
                     "╭─".truecolor(70, 65, 90),

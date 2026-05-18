@@ -100,9 +100,13 @@ static THINKING_PHRASES: &[&str] = &[
 ];
 
 pub struct ThinkingSpinner {
-    pb:     ProgressBar,
-    stop:   Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    pb:      ProgressBar,
+    stop:    Arc<AtomicBool>,
+    /// Set by the thread just before it exits — lets before_output wait for
+    /// the thread to fully stop before clearing the bar and printing output.
+    /// This eliminates the race between indicatif redraws and streaming text.
+    stopped: Arc<AtomicBool>,
+    thread:  Option<std::thread::JoinHandle<()>>,
 }
 
 impl ThinkingSpinner {
@@ -113,10 +117,14 @@ impl ThinkingSpinner {
                 .unwrap()
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
-        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        // Do NOT call enable_steady_tick — its internal thread can fire after
+        // finish_and_clear() and overwrite streaming text on Windows. We tick
+        // manually from our own thread so we control exactly when it stops.
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_clone = stop.clone();
+        let stop    = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop_clone    = stop.clone();
+        let stopped_clone = stopped.clone();
         let pb_clone = pb.clone();
 
         let start_idx = std::time::SystemTime::now()
@@ -126,27 +134,34 @@ impl ThinkingSpinner {
 
         let thread = std::thread::spawn(move || {
             let mut i = start_idx;
+            let mut ticks: usize = 0;
             pb_clone.set_message(THINKING_PHRASES[i % THINKING_PHRASES.len()]);
-            i += 1;
             loop {
-                for _ in 0..40 {
-                    if stop_clone.load(Ordering::Relaxed) { return; }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                if stop_clone.load(Ordering::Acquire) {
+                    stopped_clone.store(true, Ordering::Release);
+                    return;
                 }
-                if stop_clone.load(Ordering::Relaxed) { return; }
-                pb_clone.set_message(THINKING_PHRASES[i % THINKING_PHRASES.len()]);
-                i += 1;
+                pb_clone.tick();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                ticks += 1;
+                if ticks % 25 == 0 {
+                    i += 1;
+                    if !stop_clone.load(Ordering::Acquire) {
+                        pb_clone.set_message(THINKING_PHRASES[i % THINKING_PHRASES.len()]);
+                    }
+                }
             }
         });
 
-        Self { pb, stop, thread: Some(thread) }
+        Self { pb, stop, stopped, thread: Some(thread) }
     }
 
     pub fn pb_clone(&self) -> ProgressBar { self.pb.clone() }
     pub fn stop_signal(&self) -> Arc<AtomicBool> { self.stop.clone() }
+    pub fn stopped_signal(&self) -> Arc<AtomicBool> { self.stopped.clone() }
 
     pub fn finish_and_clear(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.stop.store(true, Ordering::Release);
         if let Some(t) = self.thread.take() { let _ = t.join(); }
         self.pb.finish_and_clear();
     }

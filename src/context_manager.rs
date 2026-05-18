@@ -151,11 +151,12 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         "## Response Style\n\
          \n\
          - Be concise. One to three sentences per update is enough.\n\
-         - Do not repeat what you are about to do in text before doing it — \
-           just do it using tools.\n\
-         - After completing a task, give a short summary of what changed.\n\
-         - Do not add unnecessary filler phrases like 'Certainly!' or \
-           'Great question!'.\n\
+         - Do not narrate what you are about to do — just do it with tools.\n\
+         - **Always produce a text response.** After every tool call (or set of \
+           tool calls), write at least one sentence summarising what you found or \
+           what changed. Never end a turn with only tool results and no text.\n\
+         - If a tool returned an error or no output, say so explicitly.\n\
+         - Do not add filler phrases like 'Certainly!' or 'Great question!'.\n\
          - Use plain text, not excessive markdown headers, in conversational replies."
             .to_string(),
     );
