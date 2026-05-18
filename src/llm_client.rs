@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{Config, OutputFormat, Provider};
 
 const MAX_TOKENS: u32 = 16_000;
-const MAX_RETRIES: u32 = 4;
+const MAX_RETRIES: u32 = 5;
 
 // ── Shared types (internal representation) ───────────────────────────────────
 
@@ -110,7 +110,7 @@ async fn send_with_retry(
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok())
             .map(|s| s * 1_000)
-            .unwrap_or(1_000 << attempt); // 1 s, 2 s, 4 s
+            .unwrap_or(5_000 << attempt); // 5 s, 10 s, 20 s, 40 s, 80 s
         eprintln!("  rate limited — retrying in {}s…", delay_ms / 1_000);
         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
     }
@@ -175,14 +175,23 @@ struct AnthropicClient {
     model: String,
     url: String,
     suppress_stream: bool,
+    bearer_auth: bool,
 }
 
 impl AnthropicClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
+        let bearer_auth = base_url.is_some();
         let url = base_url
-            .map(|b| format!("{}/v1/messages", b.trim_end_matches('/')))
+            .map(|b| {
+                let trimmed = b.trim_end_matches('/');
+                if trimmed.ends_with("/v1") {
+                    format!("{}/messages", trimmed)
+                } else {
+                    format!("{}/v1/messages", trimmed)
+                }
+            })
             .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
-        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream }
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth }
     }
 
     fn process_event(
@@ -295,12 +304,19 @@ impl LlmProvider for AnthropicClient {
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
+        let api_key = self.api_key.clone();
+        let bearer_auth = self.bearer_auth;
         let resp = send_with_retry(&self.http, |http| {
-            http.post(&self.url)
-                .header("x-api-key", &self.api_key)
+            let mut req = http.post(&self.url)
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .header("content-type", "application/json")
-                .body(body_bytes.clone())
+                .body(body_bytes.clone());
+            if bearer_auth {
+                req = req.header("Authorization", format!("Bearer {}", api_key));
+            } else {
+                req = req.header("x-api-key", &api_key);
+            }
+            req
         })
         .await
         .context("failed to reach Anthropic API")?;

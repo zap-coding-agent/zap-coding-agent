@@ -100,8 +100,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### Providers & LLM client
 | Feature | File | Notes |
 |---|---|---|
-| Anthropic (native) | `src/llm_client.rs` | SSE streaming, tool use, prompt caching |
+| Anthropic (native) | `src/llm_client.rs` | SSE streaming, tool use, prompt caching; `Authorization: Bearer` when custom base_url set (corporate gateways) |
+| Anthropic base_url | `src/llm_client.rs` | appends `/messages` if base_url ends with `/v1`, else `/v1/messages`; matches Anthropic SDK / Roo Code behaviour |
 | OpenAI-compatible | `src/llm_client.rs` | LM Studio, Ollama, Gemini, DeepSeek, Groq, Mistral, xAI, Together, Perplexity, Cohere |
+| Rate limit retry | `src/llm_client.rs` | 5s/10s/20s/40s/80s backoff (was 1s/2s/4s); MAX_RETRIES 5 (was 4) — survives Anthropic's 60s TPM window |
 | Provider switching | `src/session.rs:cmd_provider` | interactive picker, saved to `~/.agent.toml` |
 | Model switching | `src/session.rs:cmd_model` | `/model <id>` mid-session |
 | `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models |
