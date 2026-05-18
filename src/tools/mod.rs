@@ -27,6 +27,13 @@ pub trait Tool: Send + Sync {
     fn affected_path<'a>(&self, _input: &'a serde_json::Value) -> Option<&'a str> {
         None
     }
+
+    /// Whether the tool's raw output should be printed inline to the terminal.
+    /// True only for shell-type tools (shell, git_*) where seeing the raw result
+    /// is expected. File/search/code tools should keep silent — the LLM summarises.
+    fn shows_inline_output(&self) -> bool {
+        false
+    }
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────

@@ -119,10 +119,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `batch_edit` | multiple edits to one file, single diff |
 | `write_file` | create or overwrite |
 | `undo_edit` | restore from pre-edit snapshot |
-| `shell` | with permission check; description required |
+| `shell` | with permission check; description required; output printed inline |
 | `git_status` | status + recent log |
-| `git_pull` | fetch + merge; `rebase` flag; triggered by "pull / sync / get latest" |
-| `git_diff` | unstaged, staged (--cached), or between refs |
+| `git_pull` | fetch + merge; `rebase` flag; triggered by "pull / sync / get latest"; output printed inline |
+| `git_diff` | unstaged, staged (--cached), or between refs; output printed inline |
 | `search_code` | ripgrep (grep fallback), file-type filter |
 | `list_directory` | ls -la |
 | `glob_read` | list/preview files matching a pattern |
@@ -215,7 +215,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
-| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries (no `command`) are skipped with a warning; `autoApprove`/`disabledTools` fields tolerated — fully compatible with Claude Code / Roo Code shared configs |
+| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries (no `command`) are skipped with a warning; `autoApprove`/`disabledTools` fields tolerated — fully compatible with Claude Code / Roo Code shared configs; startup warning when config found but no runnable servers |
 | `/mcp` command | `src/session/commands.rs:cmd_mcp` | `list` — shows all servers (global/project, connected/pending); `edit` — opens `~/.zap/mcp.json` in $EDITOR; `edit project` — opens `.mcp.json`; `path` — prints file paths |
 | API error URL in message | `src/llm_client.rs` | 404/40x errors include the exact constructed URL for instant diagnosis |
 | base_url used as-is | `src/llm_client.rs` | when set, `base_url` is posted to directly — no path appended; gateway handles routing |

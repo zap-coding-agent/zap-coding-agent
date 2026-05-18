@@ -20,6 +20,25 @@ use crate::{
 
 pub const MAX_TURNS: usize = 50;
 
+/// Print a truncated inline preview of tool output so the user can see what happened
+/// even if the LLM produces no follow-up text.
+fn print_tool_output(output: &str) {
+    let trimmed = output.trim();
+    if trimmed.is_empty() { return; }
+    const MAX_LINES: usize = 20;
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let shown = lines.len().min(MAX_LINES);
+    for line in &lines[..shown] {
+        println!("    {}", line.truecolor(160, 155, 185));
+    }
+    if lines.len() > MAX_LINES {
+        println!(
+            "    {}",
+            format!("… {} more lines", lines.len() - MAX_LINES).truecolor(100, 95, 130)
+        );
+    }
+}
+
 // ── Context window helpers ─────────────────────────────────────────────────────
 
 /// Best-effort context window size for known model families.
@@ -124,6 +143,7 @@ impl Session {
         // The LLM will call mcp_connect("name") when it needs a server.
         let mcp_cfg = crate::mcp::load_config();
         let mcp_server_count = mcp_cfg.servers.len();
+        let mcp_had_config = mcp_cfg.had_config;
         if mcp_server_count > 0 {
             tools.load_mcp_lazy(mcp_cfg);
         }
@@ -207,6 +227,12 @@ impl Session {
                 "◎".truecolor(255, 140, 60),
                 mcp_server_count.to_string().cyan(),
                 names.join(", ").dimmed(),
+            );
+        } else if mcp_had_config && !config.is_subagent {
+            println!(
+                "  {} {}",
+                "○".truecolor(180, 120, 60),
+                "MCP config found but no runnable stdio servers — all entries are disabled or use SSE/HTTP transport  (/mcp to edit)".truecolor(150, 120, 80),
             );
         }
 
@@ -667,18 +693,25 @@ impl Session {
                                         "╰─".truecolor(70, 65, 90),
                                         "✓".truecolor(80, 210, 120),
                                         format!("{}ms", ms).truecolor(90, 85, 110));
+                                    if t.shows_inline_output() {
+                                        print_tool_output(&output);
+                                    }
                                     ContentBlock::ToolResult { tool_use_id: call.id, content: output }
                                 }
                                 Err(e) => {
                                     let _ = audit::record(&format!("tool_error name={} err={}", call.name, e));
                                     let ms = t0.elapsed().as_millis();
+                                    let err_str = format!("Error: {}", e);
                                     println!("  {} {}  {}",
                                         "╰─".truecolor(70, 65, 90),
                                         "✗".truecolor(220, 80, 80),
                                         format!("{}ms", ms).truecolor(90, 85, 110));
+                                    if t.shows_inline_output() {
+                                        println!("    {}", err_str.truecolor(220, 100, 100));
+                                    }
                                     ContentBlock::ToolResult {
                                         tool_use_id: call.id,
-                                        content:     format!("{} {}", "Error:", e),
+                                        content:     err_str,
                                     }
                                 }
                             }

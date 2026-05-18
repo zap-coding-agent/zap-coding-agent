@@ -59,6 +59,8 @@ struct RawMcpFile {
 #[derive(Debug, Default)]
 pub struct McpConfig {
     pub servers: std::collections::HashMap<String, McpServerConfig>,
+    /// True when at least one mcp.json file was found on disk (even if all entries were filtered).
+    pub had_config: bool,
 }
 
 #[derive(Debug)]
@@ -164,6 +166,7 @@ pub fn load_config() -> McpConfig {
     // Layer 1: global
     if let Some(ref p) = global_path {
         if p.exists() {
+            merged.had_config = true;
             let cfg = load_file(p);
             merged.servers.extend(cfg.servers);
         }
@@ -172,6 +175,7 @@ pub fn load_config() -> McpConfig {
     // Layer 2: project (overrides global if same name)
     let project_path = std::path::Path::new(".mcp.json");
     if project_path.exists() {
+        merged.had_config = true;
         let cfg = load_file(project_path);
         merged.servers.extend(cfg.servers);
     }

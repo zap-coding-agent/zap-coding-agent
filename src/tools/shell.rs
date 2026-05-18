@@ -85,6 +85,7 @@ impl Tool for ShellTool {
         }
         Ok(result)
     }
+    fn shows_inline_output(&self) -> bool { true }
 }
 
 // ── git_status ────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ impl Tool for GitStatusTool {
         }
         Ok(out)
     }
+    fn shows_inline_output(&self) -> bool { true }
 }
 
 // ── git_pull ──────────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ impl Tool for GitPullTool {
             Ok(if combined.is_empty() { "Already up to date.".to_string() } else { combined })
         }
     }
+    fn shows_inline_output(&self) -> bool { true }
 }
 
 // ── git_diff ──────────────────────────────────────────────────────────────────
@@ -210,6 +213,7 @@ impl Tool for GitDiffTool {
             Ok(format!("{}{}", out.stdout, out.stderr))
         }
     }
+    fn shows_inline_output(&self) -> bool { true }
 }
 
 // ── list_directory ────────────────────────────────────────────────────────────
