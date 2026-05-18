@@ -35,12 +35,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | REPL (interactive) | `src/agent_core.rs:run_repl` | rustyline, tab completion, slash picker |
 | Single-shot mode | `src/agent_core.rs:run` | `--goal "..."` flag |
 | Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables |
-| Parallel tool execution | `src/session.rs:handle_user_turn` | `join_all` after permission phase |
-| Ctrl+C cancellation | `src/session.rs` | `tokio::select!` around turn loop |
-| Turn counter in prompt | `src/agent_core.rs` | `[N:branch] ❯` |
-| Session branching | `src/session.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |
-| Auto-compact | `src/session.rs:handle_user_turn` | fires at 80k estimated tokens |
-| `/compact` | `src/session.rs:cmd_compact` | summarises history in-place |
+| Parallel tool execution | `src/session/mod.rs:handle_user_turn` | `join_all` after permission phase |
+| Ctrl+C cancellation | `src/session/mod.rs` | `tokio::select!` around turn loop |
+| Turn counter + ctx% in prompt | `src/agent_core.rs` | `[N:branch\|42%] ❯`; % colour-coded at 70/85% |
+| Session branching | `src/session/commands.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |
+| Context bar in turn footer | `src/session/mod.rs:ctx_bar` | `[████████░░] 42%` after every LLM response |
+| Model-aware context limits | `src/session/mod.rs:model_context_limit` | Claude 200k, GPT-4o 128k, local 32k |
+| Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | 70% warn, 80% interactive choice, 95% auto-compact |
+| Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
+| `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 
 ### Skill system
 | Feature | File | Notes |

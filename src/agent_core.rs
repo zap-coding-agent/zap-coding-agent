@@ -125,9 +125,19 @@ pub async fn run_repl(config: &Config) -> Result<()> {
         } else {
             String::new()
         };
+        let ctx_pct = session.context_fill_pct();
+        let ctx_tag = if ctx_pct >= 85 {
+            format!("|{}%", ctx_pct).red().bold().to_string()
+        } else if ctx_pct >= 70 {
+            format!("|{}%", ctx_pct).bright_yellow().to_string()
+        } else if ctx_pct > 0 {
+            format!("|{}%", ctx_pct).truecolor(90, 80, 110).to_string()
+        } else {
+            String::new()
+        };
         let prompt = format!(
             "\n  {} {} ",
-            format!("[{}{}]", session.turn_count + 1, branch_tag).truecolor(90, 80, 110),
+            format!("[{}{}{}]", session.turn_count + 1, branch_tag, ctx_tag).truecolor(90, 80, 110),
             "❯".truecolor(255, 210, 50).bold(),
         );
         match rl.readline(&prompt) {

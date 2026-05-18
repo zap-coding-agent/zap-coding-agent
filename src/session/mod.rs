@@ -19,7 +19,72 @@ use crate::{
 };
 
 pub const MAX_TURNS: usize = 50;
-const AUTO_COMPACT_THRESHOLD: usize = 80_000;
+
+// ── Context window helpers ─────────────────────────────────────────────────────
+
+/// Best-effort context window size for known model families.
+pub fn model_context_limit(model: &str) -> usize {
+    let m = model.to_lowercase();
+    if m.contains("claude")                                    { 200_000 }
+    else if m.contains("gemini-1.5") || m.contains("gemini-2") { 1_000_000 }
+    else if m.contains("gemini")                               { 128_000 }
+    else if m.contains("gpt-4o") || m.contains("gpt-4-turbo")
+         || m.contains("o3") || m.contains("o4")               { 128_000 }
+    else if m.contains("gpt-3.5")                              { 16_385 }
+    else                                                        { 32_768 } // local default
+}
+
+/// Renders a 10-block ASCII bar: `[████████░░] 80%`
+fn ctx_bar(pct: u8) -> String {
+    let filled = (pct as usize).min(100) * 10 / 100;
+    let bar: String = (0..10).map(|i| if i < filled { '█' } else { '░' }).collect();
+    format!("[{}] {}%", bar, pct)
+}
+
+/// Heuristic: returns true when the message looks like a fresh topic rather than
+/// a continuation of the current conversation.
+fn is_topic_shift(input: &str, messages: &[Message]) -> bool {
+    // Need ≥3 prior user turns to have a baseline.
+    let user_texts: Vec<&str> = messages.iter()
+        .filter(|m| m.role == "user")
+        .flat_map(|m| m.content.iter())
+        .filter_map(|b| if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+        .collect();
+    if user_texts.len() < 3 || input.len() < 40 { return false; }
+
+    // Continuation signals in the first 6 words → followup.
+    let lower = input.to_lowercase();
+    let head: Vec<&str> = lower.split_whitespace().take(6).collect();
+    let cont_words = ["it", "this", "that", "these", "those", "its", "above",
+                      "also", "additionally", "furthermore", "now", "next"];
+    if head.iter().any(|w| cont_words.contains(w)) { return false; }
+    if lower.starts_with("and ") || lower.starts_with("but ") { return false; }
+
+    let stop: std::collections::HashSet<&str> = [
+        "the","a","an","and","or","but","in","on","at","to","for","of","with",
+        "by","from","is","are","was","were","be","been","have","has","had","do",
+        "does","did","will","would","could","should","may","might","can","this",
+        "that","these","those","i","you","we","it","they","my","your","our",
+        "please","help","make","add","create","want","need","like","just","how",
+    ].iter().cloned().collect();
+
+    let sig_words = |text: &str| -> std::collections::HashSet<String> {
+        text.split_whitespace()
+            .map(|w| w.to_lowercase().trim_matches(|c: char| !c.is_alphabetic()).to_string())
+            .filter(|w| w.len() > 4 && !stop.contains(w.as_str()))
+            .collect()
+    };
+
+    let recent: std::collections::HashSet<String> = user_texts.iter()
+        .rev().take(3)
+        .flat_map(|t| sig_words(t))
+        .collect();
+    let incoming = sig_words(input);
+
+    if incoming.is_empty() || recent.is_empty() { return false; }
+    let overlap = incoming.intersection(&recent).count();
+    (overlap as f64 / incoming.len() as f64) < 0.15
+}
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
@@ -177,6 +242,13 @@ impl Session {
         chars / 4
     }
 
+    /// Context fill as 0–100 percentage against the model's known context window.
+    pub fn context_fill_pct(&self) -> u8 {
+        let tokens = self.estimated_context_tokens();
+        let limit  = model_context_limit(&self.model);
+        ((tokens * 100) / limit).min(100) as u8
+    }
+
     // ── Core tool loop ────────────────────────────────────────────────────────
 
     pub async fn handle_user_turn(&mut self, input: &str) -> Result<()> {
@@ -193,13 +265,54 @@ impl Session {
             input
         };
 
-        let est = self.estimated_context_tokens();
-        if est > AUTO_COMPACT_THRESHOLD {
+        // ── Topic-shift warning ───────────────────────────────────────────────
+        if self.turn_count >= 3 && is_topic_shift(input, &self.messages) {
             println!(
-                "  {} Context is large (~{}k tokens), auto-compacting…",
-                "⚡".bright_yellow(), est / 1000
+                "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
+                "💡".bright_yellow(),
+                "/branch".cyan(),
+                "/exit".cyan(),
+            );
+        }
+
+        // ── Context pressure handling ─────────────────────────────────────────
+        let ctx_pct = self.context_fill_pct();
+        let ctx_limit_k = model_context_limit(&self.model) / 1000;
+        let ctx_used_k  = (self.estimated_context_tokens() / 1000).max(1);
+        if ctx_pct >= 95 {
+            println!(
+                "  {} Context {}% full (~{}k/{}k) — compacting automatically…",
+                "⚡".red().bold(), ctx_pct, ctx_used_k, ctx_limit_k
             );
             self.cmd_compact().await;
+        } else if ctx_pct >= 80 {
+            println!(
+                "  {} Context {}% full (~{}k/{}k tokens).",
+                "⚠".bright_yellow(), ctx_pct, ctx_used_k, ctx_limit_k
+            );
+            let choice = inquire::Select::new(
+                "Context is getting full — what would you like to do?",
+                vec!["Continue anyway", "Compact (summarize history)", "Start new session (exit after this turn)"],
+            )
+            .with_render_config(crate::ui::inquire_render_config())
+            .prompt_skippable()
+            .unwrap_or(None);
+            match choice {
+                Some("Compact (summarize history)") => { self.cmd_compact().await; }
+                Some("Start new session (exit after this turn)") => {
+                    println!(
+                        "  {} Answering your question, then type {} to start fresh.",
+                        "ℹ".cyan(), "/exit".cyan()
+                    );
+                }
+                _ => {}
+            }
+        } else if ctx_pct >= 70 {
+            println!(
+                "  {} Context {}% full (~{}k/{}k) — use {} to free space.",
+                "⚠".bright_yellow().dimmed(), ctx_pct, ctx_used_k, ctx_limit_k,
+                "/compact".cyan()
+            );
         }
 
         let matched_skills: Vec<&crate::skill_manager::Skill> =
@@ -275,8 +388,15 @@ impl Session {
                 if msg_tokens_estimate > 0 {
                     parts.push(format!("msg ~{}t", msg_tokens_estimate));
                 }
-                let ctx_t = self.estimated_context_tokens();
-                parts.push(format!("ctx ~{}k", (ctx_t / 1000).max(1)));
+                let post_pct = self.context_fill_pct();
+                let bar = ctx_bar(post_pct);
+                let bar_str = if post_pct >= 85 {
+                    bar.red().bold().to_string()
+                } else if post_pct >= 70 {
+                    bar.bright_yellow().to_string()
+                } else {
+                    bar.truecolor(100, 95, 130).to_string()
+                };
 
                 if parts.is_empty() {
                     println!("  {} {}", "╰─".truecolor(70, 65, 90), cost_str.truecolor(100, 95, 130));
@@ -287,6 +407,11 @@ impl Session {
                         parts.join("  ").truecolor(100, 95, 130),
                         "·".truecolor(70, 65, 90),
                         cost_str.truecolor(100, 95, 130));
+                }
+                if post_pct > 0 {
+                    println!("  {} {}",
+                        "↳".truecolor(255, 200, 60),
+                        bar_str);
                 }
             }
 
