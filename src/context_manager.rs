@@ -91,6 +91,47 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
+    // ── Sub-agent orchestration ───────────────────────────────────────────────
+    if config.agent_depth > 0 {
+        sections.push(
+            "## Sub-Agent Orchestration\n\
+             \n\
+             You can spawn parallel sub-agents with `spawn_agent`. Each sub-agent is a \
+             full agent loop with its own message history and all tools. Multiple \
+             `spawn_agent` calls in **one response** execute in parallel — the main \
+             session only resumes after ALL complete.\n\
+             \n\
+             **Spawn when ALL hold:**\n\
+             - The task has ≥2 truly independent sub-goals (no shared file writes)\n\
+             - Each sub-goal is non-trivial (needs ≥1 tool call, not just a question)\n\
+             - Results can be synthesised without one agent needing the other's intermediate output\n\
+             \n\
+             **Proactively propose spawning** before issuing the calls, e.g.:\n\
+             > \"This has two independent parts — I'll run them in parallel:\\n\
+             >   • Agent 1: analyse src/auth.rs for security issues\\n\
+             >   • Agent 2: analyse src/api.rs for security issues\"\n\
+             \n\
+             **Trigger patterns** — consider spawning when the user asks to:\n\
+             - \"analyse / review X, Y, Z\" where X, Y, Z are independent files or modules\n\
+             - \"fix all issues in these files\" — one agent per file\n\
+             - \"implement feature A and feature B\" (if truly independent)\n\
+             - \"run tests AND update the docs\" — parallel work streams\n\
+             - \"refactor module A, B, C\" — one agent per module\n\
+             \n\
+             **Anti-patterns (never spawn for these):**\n\
+             - Sequential dependency: \"read file A, then edit B based on it\"\n\
+             - Trivial tasks: reading one file, a single small edit, answering a question\n\
+             - Overlapping writes: two agents editing the same file → race condition\n\
+             \n\
+             **After all sub-agents complete:** synthesise their findings into a coherent \
+             reply. Do not dump each agent's output verbatim — summarise what changed and why.\n\
+             \n\
+             Use `files_in_scope` in each `spawn_agent` call so overlapping file access \
+             is visible. Pass relevant parent findings through `context`."
+                .to_string(),
+        );
+    }
+
     // ── Security rules ────────────────────────────────────────────────────────
     sections.push(
         "## Security Rules (non-negotiable)\n\

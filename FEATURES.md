@@ -34,7 +34,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 |---|---|---|
 | REPL (interactive) | `src/agent_core.rs:run_repl` | rustyline, tab completion, slash picker |
 | Single-shot mode | `src/agent_core.rs:run` | `--goal "..."` flag |
-| Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables |
+| Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables; returns JSON: summary, files_changed, turns, token usage |
+| Sub-agent orchestration prompt | `src/context_manager.rs` | LLM taught trigger patterns, anti-patterns, and how to announce parallel plans |
+| Sub-agent startup suppression | `src/session/mod.rs` + `src/config.rs:is_subagent` | sub-agents don't reprint banners; clean parallel output |
+| `spawn_agent` permission gate | `src/permission_manager.rs` | spawn_agent now requires user approval (was auto-approved) |
+| `files_in_scope` schema field | `src/tools/agent.rs` | advisory list of files each sub-agent will touch; visible in permission prompt |
 | Parallel tool execution | `src/session/mod.rs:handle_user_turn` | `join_all` after permission phase |
 | Ctrl+C cancellation | `src/session/mod.rs` | `tokio::select!` around turn loop |
 | Turn counter + ctx% in prompt | `src/agent_core.rs` | `[N:branch\|42%] ❯`; % colour-coded at 70/85% |

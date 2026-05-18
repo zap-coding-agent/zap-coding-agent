@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 /// Tools that require explicit user approval in Ask mode.
-const WRITE_TOOLS: &[&str] = &["shell", "write_file", "edit_file", "batch_edit"];
+const WRITE_TOOLS: &[&str] = &["shell", "write_file", "edit_file", "batch_edit", "spawn_agent"];
 
 /// Related tools that share an "always" grant.
 /// Granting one member grants all members — avoids re-prompting for semantically

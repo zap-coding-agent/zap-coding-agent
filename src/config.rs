@@ -33,6 +33,9 @@ pub struct Config {
     pub output_format: OutputFormat,
     /// Remaining nesting depth for sub-agents. 0 = spawning disabled.
     pub agent_depth: u8,
+    /// True when this config is for a sub-agent session. Suppresses startup banners
+    /// and other output that would interleave with the parent session's output.
+    pub is_subagent: bool,
 
     // ── Corporate / network settings ─────────────────────────────────────────
     /// Explicit proxy URL, e.g. "http://user:pass@proxy.corp.com:8080".
@@ -170,7 +173,7 @@ impl Config {
 
         Ok(Self {
             permission_mode, api_key, model, provider, base_url,
-            output_format: OutputFormat::Text, agent_depth: 3,
+            output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
         })
     }

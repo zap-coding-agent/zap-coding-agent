@@ -177,16 +177,18 @@ impl Session {
             let note = if notes.is_empty() { String::new() } else {
                 format!("  {}", notes.join("  ·  ").dimmed())
             };
-            println!(
-                "  {} {} skill(s) loaded{}",
-                "◎".truecolor(255, 200, 60),
-                skills.len().to_string().cyan(),
-                note,
-            );
+            if !config.is_subagent {
+                println!(
+                    "  {} {} skill(s) loaded{}",
+                    "◎".truecolor(255, 200, 60),
+                    skills.len().to_string().cyan(),
+                    note,
+                );
+            }
         }
 
         let hooks = crate::hooks::HookRunner::load();
-        if !hooks.is_empty() {
+        if !hooks.is_empty() && !config.is_subagent {
             println!(
                 "  {} {} hook(s) loaded",
                 "◎".truecolor(255, 160, 80),
@@ -194,7 +196,7 @@ impl Session {
             );
         }
 
-        if mcp_server_count > 0 {
+        if mcp_server_count > 0 && !config.is_subagent {
             let names: Vec<String> = tools
                 .pending_mcp_servers()
                 .iter()
@@ -208,12 +210,14 @@ impl Session {
             );
         }
 
-        if let Some(summary) = crate::http::network_summary(config) {
-            println!(
-                "  {} {}",
-                "◎".truecolor(180, 180, 100),
-                summary.dimmed(),
-            );
+        if !config.is_subagent {
+            if let Some(summary) = crate::http::network_summary(config) {
+                println!(
+                    "  {} {}",
+                    "◎".truecolor(180, 180, 100),
+                    summary.dimmed(),
+                );
+            }
         }
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -222,12 +226,14 @@ impl Session {
                 match idx.index_dir(&cwd) {
                     Ok((0, _)) => {}
                     Ok((files, syms)) => {
-                        println!(
-                            "  {} indexed {} file(s), {} symbol(s)",
-                            "◎".truecolor(100, 200, 255),
-                            files.to_string().cyan(),
-                            syms.to_string().cyan(),
-                        );
+                        if !config.is_subagent {
+                            println!(
+                                "  {} indexed {} file(s), {} symbol(s)",
+                                "◎".truecolor(100, 200, 255),
+                                files.to_string().cyan(),
+                                syms.to_string().cyan(),
+                            );
+                        }
                     }
                     Err(e) => tracing::warn!("code index: {}", e),
                 }

@@ -296,20 +296,24 @@ pub async fn run_sdk(config: &Config) -> Result<()> {
 pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
     let mut sub_config = config.clone();
     sub_config.output_format = OutputFormat::Json;
-    sub_config.agent_depth = config.agent_depth.saturating_sub(1);
+    sub_config.agent_depth   = config.agent_depth.saturating_sub(1);
+    sub_config.is_subagent   = true; // suppress startup banners
 
-    let depth_label = format!("[depth {}]", 3u8.saturating_sub(sub_config.agent_depth));
+    // depth label: how many levels deep are we (original depth - remaining + 1)
+    let depth_level = 4u8.saturating_sub(sub_config.agent_depth);
+    let short_goal  = if goal.len() > 60 { &goal[..60] } else { goal };
     println!(
-        "  {} {} {}",
+        "  {} {} {}  {}",
         "◈".bright_cyan(),
         "sub-agent".cyan().bold(),
-        depth_label.dimmed(),
+        format!("[L{}]", depth_level).dimmed(),
+        short_goal.truecolor(120, 115, 140),
     );
 
     audit::record(&format!(
         "subagent_start goal=\"{}\" depth={}",
         &goal[..goal.len().min(80)],
-        sub_config.agent_depth
+        depth_level
     ))?;
 
     let mut session = Session::new(&sub_config).await?;
@@ -321,20 +325,51 @@ pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
         .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
         .count();
 
-    let response = session.messages.iter().rev()
+    // Collect files that were written/edited — helps parent understand what changed.
+    let mut files_changed: Vec<String> = session.messages.iter()
+        .flat_map(|m| &m.content)
+        .filter_map(|b| {
+            if let ContentBlock::ToolUse { name, input, .. } = b {
+                if matches!(name.as_str(), "edit_file" | "write_file" | "batch_edit") {
+                    return input["path"].as_str().map(|s| s.to_string());
+                }
+            }
+            None
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    files_changed.sort_unstable();
+
+    let summary = session.messages.iter().rev()
         .find(|m| m.role == "assistant")
         .and_then(|m| m.content.iter().find_map(|b| {
             if let ContentBlock::Text { text } = b { Some(text.clone()) } else { None }
         }))
         .unwrap_or_default();
 
+    let result = serde_json::json!({
+        "summary": summary,
+        "turns": turns,
+        "tool_calls": total_tools,
+        "files_changed": files_changed,
+        "input_tokens": session.session_usage.input_tokens,
+        "output_tokens": session.session_usage.output_tokens,
+    });
+
     println!(
-        "  {} sub-agent done  {} turn(s)  {} tool call(s)",
+        "  {} sub-agent [L{}] done  {} turn(s)  {} tool(s){}",
         "◈".bright_cyan(),
+        depth_level,
         turns.to_string().cyan(),
         total_tools.to_string().cyan(),
+        if files_changed.is_empty() {
+            String::new()
+        } else {
+            format!("  changed: {}", files_changed.join(", ").truecolor(130, 125, 150).to_string())
+        },
     );
-    audit::record("subagent_end")?;
+    audit::record(&format!("subagent_end depth={} turns={} tools={}", depth_level, turns, total_tools))?;
 
-    Ok(response)
+    Ok(result.to_string())
 }
