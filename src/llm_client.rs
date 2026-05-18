@@ -324,7 +324,7 @@ impl LlmProvider for AnthropicClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Anthropic API returned {}: {}", status, text);
+            anyhow::bail!("Anthropic API returned {} (url: {}): {}", status, self.url, text);
         }
 
         // ── Parse SSE stream ──────────────────────────────────────────────────
@@ -570,7 +570,7 @@ impl LlmProvider for OpenAiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!("OpenAI API returned {}: {}", status, text);
+            anyhow::bail!("OpenAI API returned {} (url: {}): {}", status, self.url, text);
         }
 
         // ── Parse SSE stream ──────────────────────────────────────────────────
