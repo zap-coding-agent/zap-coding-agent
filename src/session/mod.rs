@@ -794,6 +794,7 @@ impl Session {
                 }
             }
             "/hooks"       => crate::hooks::print_hooks_list(&self.hooks),
+            "/mcp"         => self.cmd_mcp(arg),
             "/tasks"       => self.cmd_tasks().await,
             "/index"       => self.cmd_index(arg),
             "/branch"      => self.cmd_branch(arg).await,

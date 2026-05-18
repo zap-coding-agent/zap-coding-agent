@@ -198,6 +198,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/memory",      "list|get|set|del"),
     ("/audit",       "[N]  audit log"),
     ("/hooks",       "list configured hooks"),
+    ("/mcp",         "list|edit|edit project|path  MCP servers"),
     ("/tasks",       "browse & execute task sessions"),
     ("/index",       "[path|stats]  reindex AST code symbols"),
     ("/undo",        "[file]  undo last file edit"),

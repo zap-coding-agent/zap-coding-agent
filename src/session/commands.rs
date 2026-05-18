@@ -63,6 +63,7 @@ impl Session {
                 ("/skill create <name>",     "create a skill file"),
                 ("/audit [N]",               "show last N audit log lines"),
                 ("/hooks",                   "list configured hooks"),
+                ("/mcp [list|edit|path]",    "view/edit MCP server configs"),
             ]),
         ];
         for (group, cmds) in groups {
@@ -514,6 +515,143 @@ impl Session {
                 }
             }
             other => println!("  {} Unknown memory subcommand '{}'. Try list/get/set/del.", "✗".red(), other),
+        }
+    }
+}
+
+// ── MCP ───────────────────────────────────────────────────────────────────────
+
+impl Session {
+    pub fn cmd_mcp(&self, arg: &str) {
+        let global_path = dirs::home_dir()
+            .map(|h| h.join(".zap").join("mcp.json"));
+        let project_path = std::path::PathBuf::from(".mcp.json");
+
+        match arg.trim() {
+            // ── list (default) ────────────────────────────────────────────
+            "" | "list" => {
+                // Read both files independently so we can show origin.
+                let global_cfg: crate::mcp::McpConfig = global_path.as_ref()
+                    .filter(|p| p.exists())
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default();
+
+                let project_cfg: crate::mcp::McpConfig = if project_path.exists() {
+                    std::fs::read_to_string(&project_path).ok()
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or_default()
+                } else {
+                    crate::mcp::McpConfig::default()
+                };
+
+                // Collect pending names from the tool registry.
+                let pending: std::collections::HashSet<String> = self.tools
+                    .pending_mcp_servers()
+                    .into_iter()
+                    .map(|(n, _)| n.to_string())
+                    .collect();
+
+                let print_servers = |servers: &std::collections::HashMap<String, crate::mcp::McpServerConfig>| {
+                    if servers.is_empty() {
+                        println!("    {}", "(none)".truecolor(100, 95, 130));
+                        return;
+                    }
+                    for (name, cfg) in servers {
+                        let status = if pending.contains(name) {
+                            "pending".truecolor(180, 130, 60)
+                        } else {
+                            "connected".truecolor(100, 200, 100)
+                        };
+                        println!("    {} {} {}  {}",
+                            "◆".truecolor(255, 210, 50),
+                            name.truecolor(100, 210, 255).bold(),
+                            format!("[{}]", status),
+                            cfg.command.truecolor(100, 95, 130),
+                        );
+                        if let Some(ref desc) = cfg.description {
+                            println!("      {}", desc.truecolor(120, 115, 140));
+                        }
+                    }
+                };
+
+                println!();
+                println!("  {} {}", "◆".truecolor(255, 210, 50), "MCP servers".truecolor(150, 140, 170).bold());
+                println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+
+                let gpath_str = global_path.as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "~/.zap/mcp.json".to_string());
+                println!("  {} {}", "global".truecolor(100, 95, 130), gpath_str.truecolor(60, 55, 80));
+                print_servers(&global_cfg.servers);
+
+                println!("  {} {}", "project".truecolor(100, 95, 130), project_path.display().to_string().truecolor(60, 55, 80));
+                print_servers(&project_cfg.servers);
+
+                println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+                println!("  {} {} · {} · {}",
+                    "tip:".truecolor(100, 95, 130),
+                    "/mcp edit".truecolor(100, 210, 255),
+                    "/mcp edit project".truecolor(100, 210, 255),
+                    "/mcp path".truecolor(100, 210, 255),
+                );
+                println!();
+            }
+
+            // ── edit global ───────────────────────────────────────────────
+            "edit" | "edit global" => {
+                let path = match global_path {
+                    Some(ref p) => p.clone(),
+                    None => { println!("  {} could not determine home dir", "✗".red()); return; }
+                };
+                // Ensure parent exists and seed an empty config if missing.
+                if !path.exists() {
+                    std::fs::create_dir_all(path.parent().unwrap()).ok();
+                    std::fs::write(&path,
+                        "{\n  \"mcpServers\": {\n  }\n}\n"
+                    ).ok();
+                    println!("  {} created {}", "✓".green(), path.display().to_string().cyan());
+                }
+                open_in_editor(&path);
+            }
+
+            // ── edit project ──────────────────────────────────────────────
+            "edit project" => {
+                if !project_path.exists() {
+                    std::fs::write(&project_path,
+                        "{\n  \"mcpServers\": {\n  }\n}\n"
+                    ).ok();
+                    println!("  {} created {}", "✓".green(), project_path.display().to_string().cyan());
+                }
+                open_in_editor(&project_path);
+            }
+
+            // ── path: just print the paths ────────────────────────────────
+            "path" | "paths" => {
+                if let Some(ref p) = global_path {
+                    println!("  {} {}", "global: ".truecolor(100, 95, 130), p.display().to_string().cyan());
+                }
+                println!("  {} {}", "project:".truecolor(100, 95, 130), project_path.display().to_string().cyan());
+            }
+
+            other => {
+                println!("  {} unknown subcommand '{}'. Try: list · edit · edit project · path",
+                    "✗".red(), other);
+            }
+        }
+    }
+}
+
+fn open_in_editor(path: &std::path::Path) {
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| "vi".to_string());
+    match std::process::Command::new(&editor).arg(path).status() {
+        Ok(s) if s.success() => {}
+        Ok(_) => {}
+        Err(e) => {
+            println!("  {} could not open editor '{}': {}", "✗".red(), editor, e);
+            println!("  Edit manually: {}", path.display().to_string().cyan());
         }
     }
 }
