@@ -18,10 +18,17 @@ jobs:
           - os: macos-latest          # GitHub ARM runner (M-series)
             target: aarch64-apple-darwin
             artifact: zap-macos-arm64
+            binary_ext: ""
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl   # static binary — runs anywhere on Linux
             artifact: zap-linux-x86_64
+            binary_ext: ""
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: zap-windows-x86_64
+            binary_ext: ".exe"
 
     runs-on: ${{ matrix.os }}
 
@@ -53,13 +60,14 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Stage artifact
-        run: cp target/${{ matrix.target }}/release/zap ${{ matrix.artifact }}
+        shell: bash
+        run: cp "target/${{ matrix.target }}/release/zap${{ matrix.binary_ext }}" "${{ matrix.artifact }}${{ matrix.binary_ext }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}${{ matrix.binary_ext }}
           retention-days: 14
 
   # ── Publish "latest" release ─────────────────────────────────────────────────
@@ -104,6 +112,7 @@ jobs:
             |---|---|
             | macOS Apple Silicon (ARM) | `zap-macos-arm64` |
             | Linux x86_64 (static musl) | `zap-linux-x86_64` |
+            | Windows x86_64 | `zap-windows-x86_64.exe` |
 
             **Commit:** `${{ github.sha }}`
             **Version:** v${{ steps.ver.outputs.version }}
@@ -126,3 +135,4 @@ jobs:
           files: |
             artifacts/zap-macos-arm64/zap-macos-arm64
             artifacts/zap-linux-x86_64/zap-linux-x86_64
+            artifacts/zap-windows-x86_64/zap-windows-x86_64.exe
