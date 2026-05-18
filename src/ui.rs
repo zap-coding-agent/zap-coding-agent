@@ -170,6 +170,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/provider",    "switch LM Studio / DeepSeek / Anthropic"),
     ("/memory",      "list|get|set|del"),
     ("/audit",       "[N]  audit log"),
+    ("/hooks",       "list configured hooks"),
+    ("/tasks",       "browse & execute task sessions"),
     ("/cost",        "token usage & cost"),
     ("/run",         "<name>  run a workflow"),
     ("/workflow",    "new <name>  scaffold a workflow"),

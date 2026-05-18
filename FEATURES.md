@@ -104,6 +104,19 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Auto-reindex on write/edit | `src/session.rs:handle_user_turn` | fires after `write_file`/`edit_file`/`batch_edit` |
 | `/index [path|stats]` | `src/session.rs:cmd_index` | manual reindex or stats |
 
+### Hooks (src/hooks.rs)
+| Feature | File | Notes |
+|---|---|---|
+| Hook loader | `src/hooks.rs:HookRunner::load` | merges `~/.zap/hooks.json` (global) + `.zap/hooks.json` (project) |
+| `PreToolUse` | `src/hooks.rs` | fires before tool runs; exit code 2 blocks the call |
+| `PostToolUse` | `src/hooks.rs` | fires after tool completes; informational, cannot block |
+| `SessionStart` | `src/hooks.rs` | fires once after session initialises |
+| `SessionEnd` | `src/hooks.rs` | fires before goodbye message |
+| `UserPromptSubmit` | `src/hooks.rs` | fires on every user message; stdout replaces the prompt |
+| Tool matcher | `src/hooks.rs:HookEntry::matches` | `"shell"`, `"*"`, or absent = all tools |
+| Hook count banner | `src/session.rs:Session::new` | shown at startup if hooks are configured |
+| `/hooks` | `src/session.rs:handle_slash` | lists all configured hooks grouped by event |
+
 ### Security & permissions
 | Feature | File | Notes |
 |---|---|---|

@@ -53,6 +53,7 @@ pub async fn run_repl(config: &Config) -> Result<()> {
 
     println!("  {} Loading…", "◌".bright_yellow());
     let mut session = Session::new(config).await?;
+    session.hooks.fire_session_start();
 
     // ── Mode picker ───────────────────────────────────────────────────────────
     let mode = crate::task_planner::pick_session_mode();
@@ -186,6 +187,7 @@ pub async fn run_repl(config: &Config) -> Result<()> {
     }
 
     let _ = rl.save_history(&history_path);
+    session.hooks.fire_session_end();
     println!("\n  {} Goodbye.", "⚡".bright_yellow());
     audit::record("repl_end")?;
     Ok(())

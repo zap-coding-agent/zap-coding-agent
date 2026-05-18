@@ -41,6 +41,7 @@ pub struct Session {
     pub current_branch: String,
     pub code_index:    Arc<Mutex<crate::code_index::CodeIndex>>,
     pub store:         persistence::Store,
+    pub hooks:         crate::hooks::HookRunner,
 }
 
 impl Session {
@@ -86,6 +87,15 @@ impl Session {
                 "◎".truecolor(255, 200, 60),
                 skills.len().to_string().cyan(),
                 note,
+            );
+        }
+
+        let hooks = crate::hooks::HookRunner::load();
+        if !hooks.is_empty() {
+            println!(
+                "  {} {} hook(s) loaded",
+                "◎".truecolor(255, 160, 80),
+                hooks.total().to_string().cyan(),
             );
         }
 
@@ -138,6 +148,7 @@ impl Session {
             current_branch: "main".to_string(),
             code_index,
             store,
+            hooks,
         })
     }
 
@@ -158,6 +169,19 @@ impl Session {
     // ── Core tool loop ────────────────────────────────────────────────────────
 
     pub async fn handle_user_turn(&mut self, input: &str) -> Result<()> {
+        // Fire UserPromptSubmit hooks — any hook that prints to stdout modifies the prompt.
+        let modified;
+        let input = if !self.hooks.user_prompt_submit.is_empty() {
+            if let Some(new_prompt) = self.hooks.fire_user_prompt_submit(input) {
+                modified = new_prompt;
+                modified.as_str()
+            } else {
+                input
+            }
+        } else {
+            input
+        };
+
         let est = self.estimated_context_tokens();
         if est > AUTO_COMPACT_THRESHOLD {
             println!(
@@ -297,14 +321,31 @@ impl Session {
                         content:     "Permission denied by user.".to_string(),
                     });
                 } else {
-                    approved.push(ApprovedCall {
-                        id:    id.clone(),
-                        name:  name.clone(),
-                        input: input.clone(),
-                        ctx,
-                    });
+                    // Fire PreToolUse hooks — exit code 2 blocks execution.
+                    match self.hooks.fire_pre_tool_use(name, input) {
+                        crate::hooks::HookDecision::Block(reason) => {
+                            audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
+                            tool_results.push(ContentBlock::ToolResult {
+                                tool_use_id: id.clone(),
+                                content:     format!("Blocked by hook: {}", reason),
+                            });
+                        }
+                        crate::hooks::HookDecision::Allow => {
+                            approved.push(ApprovedCall {
+                                id:    id.clone(),
+                                name:  name.clone(),
+                                input: input.clone(),
+                                ctx,
+                            });
+                        }
+                    }
                 }
             }
+
+            // Snapshot (name, input) for PostToolUse hooks before consuming `approved`.
+            let approved_meta: Vec<(String, serde_json::Value)> = approved.iter()
+                .map(|c| (c.name.clone(), c.input.clone()))
+                .collect();
 
             // Phase 2: execute approved tools in parallel.
             let exec_futures = approved.into_iter().map(|call| {
@@ -374,6 +415,13 @@ impl Session {
                 }
             });
             let new_results = join_all(exec_futures).await;
+
+            // Fire PostToolUse hooks (informational — cannot block).
+            for ((name, input), result) in approved_meta.iter().zip(new_results.iter()) {
+                if let ContentBlock::ToolResult { content, .. } = result {
+                    self.hooks.fire_post_tool_use(name, input, content);
+                }
+            }
 
             // Reindex any written/edited files.
             for block in &tool_calls {
@@ -472,6 +520,7 @@ impl Session {
                 ("/skill show <name>",       "preview a skill"),
                 ("/skill create <name>",     "create a skill file"),
                 ("/audit [N]",               "show last N audit log lines"),
+                ("/hooks",                   "list configured hooks"),
             ]),
         ];
         for (group, cmds) in groups {
@@ -1522,6 +1571,7 @@ end try"#,
                     println!("  usage: /workflow new <name>   create a workflow scaffold");
                 }
             }
+            "/hooks"       => crate::hooks::print_hooks_list(&self.hooks),
             "/tasks"       => self.cmd_tasks().await,
             "/index"       => self.cmd_index(arg),
             "/branch"      => self.cmd_branch(arg).await,
