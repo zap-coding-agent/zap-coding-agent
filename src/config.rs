@@ -86,11 +86,11 @@ impl FileConfig {
 
         match std::fs::read_to_string(&path) {
             Ok(contents) => toml::from_str(&contents).unwrap_or_else(|e| {
-                eprintln!("Warning: could not parse ~/.agent.toml: {}", e);
+                crate::zap_warn!("could not parse ~/.agent.toml: {}", e);
                 Self::default()
             }),
             Err(e) => {
-                eprintln!("Warning: could not read ~/.agent.toml: {}", e);
+                crate::zap_warn!("could not read ~/.agent.toml: {}", e);
                 Self::default()
             }
         }

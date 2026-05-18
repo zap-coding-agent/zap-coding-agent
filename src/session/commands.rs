@@ -123,6 +123,7 @@ impl Session {
         if self.config.timeout_secs != 120 {
             kv("timeout",        &format!("{}s", self.config.timeout_secs));
         }
+        kv("log file",           &crate::log::log_path().to_string_lossy());
         println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
         println!();
     }

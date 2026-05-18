@@ -86,11 +86,11 @@ pub fn load_config() -> McpConfig {
     }
     match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            eprintln!("  warning: could not parse .mcp.json: {}", e);
+            crate::zap_warn!("could not parse .mcp.json: {}", e);
             McpConfig::default()
         }),
         Err(e) => {
-            eprintln!("  warning: could not read .mcp.json: {}", e);
+            crate::zap_warn!("could not read .mcp.json: {}", e);
             McpConfig::default()
         }
     }

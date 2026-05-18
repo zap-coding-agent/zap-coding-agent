@@ -56,7 +56,7 @@ pub fn build(config: &Config) -> reqwest::Client {
                 }
                 builder = builder.proxy(proxy);
             }
-            Err(e) => eprintln!("  zap: invalid proxy URL '{}': {}", proxy_url, e),
+            Err(e) => crate::zap_error!("invalid proxy URL '{}': {}", proxy_url, e),
         }
     }
 
@@ -66,21 +66,18 @@ pub fn build(config: &Config) -> reqwest::Client {
     if let Some(ref ca_path) = config.ca_bundle {
         match load_ca(ca_path) {
             Ok(cert) => { builder = builder.add_root_certificate(cert); }
-            Err(e)   => eprintln!("  zap: could not load CA bundle '{}': {}", ca_path, e),
+            Err(e)   => crate::zap_error!("could not load CA bundle '{}': {}", ca_path, e),
         }
     }
 
     // ── TLS verification ──────────────────────────────────────────────────────
     if config.tls_skip_verify {
-        eprintln!(
-            "  zap: WARNING — TLS certificate verification is disabled (tls_skip_verify=true). \
-             Only use this on trusted networks."
-        );
+        crate::zap_warn!("TLS certificate verification is disabled (tls_skip_verify=true). Only use this on trusted networks.");
         builder = builder.danger_accept_invalid_certs(true);
     }
 
     builder.build().unwrap_or_else(|e| {
-        eprintln!("  zap: failed to build HTTP client: {}. Using defaults.", e);
+        crate::zap_error!("failed to build HTTP client: {}. Using defaults.", e);
         reqwest::Client::new()
     })
 }

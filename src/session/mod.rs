@@ -235,14 +235,14 @@ impl Session {
                             );
                         }
                     }
-                    Err(e) => tracing::warn!("code index: {}", e),
+                    Err(e) => crate::zap_warn!("code index: {}", e),
                 }
                 let arc = Arc::new(Mutex::new(idx));
                 crate::code_index::set_global(arc.clone());
                 arc
             }
             Err(e) => {
-                tracing::warn!("code index unavailable: {}", e);
+                crate::zap_warn!("code index unavailable: {}", e);
                 Arc::new(Mutex::new(
                     crate::code_index::CodeIndex::open(&cwd)
                         .unwrap_or_else(|_| {

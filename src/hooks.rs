@@ -72,7 +72,7 @@ struct HooksFile {
 fn load_file(path: &std::path::Path) -> HooksFile {
     let Ok(content) = std::fs::read_to_string(path) else { return HooksFile::default() };
     serde_json::from_str(&content).unwrap_or_else(|e| {
-        tracing::warn!("hooks: failed to parse {}: {}", path.display(), e);
+        crate::zap_warn!("hooks: failed to parse {}: {}", path.display(), e);
         HooksFile::default()
     })
 }

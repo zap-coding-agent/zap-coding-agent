@@ -191,7 +191,7 @@ impl CodeIndex {
             if self.needs_reindex(&path) {
                 match self.index_file(&path) {
                     Ok(n) => { files += 1; symbols += n; }
-                    Err(e) => tracing::warn!("index: skip {:?}: {}", path, e),
+                    Err(e) => crate::zap_warn!("index: skip {:?}: {}", path, e),
                 }
             }
         }
