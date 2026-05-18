@@ -33,6 +33,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | REPL (interactive) | `src/agent_core.rs:run_repl` | rustyline, tab completion, slash picker |
+| Windows ANSI colors | `src/main.rs` | `set_virtual_terminal(true)` at startup; renders correctly in CMD and PowerShell |
 | Single-shot mode | `src/agent_core.rs:run` | `--goal "..."` flag |
 | Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables; returns JSON: summary, files_changed, turns, token usage |
 | Sub-agent orchestration prompt | `src/context_manager.rs` | LLM taught trigger patterns, anti-patterns, and how to announce parallel plans |

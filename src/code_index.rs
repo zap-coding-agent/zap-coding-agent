@@ -400,8 +400,9 @@ fn signature(node: tree_sitter::Node, source: &[u8]) -> String {
     let s = std::str::from_utf8(text).unwrap_or("").trim();
     // Collapse whitespace and trim.
     let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.len() > 120 {
-        format!("{}…", &collapsed[..120])
+    if collapsed.chars().count() > 120 {
+        let truncated: String = collapsed.chars().take(120).collect();
+        format!("{}…", truncated)
     } else {
         collapsed
     }
