@@ -181,18 +181,9 @@ struct AnthropicClient {
 impl AnthropicClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
         let bearer_auth = base_url.is_some();
+        // Use base_url exactly as provided — the gateway handles routing.
+        // Fall back to the public Anthropic endpoint only when no base_url is set.
         let url = base_url
-            .map(|b| {
-                let trimmed = b.trim_end_matches('/');
-                // If the user supplied the full endpoint URL, use it as-is.
-                if trimmed.ends_with("/messages") || trimmed.ends_with("/chat/completions") {
-                    trimmed.to_string()
-                } else if trimmed.ends_with("/v1") {
-                    format!("{}/messages", trimmed)
-                } else {
-                    format!("{}/v1/messages", trimmed)
-                }
-            })
             .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth }
     }
@@ -418,16 +409,10 @@ struct OpenAiClient {
 
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
-        let base = base_url.unwrap_or_else(|| OPENAI_DEFAULT_BASE.to_string());
-        let trimmed = base.trim_end_matches('/');
-        // If the user supplied the full endpoint URL, use it as-is.
-        let url = if trimmed.ends_with("/chat/completions") || trimmed.ends_with("/messages") {
-            trimmed.to_string()
-        } else if trimmed.ends_with("/v1") {
-            format!("{}/chat/completions", trimmed)
-        } else {
-            format!("{}/v1/chat/completions", trimmed)
-        };
+        // Use base_url exactly as provided — the gateway handles routing.
+        // Fall back to the public OpenAI chat completions endpoint when not set.
+        let url = base_url
+            .unwrap_or_else(|| format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE));
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream }
     }
 
