@@ -98,9 +98,10 @@ async fn send_with_retry(
     http: &reqwest::Client,
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response> {
+    let mut last_resp = None;
     for attempt in 0..MAX_RETRIES {
         let resp = build(http).send().await?;
-        if resp.status().as_u16() != 429 || attempt + 1 == MAX_RETRIES {
+        if resp.status().as_u16() != 429 {
             return Ok(resp);
         }
         // Honour Retry-After if present, else exponential back-off.
@@ -111,10 +112,18 @@ async fn send_with_retry(
             .and_then(|s| s.parse::<u64>().ok())
             .map(|s| s * 1_000)
             .unwrap_or(5_000 << attempt); // 5 s, 10 s, 20 s, 40 s, 80 s
-        eprintln!("  rate limited — retrying in {}s…", delay_ms / 1_000);
-        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+        let remaining = MAX_RETRIES - attempt - 1;
+        if remaining > 0 {
+            println!("  ⚠ rate limited — retrying in {}s… ({} attempt(s) left)",
+                delay_ms / 1_000, remaining);
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+        } else {
+            last_resp = Some(resp);
+        }
     }
-    unreachable!()
+    // All retries exhausted — return the last 429 response so the caller
+    // can surface a clean error with the response body.
+    Ok(last_resp.unwrap())
 }
 
 // ── Anthropic streaming client ────────────────────────────────────────────────
