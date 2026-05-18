@@ -5,7 +5,7 @@ use std::io::{self, Write};
 
 /// Tools that require explicit user approval in Ask mode.
 /// Read-only and network-read tools are auto-allowed to avoid prompt fatigue.
-const WRITE_TOOLS: &[&str] = &["shell", "write_file", "edit_file"];
+const WRITE_TOOLS: &[&str] = &["shell", "write_file", "edit_file", "batch_edit"];
 
 pub struct PermissionManager {
     pub mode: PermissionMode,

@@ -1,8 +1,25 @@
 #!/bin/sh
-# Blocks a commit if src/*.rs files changed but FEATURES.md was not updated.
+# Pre-commit checks:
+#   1. cargo clippy — no warnings allowed
+#   2. FEATURES.md must be staged whenever src/ files change
+#
 # Install: scripts/install-hooks.sh
 
+# ── 1. Clippy ────────────────────────────────────────────────────────────────
 src_staged=$(git diff --cached --name-only | grep '^src/.*\.rs$')
+if [ -n "$src_staged" ]; then
+    echo "  ◌ Running cargo clippy…"
+    if ! cargo clippy --all-targets --quiet -- -D warnings 2>&1; then
+        echo ""
+        echo "  ✗ clippy found issues — fix them before committing."
+        echo "  To skip: git commit --no-verify"
+        echo ""
+        exit 1
+    fi
+    echo "  ✓ clippy passed"
+fi
+
+# ── 2. FEATURES.md gate ───────────────────────────────────────────────────────
 features_staged=$(git diff --cached --name-only | grep '^FEATURES\.md$')
 
 if [ -n "$src_staged" ] && [ -z "$features_staged" ]; then

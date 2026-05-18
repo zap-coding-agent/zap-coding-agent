@@ -22,6 +22,12 @@ pub trait Tool: Send + Sync {
     fn input_schema(&self) -> serde_json::Value;
     fn permission_context(&self, input: &serde_json::Value) -> String;
     async fn execute(&self, input: serde_json::Value) -> Result<String>;
+
+    /// Returns the filesystem path this tool writes to, if any.
+    /// The session uses this to trigger incremental code re-indexing after mutations.
+    fn affected_path<'a>(&self, _input: &'a serde_json::Value) -> Option<&'a str> {
+        None
+    }
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────

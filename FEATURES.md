@@ -21,6 +21,14 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Plan summary | `src/task_planner.rs:print_plan_summary` | numbered task list with skill tags in terminal |
 | Session pre-load | `src/agent_core.rs:run_repl` | plan goal sent as first user turn after task mode |
 
+### Module structure
+| Module | File | Responsibility |
+|---|---|---|
+| Session core | `src/session/mod.rs` | struct, `new()`, tool loop, slash dispatcher |
+| Slash commands | `src/session/commands.rs` | all `cmd_*` handlers, `/init` helpers |
+| Theme constants | `src/ui.rs:theme` | named colour palette (PRIMARY, MUTED, BORDER, …) |
+| inquire picker style | `src/ui.rs:inquire_render_config` | shared RenderConfig for all pickers |
+
 ### Core agent loop
 | Feature | File | Notes |
 |---|---|---|
@@ -120,7 +128,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### Security & permissions
 | Feature | File | Notes |
 |---|---|---|
-| Permission modes (ask/auto/deny) | `src/permission_manager.rs` | per-tool, per-session |
+| Permission modes (ask/auto/deny) | `src/permission_manager.rs` | per-tool, per-session; WRITE_TOOLS includes batch_edit |
+| `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | fires before cloud send on tool results |
 | Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
 | Audit log | `src/audit.rs` | every event → `agent_audit.jsonl` (JSONL) |

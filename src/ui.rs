@@ -152,6 +152,33 @@ impl ThinkingSpinner {
     }
 }
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+/// Named colour palette — prevents 30+ scattered `truecolor()` calls from drifting.
+pub mod theme {
+    pub const PRIMARY:  (u8, u8, u8) = (255, 210,  50); // gold   — headings, accents
+    pub const MUTED:    (u8, u8, u8) = (100,  95, 130); // muted  — labels, hints
+    pub const BORDER:   (u8, u8, u8) = ( 60,  55,  80); // border — horizontal rules
+    pub const ACCENT:   (u8, u8, u8) = (100, 210, 255); // cyan   — values, links
+    pub const BOX:      (u8, u8, u8) = ( 70,  65,  90); // dark   — ╭─ ╰─ box drawing
+    pub const SKILL:    (u8, u8, u8) = (255, 200,  60); // amber  — skill labels
+    pub const SUB:      (u8, u8, u8) = (120, 115, 140); // grey   — descriptions
+    pub const INFO:     (u8, u8, u8) = (150, 200, 150); // green  — hook / info output
+    pub const WARN:     (u8, u8, u8) = (180, 100,  80); // orange — warnings
+}
+
+/// Standard inquire picker style used across all slash-command pickers.
+pub fn inquire_render_config() -> inquire::ui::RenderConfig<'static> {
+    use inquire::ui::{Attributes, Color, RenderConfig, StyleSheet, Styled};
+    RenderConfig::default()
+        .with_prompt_prefix(Styled::new("  ◆").with_fg(Color::LightYellow))
+        .with_highlighted_option_prefix(Styled::new(" ❯").with_fg(Color::LightYellow))
+        .with_selected_option(Some(
+            StyleSheet::new().with_fg(Color::LightCyan).with_attr(Attributes::BOLD),
+        ))
+        .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey))
+}
+
 // ── Slash command table ───────────────────────────────────────────────────────
 
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[

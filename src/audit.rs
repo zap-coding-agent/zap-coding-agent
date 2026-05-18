@@ -22,7 +22,8 @@ pub fn record(event: &str) -> Result<()> {
     };
     let line = serde_json::to_string(&rec)?;
 
-    let mut guard = WRITER.lock().unwrap();
+    let mut guard = WRITER.lock()
+        .map_err(|_| anyhow::anyhow!("audit mutex poisoned"))?;
     if guard.is_none() {
         let file = OpenOptions::new()
             .create(true)
@@ -30,7 +31,8 @@ pub fn record(event: &str) -> Result<()> {
             .open(AUDIT_LOG_PATH)?;
         *guard = Some(BufWriter::new(file));
     }
-    let writer = guard.as_mut().unwrap();
+    let writer = guard.as_mut()
+        .ok_or_else(|| anyhow::anyhow!("audit writer unavailable"))?;
     writeln!(writer, "{}", line)?;
     writer.flush()?;
 

@@ -93,6 +93,9 @@ impl Tool for EditFileTool {
         format!("edit '{}': replace old_string with new_string",
             input["path"].as_str().unwrap_or("?"))
     }
+    fn affected_path<'a>(&self, input: &'a serde_json::Value) -> Option<&'a str> {
+        input["path"].as_str()
+    }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"]
             .as_str()
@@ -172,6 +175,9 @@ impl Tool for WriteFileTool {
         let bytes = input["content"].as_str().map(|s| s.len()).unwrap_or(0);
         format!("write {} bytes to '{}'", bytes, path)
     }
+    fn affected_path<'a>(&self, input: &'a serde_json::Value) -> Option<&'a str> {
+        input["path"].as_str()
+    }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"]
             .as_str()
@@ -237,6 +243,9 @@ impl Tool for BatchEditTool {
         let path = input["path"].as_str().unwrap_or("?");
         let n = input["edits"].as_array().map(|a| a.len()).unwrap_or(0);
         format!("batch edit '{}': {} edit(s)", path, n)
+    }
+    fn affected_path<'a>(&self, input: &'a serde_json::Value) -> Option<&'a str> {
+        input["path"].as_str()
     }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"].as_str().context("batch_edit: 'path' required")?;
