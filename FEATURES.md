@@ -146,11 +146,20 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | Permission modes (ask/auto/deny) | `src/permission_manager.rs` | per-tool, per-session; WRITE_TOOLS includes batch_edit |
+| Batch permission prompt | `src/permission_manager.rs:prompt_batch` | ONE grouped UI for all pending tool calls per turn instead of per-call prompts |
+| Tool grant classes | `src/permission_manager.rs:tool_grant_class` | 'a' for edit_file grants write_file + batch_edit for the session |
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | fires before cloud send on tool results |
 | Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
 | Audit log | `src/audit.rs` | every event → `~/.zap/audit.jsonl` (JSONL, global) |
-| `/audit [N]` | `src/session.rs:cmd_audit` | last N entries |
+| `/audit [N]` | `src/session/commands.rs:cmd_audit` | last N entries |
+
+### CI / headless / remote control
+| Feature | File | Notes |
+|---|---|---|
+| `--auto` / `-y` flag | `src/cli.rs` | shorthand for AGENT_PERMISSION_MODE=auto; no env var needed |
+| `--sdk` mode | `src/agent_core.rs:run_sdk` | JSON-lines stdin→stdout; multi-turn session; NO_COLOR auto-set; stderr for terminal noise |
+| SDK protocol | `src/agent_core.rs:run_sdk` | stdin: `{"type":"user","text":"..."}` / `{"type":"quit"}`; stdout: `{"type":"assistant","text":"...","turn":N,"ctx_pct":N}` |
 
 ### Session & persistence
 | Feature | File | Notes |

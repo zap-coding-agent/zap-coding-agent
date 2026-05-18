@@ -31,6 +31,25 @@ pub struct Args {
     /// Output format for single-shot mode: text (default) or json
     #[arg(long, default_value = "text")]
     pub output_format: String,
+
+    /// Auto-approve all tool operations — shorthand for AGENT_PERMISSION_MODE=auto.
+    /// Ideal for CI pipelines and scripts. Implies non-interactive mode.
+    #[arg(long, short = 'y')]
+    pub auto: bool,
+
+    /// SDK / headless mode: read newline-delimited prompts from stdin, run each as
+    /// a conversation turn, output the agent's text reply to stdout as JSON.
+    /// Implies --auto. Useful for scripting, remote control, and GitLab CI.
+    ///
+    /// Protocol — stdin (one JSON object per line):
+    ///   {"type":"user","text":"your prompt here"}
+    ///   {"type":"quit"}
+    ///
+    /// Protocol — stdout (one JSON object per line):
+    ///   {"type":"assistant","text":"...","turn":N,"ctx_pct":N}
+    ///   {"type":"error","message":"..."}
+    #[arg(long)]
+    pub sdk: bool,
 }
 
 // ── Banner ────────────────────────────────────────────────────────────────────
@@ -243,6 +262,16 @@ pub async fn run() -> Result<()> {
 
     if args.output_format.eq_ignore_ascii_case("json") {
         config.output_format = crate::config::OutputFormat::Json;
+    }
+
+    // --auto / --sdk both imply auto permission mode.
+    if args.auto || args.sdk {
+        config.permission_mode = crate::config::PermissionMode::Auto;
+    }
+
+    if args.sdk {
+        tracing::info!(model = %config.model, "SDK mode");
+        return crate::agent_core::run_sdk(&config).await;
     }
 
     match args.goal {

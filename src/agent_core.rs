@@ -203,6 +203,94 @@ pub async fn run_repl(config: &Config) -> Result<()> {
     Ok(())
 }
 
+// ── SDK / headless mode ───────────────────────────────────────────────────────
+//
+// Reads newline-delimited JSON from stdin, runs each "user" turn through the
+// session, and writes the assistant's response as JSON to stdout.
+//
+// stdin:  {"type":"user","text":"..."} | {"type":"quit"}
+// stdout: {"type":"assistant","text":"...","turn":N,"ctx_pct":N}
+//         {"type":"error","message":"..."}
+//
+// All non-JSON terminal output (tool call boxes, spinners, etc.) goes to stderr,
+// keeping stdout clean for machine consumption.
+pub async fn run_sdk(config: &Config) -> Result<()> {
+    // Redirect coloured terminal noise to stderr in SDK mode.
+    // The colored crate respects NO_COLOR; we set it so callers get clean stdout.
+    std::env::set_var("NO_COLOR", "1");
+
+    audit::record(&format!("sdk_start model={}", config.model))?;
+    let mut session = Session::new(config).await?;
+
+    use tokio::io::AsyncBufReadExt;
+    let stdin  = tokio::io::stdin();
+    let reader = tokio::io::BufReader::new(stdin);
+    let mut lines = reader.lines();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let line = line.trim().to_string();
+        if line.is_empty() { continue; }
+
+        let msg: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v)  => v,
+            Err(e) => {
+                let err = serde_json::json!({"type":"error","message": format!("bad JSON: {}", e)});
+                println!("{}", err);
+                continue;
+            }
+        };
+
+        match msg["type"].as_str() {
+            Some("user") => {
+                let text = match msg["text"].as_str() {
+                    Some(t) => t.to_string(),
+                    None => {
+                        let err = serde_json::json!({"type":"error","message":"missing 'text' field"});
+                        println!("{}", err);
+                        continue;
+                    }
+                };
+
+                if let Err(e) = session.handle_user_turn(&text).await {
+                    let err = serde_json::json!({"type":"error","message": e.to_string()});
+                    println!("{}", err);
+                    continue;
+                }
+
+                // Extract the last assistant text from the session.
+                let response_text = session.messages.iter().rev()
+                    .find(|m| m.role == "assistant")
+                    .and_then(|m| m.content.iter().find_map(|b| {
+                        if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                    }))
+                    .unwrap_or("")
+                    .to_string();
+
+                let out = serde_json::json!({
+                    "type": "assistant",
+                    "text": response_text,
+                    "turn": session.turn_count,
+                    "ctx_pct": session.context_fill_pct(),
+                    "usage": {
+                        "input_tokens":  session.session_usage.input_tokens,
+                        "output_tokens": session.session_usage.output_tokens,
+                    }
+                });
+                println!("{}", out);
+            }
+            Some("quit") | Some("exit") => break,
+            other => {
+                let err = serde_json::json!({"type":"error","message": format!("unknown type: {:?}", other)});
+                println!("{}", err);
+            }
+        }
+    }
+
+    session.hooks.fire_session_end();
+    audit::record("sdk_end")?;
+    Ok(())
+}
+
 // ── Sub-agent (spawned by SpawnAgentTool) ─────────────────────────────────────
 
 pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {

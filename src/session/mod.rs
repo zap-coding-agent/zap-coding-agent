@@ -471,15 +471,18 @@ impl Session {
                 content: response.content.clone(),
             });
 
-            // Phase 1: check permissions sequentially.
+            // Phase 1: permissions — quick-check each call, then ONE grouped prompt
+            // for anything that needs user input (instead of per-call prompts).
             struct ApprovedCall {
                 id:    String,
                 name:  String,
                 input: serde_json::Value,
                 ctx:   String,
             }
-            let mut approved:     Vec<ApprovedCall>   = Vec::new();
-            let mut tool_results: Vec<ContentBlock>   = Vec::new();
+            let mut approved:        Vec<ApprovedCall>            = Vec::new();
+            let mut tool_results:    Vec<ContentBlock>            = Vec::new();
+            // Calls that need a user prompt: (id, name, ctx, input)
+            let mut needs_prompt:    Vec<(String, String, String, serde_json::Value)> = Vec::new();
 
             for block in &tool_calls {
                 let ContentBlock::ToolUse { id, name, input } = block else { continue };
@@ -489,32 +492,64 @@ impl Session {
                 let ctx = self.tools.get(name)
                     .map(|t| t.permission_context(input))
                     .unwrap_or_default();
-                let allowed = self.permissions.check(name, &ctx)?;
 
-                if !allowed {
-                    audit::record(&format!("tool_denied name={} id={}", name, id))?;
-                    tool_results.push(ContentBlock::ToolResult {
-                        tool_use_id: id.clone(),
-                        content:     "Permission denied by user.".to_string(),
-                    });
-                } else {
-                    // Fire PreToolUse hooks — exit code 2 blocks execution.
-                    match self.hooks.fire_pre_tool_use(name, input) {
-                        crate::hooks::HookDecision::Block(reason) => {
-                            audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
-                            tool_results.push(ContentBlock::ToolResult {
-                                tool_use_id: id.clone(),
-                                content:     format!("Blocked by hook: {}", reason),
-                            });
+                match self.permissions.quick_check(name) {
+                    crate::permission_manager::QuickDecision::Allow => {
+                        match self.hooks.fire_pre_tool_use(name, input) {
+                            crate::hooks::HookDecision::Block(reason) => {
+                                audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content:     format!("Blocked by hook: {}", reason),
+                                });
+                            }
+                            crate::hooks::HookDecision::Allow => {
+                                approved.push(ApprovedCall {
+                                    id: id.clone(), name: name.clone(),
+                                    input: input.clone(), ctx,
+                                });
+                            }
                         }
-                        crate::hooks::HookDecision::Allow => {
-                            approved.push(ApprovedCall {
-                                id:    id.clone(),
-                                name:  name.clone(),
-                                input: input.clone(),
-                                ctx,
-                            });
+                    }
+                    crate::permission_manager::QuickDecision::Deny => {
+                        audit::record(&format!("tool_denied name={} id={}", name, id))?;
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: id.clone(),
+                            content:     "Permission denied by policy.".to_string(),
+                        });
+                    }
+                    crate::permission_manager::QuickDecision::NeedsPrompt => {
+                        needs_prompt.push((id.clone(), name.clone(), ctx, input.clone()));
+                    }
+                }
+            }
+
+            // Batch prompt — one grouped UI for all pending calls.
+            if !needs_prompt.is_empty() {
+                let batch: Vec<(String, String, String)> = needs_prompt.iter()
+                    .map(|(id, name, ctx, _)| (id.clone(), name.clone(), ctx.clone()))
+                    .collect();
+                let decisions = self.permissions.prompt_batch(&batch)?;
+                for (i, (id, name, ctx, input)) in needs_prompt.into_iter().enumerate() {
+                    if decisions[i] {
+                        match self.hooks.fire_pre_tool_use(&name, &input) {
+                            crate::hooks::HookDecision::Block(reason) => {
+                                audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id,
+                                    content:     format!("Blocked by hook: {}", reason),
+                                });
+                            }
+                            crate::hooks::HookDecision::Allow => {
+                                approved.push(ApprovedCall { id, name, input, ctx });
+                            }
                         }
+                    } else {
+                        audit::record(&format!("tool_denied name={} id={}", name, id))?;
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: id,
+                            content:     "Permission denied by user.".to_string(),
+                        });
                     }
                 }
             }
