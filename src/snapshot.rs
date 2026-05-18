@@ -27,7 +27,7 @@ pub fn save_snapshot(path: &str) -> Result<()> {
     let content = std::fs::read_to_string(&canonical)
         .with_context(|| format!("snapshot: cannot read '{}'", path))?;
 
-    let mut map = SNAPSHOTS.lock().unwrap();
+    let mut map = SNAPSHOTS.lock().unwrap_or_else(|e| e.into_inner());
     map.entry(canonical).or_default().push(content);
     Ok(())
 }
@@ -38,7 +38,7 @@ pub fn restore_snapshot(path: &str) -> Result<String> {
     let canonical = std::fs::canonicalize(path)
         .unwrap_or_else(|_| PathBuf::from(path));
 
-    let mut map = SNAPSHOTS.lock().unwrap();
+    let mut map = SNAPSHOTS.lock().unwrap_or_else(|e| e.into_inner());
     let stack = map.get_mut(&canonical)
         .context(format!("undo: no snapshot found for '{}'", path))?;
 
@@ -59,7 +59,7 @@ pub fn restore_snapshot(path: &str) -> Result<String> {
 
 /// List all files that have snapshots available.
 pub fn list_snapshots() -> Vec<String> {
-    let map = SNAPSHOTS.lock().unwrap();
+    let map = SNAPSHOTS.lock().unwrap_or_else(|e| e.into_inner());
     map.iter()
         .filter(|(_, stack)| !stack.is_empty())
         .map(|(path, stack)| format!("{} ({} undo(s))", path.display(), stack.len()))

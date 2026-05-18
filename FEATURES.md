@@ -159,7 +159,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Batch permission prompt | `src/permission_manager.rs:prompt_batch` | ONE grouped UI for all pending tool calls per turn instead of per-call prompts |
 | Tool grant classes | `src/permission_manager.rs:tool_grant_class` | 'a' for edit_file grants write_file + batch_edit for the session |
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
-| Secret scanner | `src/secret_scanner.rs` | fires before cloud send on tool results |
+| Secret scanner | `src/secret_scanner.rs` | 29 patterns: API keys, VCS tokens, AWS, GCP, JWT, cert blocks, credential fields |
+| Path traversal guard | `src/tools/file.rs:guard_path` | normalizes `..`, blocks `~/.ssh`, `~/.aws`, `~/.kube`, certs, `/etc/shadow`, `~/.agent.toml` |
+| ~/.agent.toml permissions | `src/config.rs:Config::save` | chmod 0600 on save (Unix) |
+| Mutex poison recovery | `src/snapshot.rs` | `unwrap_or_else(|e| e.into_inner())` — no panic on poisoned lock |
 | Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
 | Audit log | `src/audit.rs` | every event → `~/.zap/audit.jsonl` (JSONL, global) |
 | `/audit [N]` | `src/session/commands.rs:cmd_audit` | last N entries |

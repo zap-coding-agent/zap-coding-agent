@@ -21,20 +21,36 @@ struct Pattern {
 }
 
 const PATTERNS: &[Pattern] = &[
+    // API keys
     Pattern { name: "Anthropic API key",   needle: "sk-ant-" },
     Pattern { name: "OpenAI API key",      needle: "sk-proj-" },
-    Pattern { name: "OpenAI API key",      needle: "sk-or-" },
+    Pattern { name: "OpenAI API key (legacy)", needle: "sk-or-" },
+    Pattern { name: "Stripe live key",     needle: "sk_live_" },
+    Pattern { name: "Stripe test key",     needle: "sk_test_" },
+    // VCS tokens
     Pattern { name: "GitHub token",        needle: "ghp_" },
     Pattern { name: "GitHub token",        needle: "ghs_" },
     Pattern { name: "GitHub token",        needle: "gho_" },
-    Pattern { name: "AWS access key",      needle: "akia" },        // lowercase match
-    Pattern { name: "Private key block",   needle: "-----begin" },  // lowercase match
+    Pattern { name: "GitHub token",        needle: "github_pat_" },
+    Pattern { name: "GitLab token",        needle: "glpat-" },
+    // Cloud
+    Pattern { name: "AWS access key",      needle: "akia" },
+    Pattern { name: "AWS secret key",      needle: "aws_secret_access_key" },
+    Pattern { name: "GCP service account", needle: "\"type\": \"service_account\"" },
+    // Crypto / certs
+    Pattern { name: "Private key block",   needle: "-----begin" },
+    Pattern { name: "JWT token",           needle: "eyjh" },  // base64 '{"' prefix
+    Pattern { name: "JWT token",           needle: "eyja" },
+    // Generic credential fields (config files)
     Pattern { name: "password field",      needle: "password =" },
     Pattern { name: "password field",      needle: "password=" },
+    Pattern { name: "password field",      needle: "passwd=" },
     Pattern { name: "api_key field",       needle: "api_key =" },
     Pattern { name: "api_key field",       needle: "api_key=" },
     Pattern { name: "secret field",        needle: "secret =" },
     Pattern { name: "secret field",        needle: "secret=" },
+    Pattern { name: "token field",         needle: "access_token=" },
+    Pattern { name: "token field",         needle: "access_token =" },
 ];
 
 /// Scan `content` and return all detected secret matches.

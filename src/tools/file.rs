@@ -5,6 +5,62 @@ use similar::{ChangeTag, TextDiff};
 
 use super::Tool;
 
+// ── Path safety guard ─────────────────────────────────────────────────────────
+
+/// Normalize a path string to an absolute path without requiring it to exist
+/// (unlike std::fs::canonicalize). Resolves `.` and `..` components.
+fn normalize_path(path: &str) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+    let base = if std::path::Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let mut out = PathBuf::new();
+    for c in base.components() {
+        match c {
+            Component::ParentDir => { out.pop(); }
+            Component::CurDir    => {}
+            other                => out.push(other),
+        }
+    }
+    out
+}
+
+/// Reject paths that point at known-sensitive locations (credentials, keys, config).
+/// Called before every file read or write.
+fn guard_path(path: &str) -> Result<()> {
+    let abs = normalize_path(path);
+    let abs_str = abs.to_string_lossy().to_lowercase();
+
+    const BLOCKED_SEGMENTS: &[&str] = &[
+        "/.ssh/", "/.aws/", "/.gnupg/", "/.kube/", "/.docker/",
+        "/.config/gcloud", "/.netrc", "/.git-credentials", "/.pgpass",
+        "/etc/passwd", "/etc/shadow", "/etc/sudoers",
+    ];
+    for seg in BLOCKED_SEGMENTS {
+        if abs_str.contains(seg) {
+            anyhow::bail!(
+                "security: access to '{}' is blocked (sensitive path). \
+                 Use the shell tool if access is intentional.",
+                path
+            );
+        }
+    }
+
+    // Block ~/.agent.toml — contains API keys.
+    if let Some(home) = dirs::home_dir() {
+        if abs == home.join(".agent.toml") {
+            anyhow::bail!(
+                "security: '{}' is blocked — it contains API keys.",
+                path
+            );
+        }
+    }
+
+    Ok(())
+}
+
 // ── read_file ─────────────────────────────────────────────────────────────────
 
 pub(super) struct ReadFileTool;
@@ -36,6 +92,7 @@ impl Tool for ReadFileTool {
         let path = input["path"]
             .as_str()
             .context("read_file: 'path' must be a string")?;
+        guard_path(path)?;
 
         let raw = tokio::fs::read_to_string(path)
             .await
@@ -100,6 +157,7 @@ impl Tool for EditFileTool {
         let path = input["path"]
             .as_str()
             .context("edit_file: 'path' must be a string")?;
+        guard_path(path)?;
         let old_string = input["old_string"]
             .as_str()
             .context("edit_file: 'old_string' must be a string")?;
@@ -182,6 +240,7 @@ impl Tool for WriteFileTool {
         let path = input["path"]
             .as_str()
             .context("write_file: 'path' must be a string")?;
+        guard_path(path)?;
         let content = input["content"]
             .as_str()
             .context("write_file: 'content' must be a string")?;
@@ -249,6 +308,7 @@ impl Tool for BatchEditTool {
     }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"].as_str().context("batch_edit: 'path' required")?;
+        guard_path(path)?;
         let edits = input["edits"].as_array().context("batch_edit: 'edits' required")?;
 
         let _ = crate::snapshot::save_snapshot(path);

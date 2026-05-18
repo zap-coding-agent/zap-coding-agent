@@ -224,6 +224,14 @@ impl Config {
         if self.timeout_secs != 120 {
             writeln!(f, "timeout_secs = {}", self.timeout_secs)?;
         }
+
+        // Restrict to owner-read/write only — file contains API keys.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+
         Ok(())
     }
 }
