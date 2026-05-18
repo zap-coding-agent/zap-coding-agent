@@ -72,6 +72,20 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `debugging` | triggered | debug, error, crash, panic, stacktrace… |
 | `security` | triggered | auth, password, token, jwt, xss, injection… |
 
+### Corporate / network settings
+| Feature | File | Notes |
+|---|---|---|
+| Global HTTP client | `src/http.rs:init` | `OnceLock<reqwest::Client>` singleton; call once at startup |
+| Proxy support | `src/http.rs` | `AGENT_PROXY` env / `~/.agent.toml`; auto-detects `HTTP_PROXY`/`HTTPS_PROXY` |
+| No-proxy bypass | `src/http.rs` | `AGENT_NO_PROXY` env / config; passed to `reqwest::NoProxy` |
+| Custom CA bundle | `src/http.rs:load_ca` | `AGENT_CA_BUNDLE` / `SSL_CERT_FILE` / `CURL_CA_BUNDLE`; PEM or DER |
+| TLS skip verify | `src/http.rs` | `AGENT_TLS_SKIP_VERIFY=1`; dangerous, prints warning |
+| Timeout | `src/http.rs` | `AGENT_TIMEOUT_SECS` env / config; default 120s |
+| Proxy credential redaction | `src/http.rs:redact_proxy_url` | strips `user:pass@` before display |
+| Network startup banner | `src/session/mod.rs:Session::new` | shown when proxy/CA/TLS-verify-off is active |
+| `/config` network rows | `src/session/commands.rs:cmd_config` | shows proxy, ca_bundle, tls_verify, timeout when non-default |
+| Config persistence | `src/config.rs:Config::save` | network fields written to `~/.agent.toml` |
+
 ### Providers & LLM client
 | Feature | File | Notes |
 |---|---|---|

@@ -33,6 +33,19 @@ pub struct Config {
     pub output_format: OutputFormat,
     /// Remaining nesting depth for sub-agents. 0 = spawning disabled.
     pub agent_depth: u8,
+
+    // ── Corporate / network settings ─────────────────────────────────────────
+    /// Explicit proxy URL, e.g. "http://user:pass@proxy.corp.com:8080".
+    /// If absent, reqwest auto-detects HTTP_PROXY / HTTPS_PROXY from the environment.
+    pub proxy: Option<String>,
+    /// Comma-separated hosts that bypass the proxy, e.g. "localhost,.corp.internal".
+    pub no_proxy: Option<String>,
+    /// Path to a PEM or DER CA certificate file for environments with TLS inspection.
+    pub ca_bundle: Option<String>,
+    /// Disable TLS certificate verification. Dangerous — only for broken corp proxies.
+    pub tls_skip_verify: bool,
+    /// HTTP request timeout in seconds (default 120).
+    pub timeout_secs: u64,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -41,11 +54,17 @@ pub struct Config {
 /// All fields are optional so a partial file is fine.
 #[derive(Debug, Deserialize, Default)]
 struct FileConfig {
-    provider: Option<String>,
-    model: Option<String>,
-    api_key: Option<String>,
-    base_url: Option<String>,
+    provider:        Option<String>,
+    model:           Option<String>,
+    api_key:         Option<String>,
+    base_url:        Option<String>,
     permission_mode: Option<String>,
+    // network
+    proxy:           Option<String>,
+    no_proxy:        Option<String>,
+    ca_bundle:       Option<String>,
+    tls_skip_verify: Option<bool>,
+    timeout_secs:    Option<u64>,
 }
 
 impl FileConfig {
@@ -125,7 +144,35 @@ impl Config {
             other  => anyhow::bail!("invalid permission_mode '{}' — use ask / auto / deny", other),
         };
 
-        Ok(Self { permission_mode, api_key, model, provider, base_url, output_format: OutputFormat::Text, agent_depth: 3 })
+        // ── proxy ─────────────────────────────────────────────────────────────
+        let proxy = env::var("AGENT_PROXY").ok().or(file.proxy);
+
+        let no_proxy = env::var("AGENT_NO_PROXY").ok().or(file.no_proxy);
+
+        // ── CA bundle ─────────────────────────────────────────────────────────
+        // Respect the same env var names that curl and Python use.
+        let ca_bundle = env::var("AGENT_CA_BUNDLE").ok()
+            .or_else(|| env::var("SSL_CERT_FILE").ok())
+            .or_else(|| env::var("CURL_CA_BUNDLE").ok())
+            .or(file.ca_bundle);
+
+        // ── TLS skip verify ───────────────────────────────────────────────────
+        let tls_skip_verify = env::var("AGENT_TLS_SKIP_VERIFY")
+            .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
+            .unwrap_or(file.tls_skip_verify.unwrap_or(false));
+
+        // ── Timeout ───────────────────────────────────────────────────────────
+        let timeout_secs = env::var("AGENT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .or(file.timeout_secs)
+            .unwrap_or(120);
+
+        Ok(Self {
+            permission_mode, api_key, model, provider, base_url,
+            output_format: OutputFormat::Text, agent_depth: 3,
+            proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
+        })
     }
 
     /// Write current config back to ~/.agent.toml.
@@ -154,6 +201,23 @@ impl Config {
         writeln!(f, "api_key  = {:?}", self.api_key)?;
         writeln!(f)?;
         writeln!(f, "permission_mode = {:?}", pm_str)?;
+        writeln!(f)?;
+        writeln!(f, "# Network / corporate proxy settings")?;
+        if let Some(ref p) = self.proxy {
+            writeln!(f, "proxy    = {:?}", p)?;
+        }
+        if let Some(ref np) = self.no_proxy {
+            writeln!(f, "no_proxy = {:?}", np)?;
+        }
+        if let Some(ref ca) = self.ca_bundle {
+            writeln!(f, "ca_bundle = {:?}", ca)?;
+        }
+        if self.tls_skip_verify {
+            writeln!(f, "tls_skip_verify = true")?;
+        }
+        if self.timeout_secs != 120 {
+            writeln!(f, "timeout_secs = {}", self.timeout_secs)?;
+        }
         Ok(())
     }
 }

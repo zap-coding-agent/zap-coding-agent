@@ -31,10 +31,7 @@ impl Tool for WebFetchTool {
         let url       = input["url"].as_str().context("web_fetch: 'url' required")?;
         let max_chars = input["max_chars"].as_u64().unwrap_or(8000) as usize;
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .user_agent("Mozilla/5.0 zap-agent/0.1")
-            .build()?;
+        let client = crate::http::client();
 
         let resp = client.get(url).send().await
             .with_context(|| format!("web_fetch: could not reach '{}'", url))?;
@@ -84,10 +81,7 @@ impl Tool for WebSearchTool {
         let query = input["query"].as_str().context("web_search: 'query' required")?;
         let max   = input["max_results"].as_u64().unwrap_or(5) as usize;
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .user_agent("Mozilla/5.0 zap-agent/0.1")
-            .build()?;
+        let client = crate::http::client();
 
         let resp = client
             .get("https://api.duckduckgo.com/")

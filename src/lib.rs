@@ -1,5 +1,6 @@
 pub mod agent_core;
 pub mod hooks;
+pub mod http;
 pub mod audit;
 pub mod cli;
 pub mod code_index;

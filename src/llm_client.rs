@@ -182,7 +182,7 @@ impl AnthropicClient {
         let url = base_url
             .map(|b| format!("{}/v1/messages", b.trim_end_matches('/')))
             .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
-        Self { http: reqwest::Client::new(), api_key, model, url, suppress_stream }
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream }
     }
 
     fn process_event(
@@ -401,7 +401,7 @@ impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
         let base = base_url.unwrap_or_else(|| OPENAI_DEFAULT_BASE.to_string());
         let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
-        Self { http: reqwest::Client::new(), api_key, model, url, suppress_stream }
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream }
     }
 
     /// Convert our internal messages to the OpenAI wire format.

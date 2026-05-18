@@ -110,6 +110,19 @@ impl Session {
         kv("permissions",        mode);
         kv("sub-agents",         &depth_label);
         kv("turns this session", &self.turn_count.to_string());
+        // Network / proxy settings
+        if let Some(ref p) = self.config.proxy {
+            kv("proxy",          p);
+        }
+        if let Some(ref ca) = self.config.ca_bundle {
+            kv("ca_bundle",      ca);
+        }
+        if self.config.tls_skip_verify {
+            kv("tls_verify",     "DISABLED");
+        }
+        if self.config.timeout_secs != 120 {
+            kv("timeout",        &format!("{}s", self.config.timeout_secs));
+        }
         println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
         println!();
     }
@@ -426,7 +439,7 @@ impl Session {
                 return;
             }
         };
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         match client.get(&url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {

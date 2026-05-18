@@ -48,6 +48,7 @@ pub struct Session {
 
 impl Session {
     pub async fn new(config: &Config) -> Result<Self> {
+        crate::http::init(config);
         let store = persistence::init()?;
         let session_id = store.save_session("(repl)", &config.model)?;
 
@@ -98,6 +99,14 @@ impl Session {
                 "  {} {} hook(s) loaded",
                 "◎".truecolor(255, 160, 80),
                 hooks.total().to_string().cyan(),
+            );
+        }
+
+        if let Some(summary) = crate::http::network_summary(config) {
+            println!(
+                "  {} {}",
+                "◎".truecolor(180, 180, 100),
+                summary.dimmed(),
             );
         }
 
