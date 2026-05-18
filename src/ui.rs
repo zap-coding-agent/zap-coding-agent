@@ -199,6 +199,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/audit",       "[N]  audit log"),
     ("/hooks",       "list configured hooks"),
     ("/tasks",       "browse & execute task sessions"),
+    ("/index",       "[path|stats]  reindex AST code symbols"),
+    ("/undo",        "[file]  undo last file edit"),
     ("/cost",        "token usage & cost"),
     ("/run",         "<name>  run a workflow"),
     ("/workflow",    "new <name>  scaffold a workflow"),

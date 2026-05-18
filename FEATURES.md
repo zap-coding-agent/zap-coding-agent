@@ -137,7 +137,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | SQLite persistence | `src/code_index.rs` | `.zap/code.db`, incremental re-parse |
 | Global index singleton | `src/code_index.rs:set_global` | shared across tool calls |
 | Auto-reindex on write/edit | `src/session.rs:handle_user_turn` | fires after `write_file`/`edit_file`/`batch_edit` |
-| `/index [path|stats]` | `src/session.rs:cmd_index` | manual reindex or stats |
+| `/index [path|stats]` | `src/session.rs:cmd_index` | manual reindex or stats; appears in / picker and tab-completion |
 
 ### Hooks (src/hooks.rs)
 | Feature | File | Notes |
