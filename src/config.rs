@@ -36,6 +36,9 @@ pub struct Config {
     /// True when this config is for a sub-agent session. Suppresses startup banners
     /// and other output that would interleave with the parent session's output.
     pub is_subagent: bool,
+    /// Nesting depth of this session: 0 = top-level, 1 = first sub-agent, etc.
+    /// Incremented by run_subagent; never persisted to disk.
+    pub spawn_depth: u8,
 
     // ── Corporate / network settings ─────────────────────────────────────────
     /// Explicit proxy URL, e.g. "http://user:pass@proxy.corp.com:8080".
@@ -173,7 +176,7 @@ impl Config {
 
         Ok(Self {
             permission_mode, api_key, model, provider, base_url,
-            output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false,
+            output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
         })
     }

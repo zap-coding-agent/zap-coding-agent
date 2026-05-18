@@ -37,8 +37,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Sub-agent spawning | `src/agent_core.rs:run_subagent` | `--agent-depth N` enables; returns JSON: summary, files_changed, turns, token usage |
 | Sub-agent orchestration prompt | `src/context_manager.rs` | LLM taught trigger patterns, anti-patterns, and how to announce parallel plans |
 | Sub-agent startup suppression | `src/session/mod.rs` + `src/config.rs:is_subagent` | sub-agents don't reprint banners; clean parallel output |
+| Sub-agent Auto permission mode | `src/agent_core.rs:run_subagent` | sub-agents forced to Auto to prevent stdin deadlock with parent session |
+| Sub-agent depth tracking | `src/config.rs:spawn_depth` | nesting level tracked in config; L1/L2/L3 labels always correct |
 | `spawn_agent` permission gate | `src/permission_manager.rs` | spawn_agent now requires user approval (was auto-approved) |
 | `files_in_scope` schema field | `src/tools/agent.rs` | advisory list of files each sub-agent will touch; visible in permission prompt |
+| `files_changed` via trait | `src/agent_core.rs:run_subagent` | uses `Tool::affected_path()` instead of hardcoded tool name list |
 | Parallel tool execution | `src/session/mod.rs:handle_user_turn` | `join_all` after permission phase |
 | Ctrl+C cancellation | `src/session/mod.rs` | `tokio::select!` around turn loop |
 | Turn counter + ctx% in prompt | `src/agent_core.rs` | `[N:branch\|42%] ❯`; % colour-coded at 70/85% |

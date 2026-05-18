@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     audit,
-    config::{Config, OutputFormat},
+    config::{Config, OutputFormat, PermissionMode},
     llm_client::ContentBlock,
     session::Session,
     ui::{show_command_picker, SlashHandler, ZapHelper},
@@ -295,13 +295,16 @@ pub async fn run_sdk(config: &Config) -> Result<()> {
 
 pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
     let mut sub_config = config.clone();
-    sub_config.output_format = OutputFormat::Json;
-    sub_config.agent_depth   = config.agent_depth.saturating_sub(1);
-    sub_config.is_subagent   = true; // suppress startup banners
+    sub_config.output_format  = OutputFormat::Json;
+    sub_config.agent_depth    = config.agent_depth.saturating_sub(1);
+    sub_config.is_subagent    = true; // suppress startup banners
+    sub_config.spawn_depth    = config.spawn_depth.saturating_add(1);
+    // Sub-agents must run in Auto mode: they have no controlling terminal, so
+    // prompting stdin would deadlock (parent session is blocking on this call).
+    sub_config.permission_mode = PermissionMode::Auto;
 
-    // depth label: how many levels deep are we (original depth - remaining + 1)
-    let depth_level = 4u8.saturating_sub(sub_config.agent_depth);
-    let short_goal  = if goal.len() > 60 { &goal[..60] } else { goal };
+    let depth_level = sub_config.spawn_depth;
+    let short_goal: String = goal.chars().take(60).collect();
     println!(
         "  {} {} {}  {}",
         "◈".bright_cyan(),
@@ -310,10 +313,10 @@ pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
         short_goal.truecolor(120, 115, 140),
     );
 
+    let audit_goal: String = goal.chars().take(80).collect();
     audit::record(&format!(
         "subagent_start goal=\"{}\" depth={}",
-        &goal[..goal.len().min(80)],
-        depth_level
+        audit_goal, depth_level
     ))?;
 
     let mut session = Session::new(&sub_config).await?;
@@ -325,16 +328,16 @@ pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
         .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
         .count();
 
-    // Collect files that were written/edited — helps parent understand what changed.
+    // Collect files that were written/edited via the affected_path() trait method,
+    // which is the canonical source of truth rather than hardcoded tool names.
     let mut files_changed: Vec<String> = session.messages.iter()
         .flat_map(|m| &m.content)
         .filter_map(|b| {
             if let ContentBlock::ToolUse { name, input, .. } = b {
-                if matches!(name.as_str(), "edit_file" | "write_file" | "batch_edit") {
-                    return input["path"].as_str().map(|s| s.to_string());
-                }
+                session.tools.get(name)?.affected_path(input).map(str::to_string)
+            } else {
+                None
             }
-            None
         })
         .collect::<std::collections::HashSet<_>>()
         .into_iter()

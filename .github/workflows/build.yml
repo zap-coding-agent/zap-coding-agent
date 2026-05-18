@@ -19,11 +19,13 @@ jobs:
             target: aarch64-apple-darwin
             artifact: zap-macos-arm64
             binary_ext: ""
+            upload_file: zap-macos-arm64
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: zap-windows-x86_64
             binary_ext: ".exe"
+            upload_file: zap-windows-x86_64.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -54,11 +56,16 @@ jobs:
         shell: bash
         run: cp "target/${{ matrix.target }}/release/zap${{ matrix.binary_ext }}" "${{ matrix.artifact }}${{ matrix.binary_ext }}"
 
+      - name: Package Windows ZIP
+        if: matrix.binary_ext == '.exe'
+        shell: pwsh
+        run: Compress-Archive -Path "${{ matrix.artifact }}.exe" -DestinationPath "${{ matrix.artifact }}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}${{ matrix.binary_ext }}
+          path: ${{ matrix.upload_file }}
           retention-days: 14
 
   # ── Publish "latest" release ─────────────────────────────────────────────────
@@ -99,10 +106,10 @@ jobs:
           body: |
             **Latest build** — automatically published on every push to `main`.
 
-            | Platform | Binary |
+            | Platform | Download |
             |---|---|
             | macOS Apple Silicon (ARM) | `zap-macos-arm64` |
-            | Windows x86_64 | `zap-windows-x86_64.exe` |
+            | Windows x86_64 | `zap-windows-x86_64.zip` (extract and run `zap.exe`) |
 
             **Commit:** `${{ github.sha }}`
             **Version:** v${{ steps.ver.outputs.version }}
@@ -119,9 +126,10 @@ jobs:
 
             **Windows x86_64**
             ```powershell
-            # Download zap-windows-x86_64.exe, then:
+            # Download zap-windows-x86_64.zip, then:
+            Expand-Archive zap-windows-x86_64.zip .
             Move-Item zap-windows-x86_64.exe C:\Users\You\bin\zap.exe
             ```
           files: |
             artifacts/zap-macos-arm64/zap-macos-arm64
-            artifacts/zap-windows-x86_64/zap-windows-x86_64.exe
+            artifacts/zap-windows-x86_64/zap-windows-x86_64.zip
