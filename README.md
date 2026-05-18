@@ -142,7 +142,51 @@ cp target/release/zap ~/.local/bin/zap
 
 ---
 
-### 4. Security is a First-Class Concern
+### 4. Lazy MCP Loading — Zero Token Cost Until You Need It
+
+Most agents with MCP support connect to **every configured server at startup** and dump all their tool schemas into the LLM's context on every turn. Ten MCP servers with five tools each? That's potentially 10,000+ wasted tokens per request — even if you never touch those tools.
+
+zap solves this with **lazy loading**:
+
+| Stage | Other agents | zap |
+|---|---|---|
+| Startup | Spawns all server processes | Reads `.mcp.json`, stores configs only |
+| System prompt | (silent) | Server names + descriptions injected |
+| LLM tool list | All tool schemas, always | Just `mcp_connect(server)` until needed |
+| First use | Already connected | Spawns process, handshakes, loads tools |
+| Next LLM call | — | Real schemas in context, ready to call |
+
+**How it works in practice:**
+
+The LLM is told what MCP servers exist (by name and description) in the system prompt — enough to decide which to use. When it needs one, it calls `mcp_connect("filesystem")`. zap spawns the process, runs the MCP handshake, fetches `tools/list`, registers the tools, and updates the LLM's tool list in the same agentic turn. The very next call in that turn sees the full tool list and can invoke them directly.
+
+Once connected, `mcp_connect` disappears from the tool list for that server — no overhead for already-loaded servers.
+
+**`.mcp.json` with optional descriptions** (backwards-compatible):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
+      "description": "Read and write local files"
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_..." },
+      "description": "GitHub repos, issues, and pull requests"
+    }
+  }
+}
+```
+
+The `description` field is shown to the LLM before the server is connected — so it can decide which server is relevant without loading any of them.
+
+---
+
+### 5. Security is a First-Class Concern
 
 zap handles your source code, credentials, and shell — so it treats security as a core feature, not an afterthought.
 
@@ -186,7 +230,7 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
 | **Branching** | `/branch` forks a conversation like a git branch; `/switch` to move between them |
 | **Sub-agents** | `spawn_agent` runs parallel sub-agents, each with its own tool loop |
-| **MCP** | Standard Model Context Protocol support via `.mcp.json` (stdio JSON-RPC 2.0) |
+| **MCP (lazy-loaded)** | `.mcp.json` servers connected on demand — zero token cost until first use; `mcp_connect` tool auto-expands tool list mid-turn |
 | **Workflows** | Declarative YAML multi-step pipelines in `.zap/workflows/` — versioned with your repo |
 | **Images** | `/attach <path>` or `/paste` clipboard — multimodal on supported models |
 | **Audit log** | Every tool call written to `agent_audit.jsonl` |
@@ -200,9 +244,9 @@ The model can also undo its own edits using the `undo_edit` tool.
 | Platform | Status |
 |---|---|
 | macOS ARM (Apple Silicon) | Available |
+| Windows x86_64 | Available |
 | macOS Intel | Coming soon |
 | Linux x86_64 | Coming soon |
-| Windows | Coming soon |
 
 ### macOS ARM — Apple Silicon
 
@@ -236,6 +280,22 @@ zap
 
 > **macOS Gatekeeper note:** On macOS 15+ you may see `zsh: killed zap` on first run.
 > Fix: `codesign --sign - ~/.local/bin/zap`
+
+### Windows x86_64
+
+1. Download `zap-windows-x86_64.exe` from the [latest release](https://github.com/sanjeev23oct/zap/releases/latest)
+
+2. Rename and move it somewhere on your PATH, e.g.:
+
+```powershell
+Move-Item zap-windows-x86_64.exe C:\Users\You\bin\zap.exe
+```
+
+3. Run:
+
+```powershell
+zap
+```
 
 ### Build from source
 
