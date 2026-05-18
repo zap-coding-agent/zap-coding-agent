@@ -143,7 +143,7 @@ impl Session {
 
     pub fn cmd_audit(&self, arg: &str) {
         let n: usize = arg.trim().parse().unwrap_or(20).max(1).min(500);
-        match std::fs::read_to_string(audit::AUDIT_LOG_PATH) {
+        match std::fs::read_to_string(audit::audit_log_path()) {
             Ok(content) => {
                 let lines: Vec<&str> = content.lines().collect();
                 let start = lines.len().saturating_sub(n);

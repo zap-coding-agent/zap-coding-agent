@@ -5,7 +5,13 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::sync::Mutex;
 
-pub const AUDIT_LOG_PATH: &str = "agent_audit.jsonl";
+pub fn audit_log_path() -> std::path::PathBuf {
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".zap");
+    std::fs::create_dir_all(&base).ok();
+    base.join("audit.jsonl")
+}
 
 #[derive(Serialize)]
 struct AuditRecord<'a> {
@@ -28,7 +34,7 @@ pub fn record(event: &str) -> Result<()> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(AUDIT_LOG_PATH)?;
+            .open(audit_log_path())?;
         *guard = Some(BufWriter::new(file));
     }
     let writer = guard.as_mut()

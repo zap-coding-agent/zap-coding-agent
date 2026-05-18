@@ -132,13 +132,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | fires before cloud send on tool results |
 | Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
-| Audit log | `src/audit.rs` | every event → `agent_audit.jsonl` (JSONL) |
+| Audit log | `src/audit.rs` | every event → `~/.zap/audit.jsonl` (JSONL, global) |
 | `/audit [N]` | `src/session.rs:cmd_audit` | last N entries |
 
 ### Session & persistence
 | Feature | File | Notes |
 |---|---|---|
-| SQLite session store | `src/persistence.rs` | `agent_sessions.db` |
+| SQLite session store | `src/persistence.rs` | `~/.zap/agent.db` (global — shared across all projects) |
 | Message persistence | `src/persistence.rs:save_messages` | serialised after every turn |
 | Session resume | `src/session.rs:cmd_sessions` | fuzzy picker via inquire |
 | Key-value memory | `src/persistence.rs` | `/memory list/get/set/del` |

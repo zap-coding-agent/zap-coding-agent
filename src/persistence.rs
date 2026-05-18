@@ -2,16 +2,23 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-const DB_PATH: &str = "agent_sessions.db";
-
 pub struct Store {
     conn: Connection,
 }
 
+fn db_path() -> std::path::PathBuf {
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".zap");
+    std::fs::create_dir_all(&base).ok();
+    base.join("agent.db")
+}
+
 impl Store {
     pub fn open() -> Result<Self> {
-        let conn = Connection::open(DB_PATH)
-            .context("failed to open SQLite database")?;
+        let path = db_path();
+        let conn = Connection::open(&path)
+            .with_context(|| format!("failed to open database at {}", path.display()))?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
