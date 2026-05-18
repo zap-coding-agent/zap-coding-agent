@@ -27,8 +27,7 @@ use tokio::sync::Mutex;
 
 /// Raw entry as it appears in the JSON — both stdio and SSE/HTTP entries.
 /// We use a lenient schema so that files shared with Claude Code / Roo Code
-/// (which support SSE/HTTP servers with a `url` instead of `command`) don't
-/// fail the whole parse when one entry uses a transport we don't support yet.
+/// don't fail the whole parse when one entry uses a transport we don't support.
 #[derive(Debug, Deserialize)]
 struct RawServerEntry {
     /// stdio transport — the executable to spawn.
@@ -40,6 +39,15 @@ struct RawServerEntry {
     pub description: Option<String>,
     /// SSE/HTTP transport — url instead of command (not yet supported by zap).
     pub url: Option<String>,
+    /// Claude Code / Roo Code — when true, skip this server entirely.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Claude Code / Roo Code — list of auto-approved tools (ignored by zap for now).
+    #[serde(rename = "autoApprove", default)]
+    pub auto_approve: Vec<String>,
+    /// Figma MCP / others — list of disabled tools (ignored by zap for now).
+    #[serde(rename = "disabledTools", default)]
+    pub disabled_tools: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -114,6 +122,10 @@ pub(crate) fn load_file(path: &std::path::Path) -> McpConfig {
     };
     let mut cfg = McpConfig::default();
     for (name, entry) in raw.servers {
+        if entry.disabled {
+            // Respect disabled: true (same as Claude Code / Roo Code behaviour).
+            continue;
+        }
         match entry.command {
             Some(cmd) => {
                 cfg.servers.insert(name, McpServerConfig {
@@ -130,9 +142,9 @@ pub(crate) fn load_file(path: &std::path::Path) -> McpConfig {
                     .map(|u| format!("url={}", u))
                     .unwrap_or_else(|| "unknown transport".to_string());
                 crate::zap_warn!(
-                    "mcp: skipping '{}' from {} — no `command` field ({}). \
+                    "mcp: skipping '{}' — no `command` field ({}). \
                      Only stdio servers are supported.",
-                    name, path.display(), transport
+                    name, transport
                 );
             }
         }
