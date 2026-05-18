@@ -55,6 +55,9 @@ pub struct Config {
     /// Optional token budget cap. When set, overrides the model's default context
     /// window for fill-% calculation. Warns at 80%, refuses at 100%.
     pub budget: Option<u32>,
+    /// Extra skill directories to scan in addition to ~/.zap/skills/ and .zap/skills/.
+    /// Set in ~/.agent.toml as: skill_paths = [".kiro/skills", "~/shared-skills"]
+    pub skill_paths: Vec<String>,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -74,6 +77,7 @@ struct FileConfig {
     ca_bundle:       Option<String>,
     tls_skip_verify: Option<bool>,
     timeout_secs:    Option<u64>,
+    skill_paths:     Option<Vec<String>>,
 }
 
 impl FileConfig {
@@ -177,11 +181,13 @@ impl Config {
             .or(file.timeout_secs)
             .unwrap_or(120);
 
+        let skill_paths = file.skill_paths.unwrap_or_default();
+
         Ok(Self {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
-            budget: None,
+            budget: None, skill_paths,
         })
     }
 

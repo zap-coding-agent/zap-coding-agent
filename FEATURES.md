@@ -56,7 +56,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### Skill system
 | Feature | File | Notes |
 |---|---|---|
-| Skill loader | `src/skill_manager.rs:load_all_skills` | bundled → global → project, same-name override |
+| Skill loader | `src/skill_manager.rs:load_all_skills` | bundled → global → extra paths → project, same-name override |
+| Extra skill paths | `src/config.rs`, `src/skill_manager.rs` | `skill_paths = [".kiro/skills"]` in `~/.agent.toml`; shown as `◉ external` in `/skill list`; `~` expansion supported |
 | Always-on skills | `src/skill_manager.rs:always_on_skills` | no `trigger:` field = always injected |
 | Triggered skills | `src/skill_manager.rs:match_skills` | keyword match per turn |
 | Stack auto-detection | `src/skill_manager.rs:detect_stack_skills` | Cargo.toml/go.mod/package.json/pyproject |

@@ -125,6 +125,9 @@ impl Session {
             kv("timeout",        &format!("{}s", self.config.timeout_secs));
         }
         kv("log file",           &crate::log::log_path().to_string_lossy());
+        if !self.config.skill_paths.is_empty() {
+            kv("skill_paths", &self.config.skill_paths.join(", "));
+        }
         println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
         println!();
     }
@@ -901,7 +904,7 @@ impl Session {
 
         match subcmd {
             "list" | "" => {
-                let skills = crate::skill_manager::load_all_skills();
+                let skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
                 if skills.is_empty() {
                     println!("  No skills found.");
                     println!("  Create one: {} or add .md files to .zap/skills/", "/skill create <name>".cyan());
@@ -917,13 +920,15 @@ impl Session {
                     if group.is_empty() { continue; }
                     println!("  {} {}", "▸".truecolor(255, 210, 50), group_label.truecolor(150, 140, 170).bold());
                     for s in group {
-                        let (glyph, src_color) = match s.source {
+                        let (glyph, src_color) = match &s.source {
                             crate::skill_manager::SkillSource::Project =>
                                 ("▶", s.name.truecolor(100, 230, 130).bold()),
                             crate::skill_manager::SkillSource::Global  =>
                                 ("●", s.name.truecolor(100, 210, 255).bold()),
                             crate::skill_manager::SkillSource::Bundled =>
                                 ("◆", s.name.truecolor(200, 195, 220).bold()),
+                            crate::skill_manager::SkillSource::External(_) =>
+                                ("◉", s.name.truecolor(255, 200, 100).bold()),
                         };
                         let src_tag = format!("[{}]", crate::skill_manager::source_label(&s.source));
                         let detail = if s.is_always_on() {
@@ -944,18 +949,19 @@ impl Session {
                     }
                     println!();
                 }
-                println!("  {} {} | {} | {} | {}",
+                println!("  {} {} | {} | {} | {} | {}",
                     "tip:".truecolor(100, 95, 130),
                     "◆ built-in".truecolor(200, 195, 220),
                     "● global (~/.zap/skills/)".truecolor(100, 210, 255),
                     "▶ project (.zap/skills/)".truecolor(100, 230, 130),
+                    "◉ external (skill_paths in ~/.agent.toml)".truecolor(255, 200, 100),
                     "/skill create <name>".cyan(),
                 );
                 println!();
             }
             "show" => {
                 if name.is_empty() { println!("  Usage: /skill show <name>"); return; }
-                match crate::skill_manager::load_all_skills().into_iter().find(|s| s.name == name) {
+                match crate::skill_manager::load_all_skills(&self.config.skill_paths).into_iter().find(|s| s.name == name) {
                     Some(s) => {
                         println!();
                         let trigger_display = if s.is_always_on() {
@@ -987,7 +993,7 @@ impl Session {
                 match crate::skill_manager::create_skill(name, true) {
                     Ok(path) => {
                         println!("  {} Created: {}", "✓".green(), path.display().to_string().cyan());
-                        self.skills = crate::skill_manager::load_all_skills();
+                        self.skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
                     }
                     Err(e) => println!("  {} {}", "✗".red(), e),
                 }
@@ -1040,7 +1046,7 @@ impl Session {
                         match crate::skill_manager::save_captured_skill(skill_name, &content, global) {
                             Ok(path) => {
                                 println!("  {} skill saved → {}", "✓".green(), path.display().to_string().cyan());
-                                self.skills = crate::skill_manager::load_all_skills();
+                                self.skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
                             }
                             Err(e) => println!("  {} could not save: {}", "✗".red(), e),
                         }

@@ -153,7 +153,7 @@ impl Session {
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
 
-        let skills      = crate::skill_manager::load_all_skills();
+        let skills      = crate::skill_manager::load_all_skills(&config.skill_paths);
         let always_on   = crate::skill_manager::always_on_skills(&skills);
         let stack_skills = crate::skill_manager::detect_stack_skills(&skills);
 

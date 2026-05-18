@@ -32,9 +32,10 @@ pub struct Skill {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkillSource {
-    Bundled,  // shipped with the binary, lowest priority
-    Global,   // ~/.zap/skills/
-    Project,  // .zap/skills/  — highest priority
+    Bundled,           // shipped with the binary, lowest priority
+    Global,            // ~/.zap/skills/
+    Project,           // .zap/skills/  — high priority
+    External(PathBuf), // user-configured extra path (.kiro/skills, etc.)
 }
 
 impl Skill {
@@ -60,18 +61,32 @@ impl Skill {
 }
 
 /// Short display label for a skill's source tier.
-pub fn source_label(source: &SkillSource) -> &'static str {
+pub fn source_label(source: &SkillSource) -> String {
     match source {
-        SkillSource::Bundled => "built-in",
-        SkillSource::Global  => "global",
-        SkillSource::Project => "project",
+        SkillSource::Bundled       => "built-in".to_string(),
+        SkillSource::Global        => "global".to_string(),
+        SkillSource::Project       => "project".to_string(),
+        SkillSource::External(p)   => p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string_lossy().into_owned()),
     }
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
 
+/// Expand `~` at the start of a path to the actual home directory.
+fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(p)
+}
+
 /// Returns all skill directories to scan, in priority order (project overrides global).
-fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
+/// `extra` comes from `config.skill_paths` — e.g. [".kiro/skills", "~/shared-skills"].
+fn skill_dirs(extra: &[String]) -> Vec<(PathBuf, SkillSource)> {
     let mut dirs = Vec::new();
 
     // Global: ~/.zap/skills/
@@ -82,7 +97,15 @@ fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
         }
     }
 
-    // Project-local: .zap/skills/ (relative to cwd)
+    // User-configured extra paths (inserted between global and project so project still wins).
+    for raw in extra {
+        let p = expand_tilde(raw);
+        if p.is_dir() {
+            dirs.push((p.clone(), SkillSource::External(p)));
+        }
+    }
+
+    // Project-local: .zap/skills/ (highest priority, can override everything)
     let local = PathBuf::from(".zap").join("skills");
     if local.is_dir() {
         dirs.push((local, SkillSource::Project));
@@ -91,29 +114,27 @@ fn skill_dirs() -> Vec<(PathBuf, SkillSource)> {
     dirs
 }
 
-/// Load all skills: bundled defaults first, then global (~/.zap/skills/),
-/// then project-local (.zap/skills/). Higher-priority skills override bundled
-/// ones of the same name.
-pub fn load_all_skills() -> Vec<Skill> {
+/// Load all skills: bundled defaults first, then global, then extra configured
+/// paths, then project-local. Higher-priority same-name skills override lower ones.
+pub fn load_all_skills(extra_dirs: &[String]) -> Vec<Skill> {
     // Start with bundled defaults.
     let mut skills: Vec<Skill> = bundled_skills();
 
-    // Overlay user skills (global then project). Same-name skills replace bundled/global.
-    for (dir, source) in skill_dirs() {
+    // Overlay user skills in priority order.
+    for (dir, source) in skill_dirs(extra_dirs) {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("md") {
                     match parse_skill_file(&path, source.clone()) {
                         Ok(skill) => {
-                            // Replace any existing skill with the same name.
                             if let Some(pos) = skills.iter().position(|s| s.name == skill.name) {
                                 skills[pos] = skill;
                             } else {
                                 skills.push(skill);
                             }
                         }
-                        Err(e) => tracing::warn!("skill: could not parse {:?}: {}", path, e),
+                        Err(e) => crate::zap_warn!("skill: could not parse {:?}: {}", path, e),
                     }
                 }
             }

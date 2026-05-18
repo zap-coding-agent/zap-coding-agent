@@ -586,9 +586,10 @@ pub fn write_tasks_md(plan: &TaskPlan, skills: &[Skill]) -> Result<std::path::Pa
                 .iter()
                 .find(|s| &s.name == sname)
                 .map(|s| match s.source {
-                    SkillSource::Project  => " [project]",
-                    SkillSource::Global   => " [global]",
-                    SkillSource::Bundled  => " [built-in]",
+                    SkillSource::Project     => " [project]",
+                    SkillSource::Global      => " [global]",
+                    SkillSource::Bundled     => " [built-in]",
+                    SkillSource::External(_) => " [external]",
                 })
                 .unwrap_or(" [stub]");
 
