@@ -214,6 +214,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
 | MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers discovered at startup, processes spawned on first use via `mcp_connect` tool |
 | API error URL in message | `src/llm_client.rs` | 404/40x errors include the exact constructed URL for instant diagnosis |
+| Full endpoint URL passthrough | `src/llm_client.rs` | if `base_url` ends with `/messages` or `/chat/completions`, used as-is — no suffix appended |
 | MCP command validation | `src/mcp.rs:validate_mcp_command` | blocks non-absolute paths (allowlist: node/python/npx/deno/…), shell metacharacters, `..` traversal |
 | Shell dangerous-command guard | `src/tools/shell.rs:guard_shell` | blocks `rm -rf /~`, fork bomb, `mkfs`, `dd`, `curl\|sh`, `wget\|sh` — applies even in Auto mode |
 | `--budget N` token cap | `src/cli.rs`, `src/config.rs`, `src/session/mod.rs` | overrides model context limit for fill-% tracking; warns at 80%, hard-stops at 100% |
