@@ -214,7 +214,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
-| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers discovered at startup from `~/.zap/mcp.json` (global) + `.mcp.json` (project); processes spawned on first use via `mcp_connect` tool |
+| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); SSE/HTTP entries (no `command`) are skipped with a warning instead of failing the whole file — compatible with Claude Code / Roo Code shared configs |
 | `/mcp` command | `src/session/commands.rs:cmd_mcp` | `list` — shows all servers (global/project, connected/pending); `edit` — opens `~/.zap/mcp.json` in $EDITOR; `edit project` — opens `.mcp.json`; `path` — prints file paths |
 | API error URL in message | `src/llm_client.rs` | 404/40x errors include the exact constructed URL for instant diagnosis |
 | base_url used as-is | `src/llm_client.rs` | when set, `base_url` is posted to directly — no path appended; gateway handles routing |

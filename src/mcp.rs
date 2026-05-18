@@ -25,20 +25,39 @@ use tokio::sync::Mutex;
 
 // ── Config file schema ────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Default)]
-pub struct McpConfig {
-    #[serde(rename = "mcpServers", default)]
-    pub servers: std::collections::HashMap<String, McpServerConfig>,
-}
-
+/// Raw entry as it appears in the JSON — both stdio and SSE/HTTP entries.
+/// We use a lenient schema so that files shared with Claude Code / Roo Code
+/// (which support SSE/HTTP servers with a `url` instead of `command`) don't
+/// fail the whole parse when one entry uses a transport we don't support yet.
 #[derive(Debug, Deserialize)]
-pub struct McpServerConfig {
-    pub command: String,
+struct RawServerEntry {
+    /// stdio transport — the executable to spawn.
+    pub command: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
-    /// Optional human-readable summary shown in the system prompt before the server is connected.
+    pub description: Option<String>,
+    /// SSE/HTTP transport — url instead of command (not yet supported by zap).
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawMcpFile {
+    #[serde(rename = "mcpServers", default)]
+    servers: std::collections::HashMap<String, RawServerEntry>,
+}
+
+#[derive(Debug, Default)]
+pub struct McpConfig {
+    pub servers: std::collections::HashMap<String, McpServerConfig>,
+}
+
+#[derive(Debug)]
+pub struct McpServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: std::collections::HashMap<String, String>,
     pub description: Option<String>,
 }
 
@@ -82,17 +101,43 @@ fn validate_mcp_command(cfg: &McpServerConfig) -> Result<()> {
 }
 
 /// Load a single `.mcp.json` file, returning an empty config on any error.
-fn load_file(path: &std::path::Path) -> McpConfig {
-    match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            crate::zap_warn!("could not parse {}: {}", path.display(), e);
-            McpConfig::default()
-        }),
-        Err(e) => {
-            crate::zap_warn!("could not read {}: {}", path.display(), e);
-            McpConfig::default()
+/// Entries without `command` (e.g. SSE/HTTP servers used by other agents)
+/// are silently skipped — they can't be spawned via stdio.
+pub(crate) fn load_file(path: &std::path::Path) -> McpConfig {
+    let s = match std::fs::read_to_string(path) {
+        Ok(s)  => s,
+        Err(e) => { crate::zap_warn!("could not read {}: {}", path.display(), e); return McpConfig::default(); }
+    };
+    let raw: RawMcpFile = match serde_json::from_str(&s) {
+        Ok(r)  => r,
+        Err(e) => { crate::zap_warn!("could not parse {}: {}", path.display(), e); return McpConfig::default(); }
+    };
+    let mut cfg = McpConfig::default();
+    for (name, entry) in raw.servers {
+        match entry.command {
+            Some(cmd) => {
+                cfg.servers.insert(name, McpServerConfig {
+                    command: cmd,
+                    args: entry.args,
+                    env: entry.env,
+                    description: entry.description,
+                });
+            }
+            None => {
+                // SSE/HTTP server — not yet supported; skip without failing.
+                let transport = entry.url
+                    .as_deref()
+                    .map(|u| format!("url={}", u))
+                    .unwrap_or_else(|| "unknown transport".to_string());
+                crate::zap_warn!(
+                    "mcp: skipping '{}' from {} — no `command` field ({}). \
+                     Only stdio servers are supported.",
+                    name, path.display(), transport
+                );
+            }
         }
     }
+    cfg
 }
 
 /// Load MCP config by merging two locations (project entries override global):

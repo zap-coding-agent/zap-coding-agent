@@ -531,16 +531,13 @@ impl Session {
             // ── list (default) ────────────────────────────────────────────
             "" | "list" => {
                 // Read both files independently so we can show origin.
-                let global_cfg: crate::mcp::McpConfig = global_path.as_ref()
+                let global_cfg = global_path.as_ref()
                     .filter(|p| p.exists())
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .map(|p| crate::mcp::load_file(p))
                     .unwrap_or_default();
 
-                let project_cfg: crate::mcp::McpConfig = if project_path.exists() {
-                    std::fs::read_to_string(&project_path).ok()
-                        .and_then(|s| serde_json::from_str(&s).ok())
-                        .unwrap_or_default()
+                let project_cfg = if project_path.exists() {
+                    crate::mcp::load_file(&project_path)
                 } else {
                     crate::mcp::McpConfig::default()
                 };
