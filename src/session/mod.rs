@@ -105,6 +105,65 @@ fn is_topic_shift(input: &str, messages: &[Message]) -> bool {
     (overlap as f64 / incoming.len() as f64) < 0.15
 }
 
+// ── Per-turn tool selection ───────────────────────────────────────────────────
+
+/// Return the tool definitions to send with a single LLM call.
+///
+/// Anthropic: always send everything — prompt caching makes repeated tool
+/// schemas essentially free from turn 2 onward (~10% of input token price).
+///
+/// OpenAI-compatible (local / LM Studio): smaller models benefit from a
+/// tighter tool set — fewer choices means fewer hallucinated calls and fewer
+/// wasted tokens.  We keep all coding tools always and gate `web_fetch` /
+/// `web_search` behind a keyword check so they don't bloat every request.
+fn select_tools_for_turn<'a>(
+    all: &'a [serde_json::Value],
+    user_input: &str,
+    config: &crate::config::Config,
+    messages: &[crate::llm_client::Message],
+) -> std::borrow::Cow<'a, [serde_json::Value]> {
+    use crate::config::Provider;
+
+    // Anthropic has prompt caching — no filtering needed.
+    if matches!(config.provider, Provider::Anthropic) {
+        return std::borrow::Cow::Borrowed(all);
+    }
+
+    // Check current-turn keywords.
+    let lower = user_input.to_lowercase();
+    let wants_web_now = ["http://", "https://", "url", " web ", "website",
+                         "fetch ", "curl ", "download", "browse", "docs",
+                         "documentation", "web_fetch", "web_search"]
+        .iter()
+        .any(|kw| lower.contains(kw));
+
+    // Keep web tools if already used earlier this session (sticky).
+    let web_used = messages.iter().any(|m| {
+        m.content.iter().any(|b| matches!(
+            b,
+            crate::llm_client::ContentBlock::ToolUse { name, .. }
+            if name == "web_fetch" || name == "web_search"
+        ))
+    });
+
+    if wants_web_now || web_used {
+        return std::borrow::Cow::Borrowed(all);
+    }
+
+    // Drop web tools — everything else always included.
+    let filtered: Vec<serde_json::Value> = all
+        .iter()
+        .filter(|def| {
+            !matches!(
+                def["name"].as_str().unwrap_or(""),
+                "web_fetch" | "web_search"
+            )
+        })
+        .cloned()
+        .collect();
+    std::borrow::Cow::Owned(filtered)
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 pub struct Session {
@@ -458,8 +517,11 @@ impl Session {
                 })
             };
 
+            let turn_tools = select_tools_for_turn(
+                &self.tool_defs, input, &self.config, &self.messages,
+            );
             let result = self.client
-                .send(&effective_system, &self.messages, &self.tool_defs, Some(before_output))
+                .send(&effective_system, &self.messages, &turn_tools, Some(before_output))
                 .await;
             spinner.finish_and_clear();
             let response = result?;

@@ -72,11 +72,12 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          - Only use `write_file` when creating a new file or intentionally \
            replacing 100% of an existing file's content.\n\
          \n\
-         **Git commands:**\n\
-         - Use `git_pull` when the user asks to pull, sync, update, or get latest changes.\n\
-         - Use `git_diff` when the user asks to see changes, what changed, or a diff.\n\
-         - Use `git_status` to check working-tree state.\n\
-         - Prefer these over raw `shell` calls for git operations.\n\
+         **Git commands — use `shell` directly:**\n\
+         - `git status --short && git log --oneline -10` — working tree + recent history\n\
+         - `git diff` / `git diff --cached` — unstaged / staged changes\n\
+         - `git pull` / `git pull --rebase` — sync from remote\n\
+         - `git add -p`, `git commit -m \"…\"`, `git push` — stage and commit\n\
+         Always include a `description` in the shell call so the user knows what runs.\n\
          \n\
          **Shell commands:**\n\
          - Prefer targeted tools (`git_status`, `git_pull`, `git_diff`, `search_code`) \

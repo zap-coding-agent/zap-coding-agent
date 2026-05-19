@@ -29,8 +29,8 @@ pub trait Tool: Send + Sync {
     }
 
     /// Whether the tool's raw output should be printed inline to the terminal.
-    /// True only for shell-type tools (shell, git_*) where seeing the raw result
-    /// is expected. File/search/code tools should keep silent — the LLM summarises.
+    /// True for shell where seeing the raw result is expected.
+    /// File/search/code tools keep silent — the LLM summarises.
     fn shows_inline_output(&self) -> bool {
         false
     }
@@ -48,7 +48,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, UndoEditTool, WriteFileTool};
         use search::{CodeMapTool, FindDefinitionTool, FindReferencesTool, SearchCodeTool};
-        use shell::{GitDiffTool, GitPullTool, GitStatusTool, ListDirectoryTool, ShellTool};
+        use shell::{ListDirectoryTool, ShellTool};
         use web::{WebFetchTool, WebSearchTool};
 
         let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new() };
@@ -58,9 +58,6 @@ impl ToolRegistry {
         r.register(Arc::new(BatchEditTool));
         r.register(Arc::new(UndoEditTool));
         r.register(Arc::new(ShellTool));
-        r.register(Arc::new(GitStatusTool));
-        r.register(Arc::new(GitPullTool));
-        r.register(Arc::new(GitDiffTool));
         r.register(Arc::new(SearchCodeTool));
         r.register(Arc::new(FindDefinitionTool));
         r.register(Arc::new(FindReferencesTool));
