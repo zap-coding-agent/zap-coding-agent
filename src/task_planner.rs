@@ -177,7 +177,7 @@ async fn fetch_clarifying_questions(
             "You are a concise software planning assistant. Return only valid JSON.",
             &[Message::user_text(&prompt)],
             &[],
-            None,
+            None, 0,
         )
         .await?;
 
@@ -231,7 +231,7 @@ async fn fetch_task_plan(
             "You are a precise software planning assistant. Return only valid JSON.",
             &[Message::user_text(&prompt)],
             &[],
-            None,
+            None, 0,
         )
         .await?;
 
@@ -342,7 +342,7 @@ async fn generate_skill_content(
             "You write concise, expert skill files for AI coding agents. Return only the skill markdown.",
             &[Message::user_text(&prompt)],
             &[],
-            None,
+            None, 0,
         )
         .await?;
 

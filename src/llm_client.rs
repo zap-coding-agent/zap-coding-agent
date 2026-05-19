@@ -102,6 +102,9 @@ pub enum ContentBlock {
     ToolResult { tool_use_id: String, content: String },
     /// Base64-encoded image (jpeg, png, gif, webp). Sent via /attach.
     Image { media_type: String, data: String },
+    /// Anthropic extended-thinking block. `signature` is opaque — required
+    /// when echoing the block back for multi-turn continuations.
+    Thinking { thinking: String, signature: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +155,8 @@ pub trait LlmProvider: Send + Sync {
         messages: &[Message],
         tools: &[serde_json::Value],
         before_output: Option<BeforeOutput>,
+        // thinking_budget: 0 = disabled; Anthropic uses it; OpenAI providers ignore it
+        thinking_budget: u32,
     ) -> Result<ApiResponse>;
 }
 
@@ -223,6 +228,8 @@ struct AnthropicRequest<'a> {
     messages: Vec<serde_json::Value>,
     tools: Vec<serde_json::Value>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<serde_json::Value>,
 }
 
 /// Encode our internal messages into the Anthropic wire format.
@@ -245,6 +252,13 @@ fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
                         "type": "image",
                         "source": { "type": "base64", "media_type": media_type, "data": data }
                     }),
+
+                ContentBlock::Thinking { thinking, signature } =>
+                    serde_json::json!({
+                        "type": "thinking",
+                        "thinking": thinking,
+                        "signature": signature,
+                    }),
             }
         }).collect();
 
@@ -255,10 +269,11 @@ fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
 /// Per-content-block accumulator while parsing the SSE stream.
 #[derive(Default)]
 struct BlockAccum {
-    kind: String,       // "text" or "tool_use"
+    kind: String,       // "text", "tool_use", or "thinking"
     id: String,
     name: String,
-    text: String,       // accumulated text (also streamed live to stdout)
+    text: String,       // accumulated text / thinking content
+    signature: String,  // thinking block signature (opaque, required for multi-turn)
     input_json: String, // accumulated tool input JSON
 }
 
@@ -328,9 +343,23 @@ impl AnthropicClient {
                             }
                         }
                         acc.text.push_str(chunk);
+                    } else if dtype == "thinking_delta" {
+                        let chunk = delta["thinking"].as_str().unwrap_or("");
+                        if !chunk.is_empty() {
+                            // Emit to TUI if in TUI mode; never print to stdout.
+                            if crate::tui::channel::is_tui_mode() {
+                                if let Some(cb) = before_output.take() { cb(); }
+                                crate::tui::channel::tui_send(
+                                    crate::tui::channel::TuiEvent::ThinkingChunk(chunk.to_string())
+                                );
+                            }
+                            acc.text.push_str(chunk);
+                        }
                     } else if dtype == "input_json_delta" {
                         acc.input_json
                             .push_str(delta["partial_json"].as_str().unwrap_or(""));
+                    } else if dtype == "signature_delta" {
+                        acc.signature.push_str(delta["signature"].as_str().unwrap_or(""));
                     }
                 }
             }
@@ -356,6 +385,7 @@ impl LlmProvider for AnthropicClient {
         messages: &[Message],
         tools: &[serde_json::Value],
         before_output: Option<BeforeOutput>,
+        thinking_budget: u32,
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
@@ -382,6 +412,11 @@ impl LlmProvider for AnthropicClient {
             }
         }
 
+        let thinking = if thinking_budget > 0 {
+            Some(serde_json::json!({"type": "enabled", "budget_tokens": thinking_budget}))
+        } else {
+            None
+        };
         let body = AnthropicRequest {
             model: &self.model,
             max_tokens: MAX_TOKENS,
@@ -389,6 +424,7 @@ impl LlmProvider for AnthropicClient {
             messages: encode_messages_anthropic(messages),
             tools: cached_tools,
             stream: true,
+            thinking,
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
@@ -495,6 +531,12 @@ impl LlmProvider for AnthropicClient {
                         serde_json::from_str(&acc.input_json).unwrap_or(serde_json::json!({}));
                     content.push(ContentBlock::ToolUse { id: acc.id, name: acc.name, input });
                 }
+                "thinking" if !acc.text.is_empty() => {
+                    content.push(ContentBlock::Thinking {
+                        thinking: acc.text,
+                        signature: acc.signature,
+                    });
+                }
                 _ => {}
             }
         }
@@ -521,6 +563,8 @@ impl LlmProvider for AnthropicClient {
                         serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
                     ContentBlock::Image { .. } =>
                         serde_json::json!({ "type": "image", "data": "<redacted>" }),
+                    ContentBlock::Thinking { thinking, .. } =>
+                        serde_json::json!({ "type": "thinking", "thinking": format!("<{} chars>", thinking.len()) }),
                 }).collect::<Vec<_>>(),
             });
             if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
@@ -677,6 +721,7 @@ impl LlmProvider for OpenAiClient {
         messages: &[Message],
         tools: &[serde_json::Value],
         before_output: Option<BeforeOutput>,
+        _thinking_budget: u32,  // OpenAI-compatible providers don't support extended thinking
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
@@ -881,6 +926,8 @@ impl LlmProvider for OpenAiClient {
                         serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
                     ContentBlock::Image { .. } =>
                         serde_json::json!({ "type": "image", "data": "<redacted>" }),
+                    ContentBlock::Thinking { thinking, .. } =>
+                        serde_json::json!({ "type": "thinking", "thinking": format!("<{} chars>", thinking.len()) }),
                 }).collect::<Vec<_>>(),
             });
             if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {

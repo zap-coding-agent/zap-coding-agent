@@ -22,6 +22,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/provider",          "switch provider interactively"),
     ("/permissions",       "change permission mode"),
     ("/tasks",             "browse & execute task sessions"),
+    ("/think",             "toggle extended thinking (on/off/N tokens)"),
     ("/index",             "reindex AST code symbols"),
     ("/undo",              "undo last file edit"),
     ("/init",              "create CLAUDE.md for this project"),

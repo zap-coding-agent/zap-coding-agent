@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use super::app::{App, AppState, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
+use ratatui::style::Modifier;
 use super::commands::filter_commands;
 
 pub const SPINNER_FRAMES: &[&str] = &[
@@ -486,6 +487,9 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 
         for sb in &app.streaming_blocks {
             match sb {
+                StreamingBlock::Thinking(text) => {
+                    lines.extend(thinking_streaming_lines(text));
+                }
                 StreamingBlock::Text(text) => {
                     lines.extend(text_to_lines(text, width));
                 }
@@ -530,6 +534,7 @@ pub fn message_to_lines(msg: &UiMessage, width: u16) -> Vec<Line<'static>> {
             UiBlock::Code { lang, lines: code_lines }  => lines.extend(code_block_lines(lang, code_lines)),
             UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc)),
             UiBlock::Diff { path, content }            => lines.extend(diff_block_lines(path, content)),
+            UiBlock::Thinking { char_count }           => lines.extend(thinking_collapsed_line(*char_count)),
         }
     }
     lines
@@ -695,6 +700,38 @@ pub fn tool_call_lines(tc: &UiToolCall) -> Vec<Line<'static>> {
     lines
 }
 
+
+/// Thinking shown while streaming: up to 4 dimmed lines of reasoning text.
+pub fn thinking_streaming_lines(text: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let thinking_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+    lines.push(Line::from(vec![
+        Span::styled("  🧠 ".to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled("Thinking…", thinking_style),
+    ]));
+    for line in text.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev() {
+        let display: String = if line.chars().count() > 80 {
+            format!("{}…", line.chars().take(79).collect::<String>())
+        } else {
+            line.to_string()
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  │  ".to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(display, thinking_style),
+        ]));
+    }
+    lines
+}
+
+/// Collapsed thinking header shown in completed message history.
+pub fn thinking_collapsed_line(char_count: usize) -> Vec<Line<'static>> {
+    vec![Line::from(vec![
+        Span::styled(
+            format!("  🧠 Thinking ({} chars)  ", char_count),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        ),
+    ])]
+}
 
 // ── File Browser Overlay ──────────────────────────────────────────────────────
 

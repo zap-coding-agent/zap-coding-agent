@@ -187,6 +187,8 @@ pub struct Session {
     pub code_index:    Arc<Mutex<crate::code_index::CodeIndex>>,
     pub store:         persistence::Store,
     pub hooks:         crate::hooks::HookRunner,
+    /// Extended thinking token budget. 0 = disabled. Anthropic only.
+    pub thinking_budget: u32,
 }
 
 impl Session {
@@ -338,6 +340,7 @@ impl Session {
             code_index,
             store,
             hooks,
+            thinking_budget: 0,
         })
     }
 
@@ -346,10 +349,11 @@ impl Session {
     pub fn estimated_context_tokens(&self) -> usize {
         let chars: usize = self.messages.iter().map(|m| {
             m.content.iter().map(|b| match b {
-                ContentBlock::Text { text }           => text.len(),
-                ContentBlock::ToolUse { input, .. }   => input.to_string().len(),
+                ContentBlock::Text { text }              => text.len(),
+                ContentBlock::ToolUse { input, .. }      => input.to_string().len(),
                 ContentBlock::ToolResult { content, .. } => content.len(),
-                ContentBlock::Image { data, .. }      => data.len() / 4,
+                ContentBlock::Image { data, .. }         => data.len() / 4,
+                ContentBlock::Thinking { thinking, .. }  => thinking.len() / 4,
             }).sum::<usize>()
         }).sum();
         chars / 4
@@ -521,7 +525,7 @@ impl Session {
                 &self.tool_defs, input, &self.config, &self.messages,
             );
             let result = self.client
-                .send(&effective_system, &self.messages, &turn_tools, Some(before_output))
+                .send(&effective_system, &self.messages, &turn_tools, Some(before_output), self.thinking_budget)
                 .await;
             spinner.finish_and_clear();
             let response = result?;
@@ -985,6 +989,7 @@ impl Session {
             "/hooks"       => crate::hooks::print_hooks_list(&self.hooks),
             "/mcp"         => self.cmd_mcp(arg),
             "/tasks"       => self.cmd_tasks().await,
+            "/think"       => self.cmd_think(arg),
             "/index"       => self.cmd_index(arg),
             "/branch"      => self.cmd_branch(arg).await,
             "/branches"    => self.cmd_branches(),

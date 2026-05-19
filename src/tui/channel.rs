@@ -8,6 +8,8 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone)]
 pub enum TuiEvent {
     LlmChunk(String),
+    /// A chunk of extended-thinking text (Anthropic thinking blocks).
+    ThinkingChunk(String),
     ToolStart { id: String, name: String, label: String },
     ToolDone  { id: String, elapsed_ms: u64, success: bool, preview: String },
     CostUpdate { total_usd: f64 },

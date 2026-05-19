@@ -41,6 +41,7 @@ impl Session {
                 ("/models",                  "list models on server"),
                 ("/provider",                "switch provider interactively"),
                 ("/permissions ask|auto|deny","change permission mode"),
+                ("/think [on|off|N]",        "enable extended thinking (Anthropic only)"),
             ]),
             ("code", &[
                 ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),
@@ -229,7 +230,7 @@ impl Session {
 
         let result = self.client.send(
             "You are a helpful assistant. Summarize the conversation concisely.",
-            &temp, &[], None,
+            &temp, &[], None, 0,
         ).await;
         spinner.finish_and_clear();
 
@@ -752,6 +753,39 @@ impl Session {
         }
     }
 
+    pub fn cmd_think(&mut self, arg: &str) {
+        match arg.trim() {
+            "" | "status" => {
+                if self.thinking_budget == 0 {
+                    println!("  {} Extended thinking: {}", "◎".truecolor(100, 200, 255), "off".dimmed());
+                } else {
+                    println!("  {} Extended thinking: {} token budget", "◎".truecolor(100, 200, 255), self.thinking_budget.to_string().cyan());
+                }
+                println!("  {} Usage: /think on|off|<tokens>  (e.g. /think 8000)", "·".dimmed());
+                println!("  {} Note: extended thinking requires claude-3-7-sonnet or newer.", "·".dimmed());
+            }
+            "off" | "0" => {
+                self.thinking_budget = 0;
+                println!("  {} Extended thinking {}", "◎".truecolor(100, 200, 255), "disabled".dimmed());
+            }
+            "on" => {
+                self.thinking_budget = 8000;
+                println!("  {} Extended thinking {} ({} token budget)", "◎".truecolor(100, 200, 255), "enabled".green(), "8000".cyan());
+            }
+            n => match n.parse::<u32>() {
+                Ok(0) => {
+                    self.thinking_budget = 0;
+                    println!("  {} Extended thinking {}", "◎".truecolor(100, 200, 255), "disabled".dimmed());
+                }
+                Ok(v) => {
+                    self.thinking_budget = v;
+                    println!("  {} Extended thinking {} ({} token budget)", "◎".truecolor(100, 200, 255), "enabled".green(), v.to_string().cyan());
+                }
+                Err(_) => println!("  {} Usage: /think on|off|<budget_tokens>  e.g. /think 8000", "✗".red()),
+            }
+        }
+    }
+
     pub fn cmd_index(&mut self, arg: &str) {
         let cwd    = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let target = if arg.is_empty() { cwd.clone() } else { std::path::PathBuf::from(arg) };
@@ -1104,7 +1138,7 @@ impl Session {
                 });
                 let resp = self.client.send(
                     "You extract reusable instructions from conversations into skill files.",
-                    &[Message::user_text(&capture_prompt)], &[], Some(before),
+                    &[Message::user_text(&capture_prompt)], &[], Some(before), 0,
                 ).await;
                 spinner.finish_and_clear();
 
@@ -1279,7 +1313,7 @@ impl Session {
         });
         let resp = self.client.send(
             "You summarize conversations concisely.",
-            &[Message::user_text(&prompt)], &[], Some(before),
+            &[Message::user_text(&prompt)], &[], Some(before), 0,
         ).await;
         spinner.finish_and_clear();
 

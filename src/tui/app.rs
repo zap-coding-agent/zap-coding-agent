@@ -38,6 +38,8 @@ pub enum UiBlock {
     Code { lang: String, lines: Vec<String> },
     Tool(UiToolCall),
     Diff { path: String, content: String },
+    /// Extended-thinking block: stores full text, shown collapsed in history.
+    Thinking { char_count: usize },
 }
 
 /// An in-flight block during the current assistant turn.
@@ -48,6 +50,8 @@ pub enum StreamingBlock {
     /// Accumulated text chunk (may span multiple LlmChunk events).
     Text(String),
     Tool(UiToolCall),
+    /// Accumulated extended-thinking text (Anthropic only).
+    Thinking(String),
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +184,13 @@ impl App {
                     _ => self.streaming_blocks.push(StreamingBlock::Text(text)),
                 }
             }
+            TuiEvent::ThinkingChunk(text) => {
+                self.state = AppState::Thinking;
+                match self.streaming_blocks.last_mut() {
+                    Some(StreamingBlock::Thinking(ref mut s)) => s.push_str(&text),
+                    _ => self.streaming_blocks.push(StreamingBlock::Thinking(text)),
+                }
+            }
             TuiEvent::ToolStart { id, name, label } => {
                 self.state = AppState::ToolRunning(name.clone());
                 self.streaming_blocks.push(StreamingBlock::Tool(UiToolCall {
@@ -225,6 +236,9 @@ impl App {
                 }
                 StreamingBlock::Tool(tc) => {
                     blocks_out.push(UiBlock::Tool(tc));
+                }
+                StreamingBlock::Thinking(text) => {
+                    blocks_out.push(UiBlock::Thinking { char_count: text.chars().count() });
                 }
             }
         }
