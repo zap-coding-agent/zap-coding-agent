@@ -55,6 +55,9 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | TUI-visible warnings | `src/log.rs:write` | WARN/ERROR from `zap_warn!`/`zap_error!` are forwarded via `TuiEvent::LlmChunk` so they appear in the TUI chat; previously invisible behind the alternate screen |
 | Removed redundant git tools | `src/tools/shell.rs`, `src/tools/mod.rs` | `git_status`, `git_pull`, `git_diff` removed — model uses `shell` directly; saves ~250 tokens per request |
 | Per-turn tool filtering | `src/session/mod.rs:select_tools_for_turn` | For OpenAI-compatible (local) providers, `web_fetch`/`web_search` are omitted unless the user mentions web/url/docs or web tools were already used this session; Anthropic sends all tools (cached) |
+| Windows shell compatibility | `src/shell_runner.rs:run_command` | Uses `cmd.exe /C` on Windows, `sh -c` on Unix/macOS — git commands now work natively on Windows via the shell tool |
+| Full request logging in llm.log | `src/llm_client.rs` | Every REQUEST log entry now includes `POST <url>` and `Authorization: <redacted>` so you can see exactly what endpoint and credentials are used |
+| Corporate gateway tool-support detection | `src/llm_client.rs` | HTTP 400/422 errors mentioning "tool"/"function" emit a `zap_warn!` explaining the gateway likely doesn't support function calling; text responses containing JSON-style tool-call blobs (gateway stripped tools array) also trigger a warning |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 

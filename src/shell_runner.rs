@@ -13,13 +13,24 @@ pub struct ShellOutput {
     pub exit_code: i32,
 }
 
-/// Run an arbitrary shell string via `sh -c`.
+/// Run an arbitrary shell string.
+/// Uses `cmd.exe /C` on Windows, `sh -c` everywhere else.
 /// Only use this for the user-facing `shell` tool.  Internal tools must use
 /// `run_args` / `run_args_in` to avoid shell-injection.
 pub async fn run_command(command: &str) -> Result<ShellOutput> {
     tracing::info!(command = %command, "executing shell command");
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(command);
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", command]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
     run_with_timeout(&mut cmd).await
 }
 

@@ -8,6 +8,47 @@ use crate::config::{Config, OutputFormat, Provider};
 const MAX_TOKENS: u32 = 16_000;
 const MAX_RETRIES: u32 = 5;
 
+/// Redact an API key for log files: show first 4 + last 4 chars and the total
+/// length so you can distinguish keys without exposing usable credentials.
+fn redact_token(token: &str) -> String {
+    if token.is_empty() { return "(none)".to_string(); }
+    if token.len() <= 8  { return "***".to_string(); }
+    format!("{}…{} ({} chars)", &token[..4], &token[token.len()-4..], token.len())
+}
+
+/// Detect whether a non-2xx error body suggests the gateway does not support
+/// the OpenAI tools / function-calling API.
+fn check_tool_support_error(status: u16, body: &str) {
+    if status != 400 && status != 422 { return; }
+    let lower = body.to_lowercase();
+    if lower.contains("tool") || lower.contains("function") || lower.contains("function_call") {
+        crate::zap_warn!(
+            "Gateway returned HTTP {status} with a tool/function-related error. \
+             The endpoint at your base_url may not support the OpenAI tools API. \
+             Consider using a model or gateway that supports function calling, \
+             or contact your IT team. Error snippet: {}",
+            body.chars().take(300).collect::<String>()
+        );
+    }
+}
+
+/// Detect whether a model that received tools is responding with tool-call JSON
+/// embedded in plain text — a sign the gateway silently stripped the tools array.
+fn check_text_mode_tool_call(text: &str, tools_were_sent: bool) {
+    if !tools_were_sent || text.is_empty() { return; }
+    // Pattern: {"name": "...", "arguments": ...} or similar JSON tool-call blobs in text.
+    let has_name_field = text.contains(r#""name":"#) || text.contains(r#""name": "#);
+    let has_args_field = text.contains(r#""arguments":"#) || text.contains(r#""arguments": "#)
+                      || text.contains(r#""parameters":"#) || text.contains(r#""input":"#);
+    if has_name_field && has_args_field {
+        crate::zap_warn!(
+            "Model appears to be outputting tool calls as plain text instead of using \
+             the native function-calling API. Your gateway may be silently stripping \
+             the 'tools' field from requests. Check your base_url and gateway settings."
+        );
+    }
+}
+
 // ── Shared types (internal representation) ───────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,7 +354,15 @@ impl LlmProvider for AnthropicClient {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
             v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
-                crate::log::write_llm("REQUEST [anthropic]", &pretty);
+                let auth_line = if self.bearer_auth {
+                    format!("Authorization: Bearer {}", redact_token(&self.api_key))
+                } else {
+                    format!("x-api-key: {}", redact_token(&self.api_key))
+                };
+                crate::log::write_llm(
+                    "REQUEST [anthropic]",
+                    &format!("POST {}\n{}\n\n{}", self.url, auth_line, pretty),
+                );
             }
         }
 
@@ -337,7 +386,8 @@ impl LlmProvider for AnthropicClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            crate::log::write_llm("ERROR [anthropic]", &format!("HTTP {status} — {text}"));
+            crate::log::write_llm("ERROR [anthropic]", &format!("HTTP {} — {}", status, text));
+            check_tool_support_error(status.as_u16(), &text);
             anyhow::bail!("Anthropic API returned {} (url: {}): {}", status, self.url, text);
         }
 
@@ -597,13 +647,22 @@ impl LlmProvider for OpenAiClient {
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
         // Log request — replace tools array with a count to keep the log readable.
+        let tools_were_sent = !oai_tools.is_empty();
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
             if n > 0 {
                 v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
             }
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
-                crate::log::write_llm("REQUEST [openai]", &pretty);
+                let auth_line = if self.api_key.is_empty() {
+                    "(no auth)".to_string()
+                } else {
+                    format!("Authorization: Bearer {}", redact_token(&self.api_key))
+                };
+                crate::log::write_llm(
+                    "REQUEST [openai]",
+                    &format!("POST {}\n{}\n\n{}", self.url, auth_line, pretty),
+                );
             }
         }
 
@@ -624,7 +683,8 @@ impl LlmProvider for OpenAiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            crate::log::write_llm("ERROR [openai]", &format!("HTTP {status} — {text}"));
+            crate::log::write_llm("ERROR [openai]", &format!("HTTP {} — {}", status, text));
+            check_tool_support_error(status.as_u16(), &text);
             anyhow::bail!("OpenAI API returned {} (url: {}): {}", status, self.url, text);
         }
 
@@ -710,6 +770,13 @@ impl LlmProvider for OpenAiClient {
         if let Some(cb) = before_output.take() { cb(); }
 
         // ── Assemble content blocks ───────────────────────────────────────────
+        // If the model returned text with no native tool calls but we sent tools,
+        // check whether it tried to emit tool calls as plain-text JSON — a sign
+        // the gateway silently stripped the tools field from the request.
+        if tool_accums.is_empty() && finish_reason == "stop" {
+            check_text_mode_tool_call(&text_acc, tools_were_sent);
+        }
+
         let mut content: Vec<ContentBlock> = Vec::new();
         if !text_acc.is_empty() {
             content.push(ContentBlock::Text { text: text_acc });
