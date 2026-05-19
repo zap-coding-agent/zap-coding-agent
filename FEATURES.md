@@ -50,6 +50,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Context bar in turn footer | `src/session/mod.rs:ctx_bar` | `[████████░░] 42%` after every LLM response |
 | Model-aware context limits | `src/session/mod.rs:model_context_limit` | Claude 200k, GPT-4o 128k, local 32k |
 | Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | 70% warn, 80% interactive choice, 95% auto-compact |
+| Tool result truncation | `src/session/mod.rs:handle_user_turn` | tool outputs capped at 20 000 chars before being sent to LLM; prevents context overflow on large file/dir reads |
+| Empty response detection | `src/session/mod.rs:handle_user_turn` | detects 200 OK with empty content + 0 tokens (context window exceeded); shows `zap_warn!` with context size and advice instead of silently stopping |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 

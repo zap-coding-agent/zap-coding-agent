@@ -464,6 +464,18 @@ impl Session {
             spinner.finish_and_clear();
             let response = result?;
 
+            // Empty response with no usage usually means the model's context window
+            // was exceeded — the server returns 200 OK but an empty SSE stream.
+            if response.content.is_empty() && response.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0) == 0 {
+                let ctx_k = self.estimated_context_tokens() / 1000;
+                crate::zap_warn!(
+                    "Model returned an empty response (context ~{}k tokens). \
+                     Try /compact to free space, or increase the model's context window in LM Studio.",
+                    ctx_k
+                );
+                break;
+            }
+
             if let Some(ref u) = response.usage {
                 self.session_usage.input_tokens       += u.input_tokens;
                 self.session_usage.output_tokens      += u.output_tokens;
@@ -737,7 +749,19 @@ impl Session {
                                             print_tool_output(&output);
                                         }
                                     }
-                                    ContentBlock::ToolResult { tool_use_id: call.id, content: output }
+                                    // Cap tool result size so large outputs don't blow the context.
+                                    const MAX_TOOL_CHARS: usize = 20_000;
+                                    let content = if output.len() > MAX_TOOL_CHARS {
+                                        format!(
+                                            "{}\n\n[... truncated — output was {} chars, showing first {}]",
+                                            &output[..MAX_TOOL_CHARS],
+                                            output.len(),
+                                            MAX_TOOL_CHARS,
+                                        )
+                                    } else {
+                                        output
+                                    };
+                                    ContentBlock::ToolResult { tool_use_id: call.id, content }
                                 }
                                 Err(e) => {
                                     let _ = audit::record(&format!("tool_error name={} err={}", call.name, e));
