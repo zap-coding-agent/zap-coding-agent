@@ -46,6 +46,15 @@ pub fn write(level: &str, msg: &str) {
     // Always visible on screen.
     println!("  {}", line);
 
+    // In TUI mode println! writes to the alternate screen buffer and is hidden
+    // by the next render. Route WARN/ERROR into the chat via LlmChunk so the
+    // user actually sees them.
+    if level.trim() == "WARN" || level.trim() == "ERROR" {
+        crate::tui::channel::tui_send(
+            crate::tui::channel::TuiEvent::LlmChunk(format!("\n⚠ {}\n", msg))
+        );
+    }
+
     // Also append to log file.
     let mut guard = WRITER.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
