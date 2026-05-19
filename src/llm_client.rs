@@ -308,8 +308,10 @@ impl LlmProvider for AnthropicClient {
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
-        // Log request to ~/.zap/llm.log
-        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+        // Log request — replace tools array with a count to keep the log readable.
+        if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
+            v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
                 crate::log::write_llm("REQUEST [anthropic]", &pretty);
             }
@@ -594,8 +596,12 @@ impl LlmProvider for OpenAiClient {
         }
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
-        // Log request to ~/.zap/llm.log
-        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+        // Log request — replace tools array with a count to keep the log readable.
+        if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
+            if n > 0 {
+                v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
+            }
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
                 crate::log::write_llm("REQUEST [openai]", &pretty);
             }
