@@ -71,6 +71,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.file_browser.is_some() {
         draw_file_browser(frame, app, size);
     }
+
+    // Draw session picker overlay if open
+    if app.session_picker.is_some() {
+        draw_session_picker(frame, app, size);
+    }
 }
 
 // ── Header — 7-line rich brand (border + 5 content rows + border) ────────────
@@ -840,4 +845,92 @@ fn draw_file_preview(frame: &mut Frame, browser: &super::file_browser::FileBrows
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(para, inner);
     }
+}
+
+// ── Session picker overlay ─────────────────────────────────────────────────────
+
+fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let picker = match app.session_picker.as_ref() {
+        Some(p) => p,
+        None    => return,
+    };
+
+    // Centred overlay: 82% wide, up to 22 rows tall.
+    let w       = (area.width * 82 / 100).max(40).min(area.width);
+    let visible = picker.entries.len().min(18);
+    let h       = (visible as u16 + 4).min(area.height); // borders + header + footer hint
+    let x       = area.x + (area.width.saturating_sub(w)) / 2;
+    let y       = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            " sessions  ↑↓ navigate   Enter load   Esc cancel ",
+            Style::default().fg(Color::Yellow).bold(),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    if picker.entries.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No sessions found.")
+                .style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let sel   = picker.selected.min(picker.entries.len().saturating_sub(1));
+    let start = if sel >= visible { sel - visible + 1 } else { 0 };
+    let end   = (start + visible).min(picker.entries.len());
+
+    let col_id_w    = 5usize;
+    let col_date_w  = 10usize;
+    let col_model_w = 18usize;
+    let sep_w       = 3usize; // " │ "
+    let goal_w      = (inner.width as usize)
+        .saturating_sub(col_id_w + sep_w + col_date_w + sep_w + col_model_w + sep_w + 1);
+
+    let rows: Vec<Line<'static>> = picker.entries[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let is_sel = (start + i) == sel;
+
+            let goal_disp: String = if entry.goal.chars().count() > goal_w {
+                format!("{}…", entry.goal.chars().take(goal_w.saturating_sub(1)).collect::<String>())
+            } else {
+                format!("{:<width$}", entry.goal, width = goal_w)
+            };
+            let model_disp: String = if entry.model.chars().count() > col_model_w {
+                format!("{}…", entry.model.chars().take(col_model_w - 1).collect::<String>())
+            } else {
+                format!("{:<width$}", entry.model, width = col_model_w)
+            };
+
+            let text = format!(
+                " #{:<id$} │ {:<date$} │ {} │ {}",
+                entry.id,
+                entry.date,
+                goal_disp,
+                model_disp,
+                id   = col_id_w - 1,
+                date = col_date_w,
+            );
+
+            if is_sel {
+                Line::from(Span::styled(text, Style::default().fg(Color::Black).bg(Color::Cyan)))
+            } else {
+                Line::from(Span::styled(text, Style::default().fg(Color::White)))
+            }
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(rows), inner);
 }

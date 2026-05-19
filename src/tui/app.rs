@@ -56,6 +56,21 @@ pub struct UiMessage {
     pub blocks: Vec<UiBlock>,
 }
 
+// ── Session picker ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SessionEntry {
+    pub id:    i64,
+    pub goal:  String,
+    pub model: String,
+    pub date:  String,
+}
+
+pub struct SessionPickerState {
+    pub entries:  Vec<SessionEntry>,
+    pub selected: usize,
+}
+
 // ── App ────────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -109,6 +124,9 @@ pub struct App {
     
     /// File browser state (None when closed).
     pub file_browser: Option<super::file_browser::FileBrowser>,
+
+    /// Session picker overlay (None when closed).
+    pub session_picker: Option<SessionPickerState>,
 }
 
 impl App {
@@ -139,6 +157,7 @@ impl App {
             git_ahead: 0,
             git_behind: 0,
             file_browser: None,
+            session_picker: None,
         }
     }
 

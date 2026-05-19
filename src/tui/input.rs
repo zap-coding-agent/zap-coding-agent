@@ -15,6 +15,8 @@ pub enum InputAction {
     ClearInput,
     OpenDirPicker,
     ToggleFileBrowser,
+    LoadSession(i64),
+    CloseSessionPicker,
 }
 
 /// Returns true when the command picker is active (idle + input starts with '/').
@@ -23,6 +25,11 @@ fn picker_active(app: &App) -> bool {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
+    // Session picker takes priority when open.
+    if app.session_picker.is_some() {
+        return handle_session_picker_key(app, key);
+    }
+
     // If file browser is open, handle its keys first
     if app.file_browser.is_some() {
         return handle_file_browser_key(app, key);
@@ -209,6 +216,37 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
+}
+
+/// Handle keys when the session picker overlay is open.
+fn handle_session_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let picker = app.session_picker.as_mut().unwrap();
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.session_picker = None;
+            InputAction::CloseSessionPicker
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            picker.selected = picker.selected.saturating_sub(1);
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let max = picker.entries.len().saturating_sub(1);
+            picker.selected = (picker.selected + 1).min(max);
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            if let Some(entry) = picker.entries.get(picker.selected) {
+                let id = entry.id;
+                app.session_picker = None;
+                InputAction::LoadSession(id)
+            } else {
+                app.session_picker = None;
+                InputAction::CloseSessionPicker
+            }
+        }
+        _ => InputAction::None,
+    }
 }
 
 /// Handle keys when file browser is open.

@@ -212,6 +212,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | TUI diff rendering | `src/tui/syntax.rs` | color-coded diffs (green/red/cyan) |
 | TUI file browser | `src/tui/file_browser.rs` | Ctrl+F, tree view, syntax-highlighted preview, git status |
 | TUI directory picker | `src/tui/mod.rs` | Ctrl+O, native macOS/Windows folder picker |
+| TUI session picker | `src/tui/app.rs` + `src/tui/render.rs` | `/sessions` opens centred overlay (↑↓/Enter/Esc) — no CLI breakout |
+| `/new` command (TUI) | `src/tui/commands.rs` | clears history, creates new DB session, stays in TUI |
+| Windows key doubling fix | `src/tui/mod.rs` | skip `KeyEventKind::Release` events so each key fires once |
+| Panic hook + log | `src/main.rs` | restores terminal on panic, writes `[PANIC]` to `~/.zap/zap.log` |
+| Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |
 | Colored diff on edit | `src/ui.rs` | similar crate, red/green |

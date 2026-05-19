@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, MsgRole, UiBlock, UiMessage};
+use app::{App, AppState, MsgRole, SessionEntry, SessionPickerState, UiBlock, UiMessage};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -98,6 +98,28 @@ async fn tui_loop(
         // Handle pending input (user just pressed Enter)
         if let Some(input) = app.pending_input.take() {
             if input.starts_with('/') {
+                // /sessions → open TUI-native session picker instead of dropping to CLI.
+                let cmd = input.trim();
+                if cmd == "/sessions" || cmd.starts_with("/sessions ") {
+                    match session.store.recent_sessions(30) {
+                        Ok(rows) => {
+                            app.session_picker = Some(SessionPickerState {
+                                entries: rows.iter().map(|(id, goal, model, ts)| SessionEntry {
+                                    id:    *id,
+                                    goal:  goal.clone(),
+                                    model: model.clone(),
+                                    date:  ts.get(..10).unwrap_or(ts).to_string(),
+                                }).collect(),
+                                selected: 0,
+                            });
+                        }
+                        Err(e) => {
+                            app.error = Some(format!("sessions: {e}"));
+                        }
+                    }
+                    continue;
+                }
+
                 // 1. Try native inline handler (output rendered in chat area).
                 if let Some(text) = commands::handle_inline(session, &input, config) {
                     if !text.is_empty() {
@@ -211,7 +233,11 @@ async fn tui_loop(
         // Idle: wait for terminal event (50ms timeout to keep spinner alive)
         if crossterm::event::poll(Duration::from_millis(50))? {
             match crossterm::event::read()? {
-                Event::Key(key) => {
+                // Skip Release events — on Windows crossterm fires Press+Release for every
+                // key, which would insert each character twice without this guard.
+                Event::Key(key)
+                    if key.kind != crossterm::event::KeyEventKind::Release =>
+                {
                     match handle_key(app, key) {
                         InputAction::Quit => break,
                         InputAction::Submit(text) => {
@@ -353,6 +379,32 @@ async fn tui_loop(
                                 }
                             }
                         }
+                        InputAction::LoadSession(sid) => {
+                            match session.store.load_messages(sid) {
+                                Ok(Some(json)) => {
+                                    match serde_json::from_str::<Vec<crate::llm_client::Message>>(&json) {
+                                        Ok(msgs) => {
+                                            let count = msgs.len();
+                                            let turns = msgs.iter().filter(|m| m.role == "user").count();
+                                            session.messages   = msgs;
+                                            session.turn_count = turns;
+                                            session.session_id = sid;
+                                            app.messages.push(UiMessage {
+                                                role: MsgRole::Assistant,
+                                                blocks: vec![UiBlock::Text(format!(
+                                                    "Resumed session #{sid} — {count} messages, {turns} turns."
+                                                ))],
+                                            });
+                                            app.auto_scroll = true;
+                                        }
+                                        Err(e) => app.error = Some(format!("session parse error: {e}")),
+                                    }
+                                }
+                                Ok(None) => app.error = Some(format!("No messages for session #{sid}")),
+                                Err(e)   => app.error = Some(format!("load session: {e}")),
+                            }
+                        }
+                        InputAction::CloseSessionPicker => {}
                         InputAction::ClearInput => {}
                         InputAction::None => {}
                     }

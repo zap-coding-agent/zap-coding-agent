@@ -14,6 +14,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/history",           "message count"),
     ("/clear",             "clear conversation history"),
     ("/compact",           "summarize and compress history"),
+    ("/new",               "start a fresh session (clear history)"),
     ("/sessions",          "browse and resume old sessions"),
     ("/cd",                "change working directory"),
     ("/model",             "switch model for this session"),
@@ -64,6 +65,14 @@ pub fn handle_inline(
             "{} messages in history  ·  {} turns this session",
             session.messages.len(), session.turn_count
         )),
+        "/new" => {
+            session.messages.clear();
+            session.turn_count = 0;
+            if let Ok(id) = session.store.save_session("(new session)", &session.config.model) {
+                session.session_id = id;
+            }
+            Some("New session started. History cleared.".to_string())
+        }
         "/clear" => {
             session.messages.clear();
             Some("History cleared.".to_string())
@@ -117,6 +126,7 @@ fn help_text() -> String {
             ("/config",                   "provider, model, URL"),
             ("/cost",                     "token usage and estimated cost"),
             ("/history",                  "message count"),
+            ("/new",                      "start a fresh session"),
             ("/clear",                    "clear conversation history"),
             ("/compact",                  "summarize and compress history"),
             ("/sessions [N]",             "browse and resume old sessions"),
