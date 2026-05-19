@@ -61,6 +61,9 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Curl-ready request replay | `src/log.rs:save_request_body`, `src/llm_client.rs:build_curl_block` | Every REQUEST entry in `llm.log` ends with a ready-to-run `curl` command; the full request body (stream:false) is saved to `~/.zap/llm_requests/<ts>_<provider>.json` and referenced via `-d @path`; the curl block uses the real API key (treat these files as sensitive) |
 | System prompt git refs cleaned | `src/context_manager.rs` | Shell commands section no longer references deleted `git_status`/`git_pull`/`git_diff` tools |
 | 12 new language/platform skills | `src/default_skills/` | Added: Java, C#, C++, Kotlin, Swift, Ruby, SQL, Bash, PHP, Scala, Vue.js, CSS/SCSS, Dart/Flutter — each triggered by language keywords and grounded in canonical style guides |
+| `/index files` | `src/session/commands.rs:cmd_index`, `src/code_index.rs:list_indexed_files` | Lists all files in the code index with their symbol count; sorted by symbol count desc |
+| `/index db` | `src/session/commands.rs:cmd_index` | Shows agent.db summary: session count, memory entries, branches, last 10 sessions and all memory key-value pairs |
+| Ctrl+Q confirmation | `src/tui/input.rs`, `src/tui/app.rs` | First Ctrl+Q shows "Press Ctrl+Q again to quit" notice; any other key cancels; second Ctrl+Q quits — prevents accidental exits |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 

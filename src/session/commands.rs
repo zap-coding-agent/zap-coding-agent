@@ -768,6 +768,75 @@ impl Session {
             return;
         }
 
+        if arg == "files" || arg == "list" {
+            let entries = crate::code_index::global_list_indexed_files(200);
+            if entries.is_empty() {
+                println!("  {} No files indexed yet. Run {} to index the project.", "·".dimmed(), "/index".cyan());
+            } else {
+                println!("  {} {} file(s) in code index:", "◎".truecolor(100, 200, 255), entries.len());
+                for (path, syms) in &entries {
+                    println!("  {} {:>4} sym  {}", "·".dimmed(), syms, path.dimmed());
+                }
+            }
+            return;
+        }
+
+        if arg == "db" {
+            // Show agent.db summary from ~/.zap/agent.db
+            let db_path = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".zap").join("agent.db");
+            if !db_path.exists() {
+                println!("  {} agent.db not found at {}", "✗".red(), db_path.display());
+                return;
+            }
+            match rusqlite::Connection::open(&db_path) {
+                Err(e) => println!("  {} failed to open agent.db: {}", "✗".red(), e),
+                Ok(conn) => {
+                    let sessions: i64 = conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap_or(0);
+                    let memory: i64  = conn.query_row("SELECT COUNT(*) FROM memory", [], |r| r.get(0)).unwrap_or(0);
+                    let branches: i64 = conn.query_row("SELECT COUNT(*) FROM branches", [], |r| r.get(0)).unwrap_or(0);
+                    println!("  {} agent.db  ({})", "◎".truecolor(100, 200, 255), db_path.display().to_string().dimmed());
+                    println!("  {} sessions: {}  memory entries: {}  branches: {}", "·".dimmed(), sessions, memory, branches);
+
+                    // Recent sessions
+                    let mut stmt = conn.prepare(
+                        "SELECT id, goal, model, created_at FROM sessions ORDER BY id DESC LIMIT 10"
+                    ).unwrap();
+                    let rows: Vec<(i64, String, String, String)> = stmt.query_map([], |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                    }).unwrap().flatten().collect();
+                    if !rows.is_empty() {
+                        println!("  {} Recent sessions:", "·".dimmed());
+                        for (id, goal, model, created) in &rows {
+                            let short_goal = if goal.chars().count() > 60 {
+                                format!("{}…", goal.chars().take(60).collect::<String>())
+                            } else {
+                                goal.clone()
+                            };
+                            println!("    {} #{} [{}] {} — {}", "·".dimmed(), id, model.dimmed(), short_goal.cyan(), created.dimmed());
+                        }
+                    }
+
+                    // Memory entries
+                    let mut mstmt = conn.prepare("SELECT key, value FROM memory ORDER BY key LIMIT 20").unwrap();
+                    let mrows: Vec<(String, String)> = mstmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect();
+                    if !mrows.is_empty() {
+                        println!("  {} Memory ({} entries):", "·".dimmed(), mrows.len());
+                        for (key, val) in &mrows {
+                            let short_val = if val.chars().count() > 80 {
+                                format!("{}…", val.chars().take(80).collect::<String>())
+                            } else {
+                                val.clone()
+                            };
+                            println!("    {} {}: {}", "·".dimmed(), key.cyan(), short_val.dimmed());
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         println!("  {} Indexing {}…", "◎".truecolor(100, 200, 255), target.display().to_string().cyan());
         if let Ok(mut guard) = self.code_index.lock() {
             match guard.index_dir(&target) {

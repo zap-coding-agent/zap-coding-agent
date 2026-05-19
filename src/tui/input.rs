@@ -67,12 +67,21 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
-    // Ctrl+Q: quit from anywhere (idle only)
+    // Ctrl+Q: quit with confirmation (idle only; two presses required)
     if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
-            return InputAction::Quit;
+            if app.quit_confirm {
+                return InputAction::Quit;
+            }
+            app.quit_confirm = true;
+            app.error = Some("Press Ctrl+Q again to quit, any other key to cancel".to_string());
         }
         return InputAction::None;
+    }
+    // Any other key resets quit confirmation.
+    if app.quit_confirm {
+        app.quit_confirm = false;
+        app.error = None;
     }
 
     match key.code {

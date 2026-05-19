@@ -66,6 +66,14 @@ pub fn global_search(query: &str, limit: usize) -> Vec<Symbol> {
         .unwrap_or_default()
 }
 
+pub fn global_list_indexed_files(limit: usize) -> Vec<(String, usize)> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.list_indexed_files(limit).ok())
+        .unwrap_or_default()
+}
+
 pub fn global_stats() -> (usize, usize) {
     GLOBAL_INDEX
         .get()
@@ -259,6 +267,17 @@ impl CodeIndex {
             .flatten()
             .collect();
         Ok(results)
+    }
+
+    /// Returns all indexed files sorted by symbol count descending.
+    pub fn list_indexed_files(&self, limit: usize) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, symbol_count FROM indexed_files ORDER BY symbol_count DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize)))?
+            .flatten()
+            .collect();
+        Ok(rows)
     }
 
     /// Returns (indexed_files, total_symbols).

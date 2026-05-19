@@ -127,6 +127,9 @@ pub struct App {
 
     /// Session picker overlay (None when closed).
     pub session_picker: Option<SessionPickerState>,
+
+    /// True after first Ctrl+Q press; second press confirms quit.
+    pub quit_confirm: bool,
 }
 
 impl App {
@@ -158,6 +161,7 @@ impl App {
             git_behind: 0,
             file_browser: None,
             session_picker: None,
+            quit_confirm: false,
         }
     }
 
