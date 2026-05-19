@@ -80,8 +80,8 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          Always include a `description` in the shell call so the user knows what runs.\n\
          \n\
          **Shell commands:**\n\
-         - Prefer targeted tools (`git_status`, `git_pull`, `git_diff`, `search_code`) \
-           over raw shell commands when they cover the use case.\n\
+         - Prefer targeted tools (`search_code`, `code_map`, `find_definition`) \
+           over `shell` for code navigation.\n\
          - Always provide a `description` when calling `shell` so the user \
            understands what the command will do before approving it.\n\
          - Never run commands that modify the system outside the working directory \
