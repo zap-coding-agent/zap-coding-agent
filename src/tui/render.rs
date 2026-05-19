@@ -66,6 +66,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_input(frame, app, left[1]);
         draw_dir_panel(frame, app, left[2]);
     }
+    
+    // Draw file browser overlay if open
+    if app.file_browser.is_some() {
+        draw_file_browser(frame, app, size);
+    }
 }
 
 // ── Header — 7-line rich brand (border + 5 content rows + border) ────────────
@@ -683,4 +688,156 @@ pub fn tool_call_lines(tc: &UiToolCall) -> Vec<Line<'static>> {
         Span::styled("  └".to_string(), Style::default().fg(Color::DarkGray)),
     ]));
     lines
+}
+
+
+// ── File Browser Overlay ──────────────────────────────────────────────────────
+
+fn draw_file_browser(frame: &mut Frame, app: &App, area: Rect) {
+    let browser = match &app.file_browser {
+        Some(b) => b,
+        None => return,
+    };
+    
+    // Create centered overlay (80% width, 80% height)
+    let overlay_w = (area.width as f32 * 0.8) as u16;
+    let overlay_h = (area.height as f32 * 0.8) as u16;
+    let overlay_x = (area.width - overlay_w) / 2;
+    let overlay_y = (area.height - overlay_h) / 2;
+    
+    let overlay_area = Rect {
+        x: overlay_x,
+        y: overlay_y,
+        width: overlay_w,
+        height: overlay_h,
+    };
+    
+    // Clear background
+    frame.render_widget(Clear, overlay_area);
+    
+    // Split into file list (left) and preview (right)
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(40),
+        Constraint::Percentage(60),
+    ])
+    .split(overlay_area);
+    
+    draw_file_list(frame, browser, chunks[0]);
+    draw_file_preview(frame, browser, chunks[1]);
+}
+
+fn draw_file_list(frame: &mut Frame, browser: &super::file_browser::FileBrowser, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(" Files (Ctrl+F to close) ", Style::default().fg(Color::Cyan).bold()));
+    
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    
+    // Render file entries
+    let mut lines = Vec::new();
+    let filtered = browser.filtered_entries();
+    
+    for (idx, entry) in filtered.iter() {
+        let is_selected = *idx == browser.selected;
+        
+        // Indentation
+        let indent = "  ".repeat(entry.depth);
+        
+        // Icon
+        let icon = if entry.is_dir {
+            if entry.is_expanded { "▼ " } else { "▶ " }
+        } else {
+            "  "
+        };
+        
+        // Git status indicator
+        let git_icon = match entry.git_status {
+            super::file_browser::GitStatus::Modified => "M",
+            super::file_browser::GitStatus::Untracked => "?",
+            super::file_browser::GitStatus::Staged => "A",
+            super::file_browser::GitStatus::Ignored => "!",
+            super::file_browser::GitStatus::Clean => " ",
+        };
+        
+        let git_color = match entry.git_status {
+            super::file_browser::GitStatus::Modified => Color::Yellow,
+            super::file_browser::GitStatus::Untracked => Color::Red,
+            super::file_browser::GitStatus::Staged => Color::Green,
+            super::file_browser::GitStatus::Ignored => Color::DarkGray,
+            super::file_browser::GitStatus::Clean => Color::Gray,
+        };
+        
+        // Name color
+        let name_color = if entry.is_dir {
+            Color::Cyan
+        } else {
+            Color::White
+        };
+        
+        let line = if is_selected {
+            Line::from(vec![
+                Span::styled(format!("{}{}{} ", indent, icon, git_icon), Style::default().fg(git_color).bg(Color::DarkGray)),
+                Span::styled(entry.name.clone(), Style::default().fg(name_color).bg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(format!("{}{}{} ", indent, icon, git_icon), Style::default().fg(git_color)),
+                Span::styled(entry.name.clone(), Style::default().fg(name_color)),
+            ])
+        };
+        
+        lines.push(line);
+    }
+    
+    // Add help text at bottom
+    if lines.len() < inner.height as usize - 2 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("↑↓ navigate  Enter open  Esc close", Style::default().fg(Color::DarkGray))));
+    }
+    
+    let para = Paragraph::new(lines)
+        .scroll((browser.scroll as u16, 0));
+    frame.render_widget(para, inner);
+}
+
+fn draw_file_preview(frame: &mut Frame, browser: &super::file_browser::FileBrowser, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(" Preview ", Style::default().fg(Color::Cyan).bold()));
+    
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    
+    if let Some(ref content) = browser.preview_content {
+        let lines = if let Some(ref lang) = browser.preview_lang {
+            // Use syntax highlighting
+            super::syntax::highlight_code(lang, content)
+        } else {
+            // Plain text
+            content.lines()
+                .map(|line| Line::from(Span::styled(line.to_string(), Style::default().fg(Color::White))))
+                .collect()
+        };
+        
+        let para = Paragraph::new(lines)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(para, inner);
+    } else {
+        let text = if let Some(entry) = browser.entries.get(browser.selected) {
+            if entry.is_dir {
+                "[Directory]"
+            } else {
+                "[No preview available]"
+            }
+        } else {
+            "[No file selected]"
+        };
+        
+        let para = Paragraph::new(text)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(para, inner);
+    }
 }

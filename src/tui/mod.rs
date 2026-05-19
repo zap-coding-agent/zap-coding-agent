@@ -8,6 +8,7 @@ pub mod commands;
 pub mod input;
 pub mod render;
 pub mod syntax;
+pub mod file_browser;
 
 use std::io::Stdout;
 use std::time::Duration;
@@ -328,6 +329,26 @@ async fn tui_loop(
                                             ))],
                                         });
                                         app.auto_scroll = true;
+                                    }
+                                }
+                            }
+                        }
+                        InputAction::ToggleFileBrowser => {
+                            if app.file_browser.is_some() {
+                                app.file_browser = None;
+                            } else {
+                                // Open file browser at current directory
+                                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                                match file_browser::FileBrowser::new(cwd) {
+                                    Ok(browser) => {
+                                        app.file_browser = Some(browser);
+                                        // Load initial preview
+                                        if let Some(ref mut browser) = app.file_browser {
+                                            let _ = browser.load_preview();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.error = Some(format!("Failed to open file browser: {}", e));
                                     }
                                 }
                             }

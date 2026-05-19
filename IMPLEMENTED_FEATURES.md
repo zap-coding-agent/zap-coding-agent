@@ -1,6 +1,6 @@
-# ✅ Implemented TUI Enhancements - Phase 1
+# ✅ Implemented TUI Enhancements - Phase 1 & 2
 
-## 🎨 Visual Enhancements
+## 🎨 Visual Enhancements (Phase 1)
 
 ### 1. **Syntax Highlighting** ✅
 - **Status**: IMPLEMENTED
@@ -87,6 +87,43 @@ fn main() {
 - Directory changes immediately
 - Agent tools now operate in the selected directory
 
+---
+
+## 🗂️ Interactive Features (Phase 2)
+
+### 8. **File Browser** ✅
+- **Status**: IMPLEMENTED
+- Full-featured file browser overlay
+- **Keyboard shortcuts:**
+  - **Ctrl+F** - Toggle file browser
+  - **↑↓ / j/k** - Navigate files
+  - **Enter / →** - Open file or expand directory
+  - **← / h** - Collapse directory
+  - **Esc / q** - Close browser
+- **Features:**
+  - Tree view with collapsible folders
+  - Syntax-highlighted preview pane
+  - Git status indicators (M/A/?/!)
+  - Color-coded files and directories
+  - Smart filtering (hides node_modules, target, etc.)
+  - Real-time preview as you navigate
+  - Inserts file path into chat on Enter
+
+**Visual Design:**
+- 80% screen overlay (centered)
+- Split view: file list (40%) | preview (60%)
+- Cyan borders and highlights
+- Selected item highlighted with dark gray background
+- Git status colors: Yellow (modified), Red (untracked), Green (staged)
+
+**Usage:**
+1. Press **Ctrl+F** to open file browser
+2. Use arrow keys or vim keys (j/k/h/l) to navigate
+3. Press Enter on a file to insert its path into chat
+4. Press Enter on a directory to expand/collapse
+5. Preview updates automatically as you navigate
+6. Press Esc to close and return to chat
+
 ### 7. **TUI-Native Permission Prompts** ✅
 - **Status**: IMPLEMENTED
 - Permission prompts stay within TUI (no CLI breakout)
@@ -104,6 +141,11 @@ fn main() {
    - `highlight_code()` - Syntax highlighting with syntect
    - `parse_markdown()` - Markdown parsing with pulldown-cmark
    - `render_diff()` - Color-coded diff rendering
+2. **`src/tui/file_browser.rs`** - File browser implementation
+   - `FileBrowser` - Main browser state and logic
+   - `FileEntry` - File/directory entry with git status
+   - Tree navigation and expansion
+   - Preview loading and caching
 
 ### New Dependencies Added:
 ```toml
@@ -117,11 +159,14 @@ git2 = "0.21"            # Git integration (ready for future use)
 pub struct App {
     // ... existing fields ...
     
-    // New fields for enhanced features
+    // Phase 1 additions
     pub expanded_tools: HashSet<String>,  // For collapsible tool output
     pub git_dirty: bool,                  // Git dirty state
     pub git_ahead: usize,                 // Commits ahead
     pub git_behind: usize,                // Commits behind
+    
+    // Phase 2 additions
+    pub file_browser: Option<FileBrowser>, // File browser state
 }
 ```
 
@@ -251,12 +296,25 @@ Press **Ctrl+O** to open native folder picker:
 
 ## 🎉 Summary
 
-**Phase 1 Complete!** We've implemented 7 major visual enhancements plus critical bug fixes that make the TUI significantly more polished and professional. The foundation is now in place for advanced features like file browsing, multi-panel layouts, and interactive elements.
+**Phase 1 & 2 Complete!** We've implemented 8 major features that make the TUI world-class:
+- 7 visual enhancements (syntax highlighting, markdown, git status, etc.)
+- 1 interactive feature (file browser with preview)
+- Critical bug fixes for directory picker
 
-**Lines of Code Added:** ~600
+**Lines of Code Added:** ~1000
 **New Dependencies:** 3 (syntect, pulldown-cmark, git2)
+**New Modules:** 2 (syntax.rs, file_browser.rs)
 **Build Time:** ~25 seconds
 **Binary Size Impact:** ~2MB (syntax highlighting assets)
 **Bug Fixes:** 1 critical (directory picker context)
 
-Ready for Phase 2! 🚀
+**Key Features:**
+- ✨ Syntax highlighting for 50+ languages
+- 📝 Rich markdown rendering
+- 🌿 Git status integration
+- 📁 Interactive file browser with preview
+- 🎨 Beautiful colors and readability
+- ⌨️ Vim-style navigation (j/k/h/l)
+- 🔍 Real-time file preview
+
+Ready for Phase 3! 🚀

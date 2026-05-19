@@ -106,6 +106,9 @@ pub struct App {
     pub git_dirty: bool,
     pub git_ahead: usize,
     pub git_behind: usize,
+    
+    /// File browser state (None when closed).
+    pub file_browser: Option<super::file_browser::FileBrowser>,
 }
 
 impl App {
@@ -135,6 +138,7 @@ impl App {
             git_dirty: false,
             git_ahead: 0,
             git_behind: 0,
+            file_browser: None,
         }
     }
 

@@ -206,6 +206,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | TUI (ratatui) | `src/tui/` | Scrollable conversation, header bar, input box, streaming; default mode; `--cli` for REPL |
+| TUI syntax highlighting | `src/tui/syntax.rs` | syntect integration, 50+ languages, base16-ocean.dark theme |
+| TUI markdown rendering | `src/tui/syntax.rs` | pulldown-cmark, bold/italic/headers/lists/links |
+| TUI git status | `src/tui/mod.rs` | branch with dirty/ahead/behind indicators in header |
+| TUI diff rendering | `src/tui/syntax.rs` | color-coded diffs (green/red/cyan) |
+| TUI file browser | `src/tui/file_browser.rs` | Ctrl+F, tree view, syntax-highlighted preview, git status |
+| TUI directory picker | `src/tui/mod.rs` | Ctrl+O, native macOS/Windows folder picker |
+| TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |
 | Colored diff on edit | `src/ui.rs` | similar crate, red/green |
 | Token + cost display | `src/session.rs:handle_user_turn` | per-turn: skills t, msg t, ctx k, est. $ |

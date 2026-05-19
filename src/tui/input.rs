@@ -14,6 +14,7 @@ pub enum InputAction {
     ScrollDown(usize),
     ClearInput,
     OpenDirPicker,
+    ToggleFileBrowser,
 }
 
 /// Returns true when the command picker is active (idle + input starts with '/').
@@ -22,6 +23,11 @@ fn picker_active(app: &App) -> bool {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
+    // If file browser is open, handle its keys first
+    if app.file_browser.is_some() {
+        return handle_file_browser_key(app, key);
+    }
+    
     // Ctrl+C: cancel during a turn
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         match &app.state {
@@ -42,6 +48,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
             return InputAction::OpenDirPicker;
+        }
+        return InputAction::None;
+    }
+
+    // Ctrl+F: toggle file browser (idle only)
+    if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Idle) {
+            return InputAction::ToggleFileBrowser;
         }
         return InputAction::None;
     }
@@ -195,4 +209,55 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
+}
+
+/// Handle keys when file browser is open.
+fn handle_file_browser_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let browser = app.file_browser.as_mut().unwrap();
+    
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.file_browser = None;
+            InputAction::None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            browser.move_up();
+            let _ = browser.load_preview();
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            browser.move_down();
+            let _ = browser.load_preview();
+            InputAction::None
+        }
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            // Toggle expand for directories, or insert file path for files
+            if let Some(entry) = browser.entries.get(browser.selected) {
+                if entry.is_dir {
+                    let _ = browser.toggle_expand();
+                } else {
+                    // Insert file path into input
+                    let path = entry.path.display().to_string();
+                    app.input = format!("show me {}", path);
+                    app.cursor = app.input.chars().count();
+                    app.file_browser = None;
+                }
+            }
+            InputAction::None
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            // Collapse directory
+            if let Some(entry) = browser.entries.get(browser.selected) {
+                if entry.is_dir && entry.is_expanded {
+                    let _ = browser.toggle_expand();
+                }
+            }
+            InputAction::None
+        }
+        KeyCode::Char('/') => {
+            // Start search mode (for now, just a placeholder)
+            InputAction::None
+        }
+        _ => InputAction::None,
+    }
 }
