@@ -16,6 +16,49 @@ fn redact_token(token: &str) -> String {
     format!("{}…{} ({} chars)", &token[..4], &token[token.len()-4..], token.len())
 }
 
+/// Persist the request body as a standalone JSON file and return a ready-to-run
+/// curl command that references it.  The body has `stream` forced to false so
+/// the curl response is a plain JSON object rather than an SSE stream.
+///
+/// The curl command contains the **real** API key — `llm_requests/` and
+/// `llm.log` should be treated as sensitive local debug files.
+fn build_curl_block(
+    slug: &str,          // e.g. "openai" or "anthropic"
+    url: &str,
+    auth_header: &str,   // e.g. "Authorization" or "x-api-key"
+    auth_value: &str,    // real (unredacted) token
+    body_value: &serde_json::Value,
+) -> String {
+    // Force stream:false — reading SSE in a terminal is painful.
+    let mut curl_body = body_value.clone();
+    if let Some(obj) = curl_body.as_object_mut() {
+        obj.insert("stream".to_string(), serde_json::Value::Bool(false));
+        obj.remove("stream_options"); // only meaningful with streaming
+    }
+    let compact = serde_json::to_string(&curl_body).unwrap_or_default();
+
+    // Save body to ~/.zap/llm_requests/ so the curl command stays short.
+    let body_path = crate::log::save_request_body(slug, &compact);
+
+    match body_path {
+        Some(p) => format!(
+            "\n# curl (body: {path} — contains real key, treat as sensitive):\n\
+             curl -s '{url}' \\\n\
+             \x20 -H 'Content-Type: application/json' \\\n\
+             \x20 -H '{auth_header}: {auth_value}' \\\n\
+             \x20 -d @'{path}'",
+            path = p.display(), url = url,
+            auth_header = auth_header, auth_value = auth_value,
+        ),
+        None => format!(
+            "\n# curl (could not save body file):\n\
+             curl -s '{url}' -H '{auth_header}: {auth_value}' -H 'Content-Type: application/json' \\\n\
+             \x20 -d '<see body above, change stream to false>'",
+            url = url, auth_header = auth_header, auth_value = auth_value,
+        ),
+    }
+}
+
 /// Detect whether a non-2xx error body suggests the gateway does not support
 /// the OpenAI tools / function-calling API.
 fn check_tool_support_error(status: u16, body: &str) {
@@ -352,16 +395,22 @@ impl LlmProvider for AnthropicClient {
         // Log request — replace tools array with a count to keep the log readable.
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
+
+            // Curl block uses the real body (tool schemas included).
+            let (auth_hdr, auth_val) = if self.bearer_auth {
+                ("Authorization", format!("Bearer {}", self.api_key))
+            } else {
+                ("x-api-key", self.api_key.clone())
+            };
+            let curl = build_curl_block("anthropic", &self.url, auth_hdr, &auth_val, &v);
+
+            // Pretty log: redact token and collapse tools to a count.
             v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
-                let auth_line = if self.bearer_auth {
-                    format!("Authorization: Bearer {}", redact_token(&self.api_key))
-                } else {
-                    format!("x-api-key: {}", redact_token(&self.api_key))
-                };
+                let auth_line = format!("{}: {}", auth_hdr, redact_token(&auth_val));
                 crate::log::write_llm(
                     "REQUEST [anthropic]",
-                    &format!("POST {}\n{}\n\n{}", self.url, auth_line, pretty),
+                    &format!("POST {}\n{}\n\n{}{}", self.url, auth_line, pretty, curl),
                 );
             }
         }
@@ -650,18 +699,32 @@ impl LlmProvider for OpenAiClient {
         let tools_were_sent = !oai_tools.is_empty();
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
+
+            // Curl block uses the real body and real key.
+            let auth_val = if self.api_key.is_empty() {
+                String::new()
+            } else {
+                format!("Bearer {}", self.api_key)
+            };
+            let curl = if auth_val.is_empty() {
+                build_curl_block("openai", &self.url, "Authorization", "", &v)
+            } else {
+                build_curl_block("openai", &self.url, "Authorization", &auth_val, &v)
+            };
+
+            // Pretty log: redact token and collapse tools to a count.
             if n > 0 {
                 v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
             }
             if let Ok(pretty) = serde_json::to_string_pretty(&v) {
-                let auth_line = if self.api_key.is_empty() {
+                let auth_line = if auth_val.is_empty() {
                     "(no auth)".to_string()
                 } else {
-                    format!("Authorization: Bearer {}", redact_token(&self.api_key))
+                    format!("Authorization: {}", redact_token(&auth_val))
                 };
                 crate::log::write_llm(
                     "REQUEST [openai]",
-                    &format!("POST {}\n{}\n\n{}", self.url, auth_line, pretty),
+                    &format!("POST {}\n{}\n\n{}{}", self.url, auth_line, pretty, curl),
                 );
             }
         }

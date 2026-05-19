@@ -58,6 +58,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Windows shell compatibility | `src/shell_runner.rs:run_command` | Uses `cmd.exe /C` on Windows, `sh -c` on Unix/macOS — git commands now work natively on Windows via the shell tool |
 | Full request logging in llm.log | `src/llm_client.rs` | Every REQUEST log entry now includes `POST <url>` and `Authorization: <redacted>` so you can see exactly what endpoint and credentials are used |
 | Corporate gateway tool-support detection | `src/llm_client.rs` | HTTP 400/422 errors mentioning "tool"/"function" emit a `zap_warn!` explaining the gateway likely doesn't support function calling; text responses containing JSON-style tool-call blobs (gateway stripped tools array) also trigger a warning |
+| Curl-ready request replay | `src/log.rs:save_request_body`, `src/llm_client.rs:build_curl_block` | Every REQUEST entry in `llm.log` ends with a ready-to-run `curl` command; the full request body (stream:false) is saved to `~/.zap/llm_requests/<ts>_<provider>.json` and referenced via `-d @path`; the curl block uses the real API key (treat these files as sensitive) |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 

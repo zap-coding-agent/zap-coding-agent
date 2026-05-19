@@ -27,9 +27,27 @@ pub fn llm_log_path() -> std::path::PathBuf {
     base.join("llm.log")
 }
 
+fn llm_requests_dir() -> std::path::PathBuf {
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".zap")
+        .join("llm_requests");
+    std::fs::create_dir_all(&base).ok();
+    base
+}
+
+/// Save `body` (compact JSON, stream:false) to ~/.zap/llm_requests/<ts>_<slug>.json.
+/// Returns the path so the caller can reference it in a curl command.
+pub fn save_request_body(slug: &str, body: &str) -> Option<std::path::PathBuf> {
+    let ts = Utc::now().format("%Y%m%d_%H%M%S%3f"); // millisecond precision avoids collisions
+    let path = llm_requests_dir().join(format!("{}_{}.json", ts, slug));
+    std::fs::write(&path, body).ok()?;
+    Some(path)
+}
+
 /// Append one LLM direction block to ~/.zap/llm.log.
 /// `direction` is e.g. "REQUEST [anthropic]" or "RESPONSE [anthropic]".
-/// `payload`   is the pretty-printed JSON string.
+/// `payload`   is the pretty-printed JSON string (plus any curl block appended by the caller).
 pub fn write_llm(direction: &str, payload: &str) {
     let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
     let path = llm_log_path();
