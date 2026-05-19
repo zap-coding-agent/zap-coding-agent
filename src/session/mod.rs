@@ -530,15 +530,26 @@ impl Session {
             spinner.finish_and_clear();
             let response = result?;
 
-            // Empty response with no usage usually means the model's context window
-            // was exceeded — the server returns 200 OK but an empty SSE stream.
-            if response.content.is_empty() && response.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0) == 0 {
-                let ctx_k = self.estimated_context_tokens() / 1000;
-                crate::zap_warn!(
-                    "Model returned an empty response (context ~{}k tokens). \
-                     Try /compact to free space, or increase the model's context window in LM Studio.",
-                    ctx_k
-                );
+            // Empty response: two known causes.
+            // (a) Zero input_tokens → context window exceeded (server sends 200 OK but empty SSE).
+            // (b) Non-zero input_tokens → proxy or gateway dropped the response body.
+            if response.content.is_empty() {
+                let input_tokens = response.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
+                if input_tokens == 0 {
+                    let ctx_k = self.estimated_context_tokens() / 1000;
+                    crate::zap_warn!(
+                        "Model returned an empty response (context ~{}k tokens). \
+                         Try /compact to free space, or increase the model's context window in LM Studio.",
+                        ctx_k
+                    );
+                } else {
+                    crate::zap_warn!(
+                        "Model returned an empty response (stop_reason: {}, input_tokens: {}). \
+                         Your proxy may have dropped the response body. \
+                         Check ~/.zap/llm.log for the raw SSE stream.",
+                        response.stop_reason, input_tokens
+                    );
+                }
                 break;
             }
 
@@ -600,16 +611,29 @@ impl Session {
                 "llm_response turn={} stop_reason={}", turn, response.stop_reason
             ))?;
 
-            let tool_calls: Vec<&ContentBlock> = response.content.iter()
-                .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
-                .collect();
-
-            if tool_calls.is_empty() { break; }
-
+            // Always record the assistant turn in history so subsequent turns
+            // have full context (text-only responses were previously not saved).
             self.messages.push(Message {
                 role:    "assistant".to_string(),
                 content: response.content.clone(),
             });
+
+            let tool_calls: Vec<&ContentBlock> = response.content.iter()
+                .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
+                .collect();
+
+            if tool_calls.is_empty() {
+                // If the model signaled tool_use but we parsed no tool blocks,
+                // the proxy likely used a non-standard response format.
+                if response.stop_reason == "tool_use" {
+                    crate::zap_warn!(
+                        "Model signaled stop_reason=tool_use but no tool calls were parsed. \
+                         Your proxy may use a unified/normalized schema that differs from \
+                         the Anthropic wire format. Check ~/.zap/llm.log for the raw response."
+                    );
+                }
+                break;
+            }
 
             // Phase 1: permissions — quick-check each call, then ONE grouped prompt
             // for anything that needs user input (instead of per-call prompts).
@@ -908,12 +932,14 @@ impl Session {
                     if let ContentBlock::ToolResult { content, .. } = result {
                         let hits = crate::secret_scanner::scan(content);
                         if !hits.is_empty() {
+                            crate::tui::channel::suspend_for_prompt();
                             println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
                             for h in &hits { println!("    {}", h.to_string().yellow()); }
                             print!("  send anyway? [y/N] ");
                             let _ = std::io::Write::flush(&mut std::io::stdout());
                             let mut ans = String::new();
                             std::io::stdin().read_line(&mut ans).ok();
+                            crate::tui::channel::resume_from_prompt();
                             if !ans.trim().eq_ignore_ascii_case("y") {
                                 println!("  {} aborted by user — secrets not sent", "✗".red());
                                 return Ok(());

@@ -51,7 +51,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Model-aware context limits | `src/session/mod.rs:model_context_limit` | Claude 200k, GPT-4o 128k, local 32k |
 | Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | 70% warn, 80% interactive choice, 95% auto-compact |
 | Tool result truncation | `src/session/mod.rs:handle_user_turn` | tool outputs capped at 20 000 chars before being sent to LLM; prevents context overflow on large file/dir reads |
-| Empty response detection | `src/session/mod.rs:handle_user_turn` | detects 200 OK with empty content + 0 tokens (context window exceeded); shows `zap_warn!` with context size and advice instead of silently stopping |
+| Empty response detection | `src/session/mod.rs:handle_user_turn` | two-case detection: zero input_tokens → context window exceeded (warns with ctx size + /compact advice); non-zero input_tokens → proxy/gateway dropped body (warns with stop_reason + log path) |
+| Multi-turn history fix | `src/session/mod.rs:handle_user_turn` | assistant response is now always pushed to `self.messages` before the tool-calls check; previously text-only turns were not saved, breaking context on subsequent turns |
+| Proxy tool_use parse warning | `src/session/mod.rs:handle_user_turn` | when `stop_reason=tool_use` but no tool blocks were parsed, warns about unified/normalized proxy schema instead of silently breaking |
+| Secret scanner TUI fix | `src/session/mod.rs:handle_user_turn` | secret-scanner prompt now calls `suspend_for_prompt`/`resume_from_prompt` so the stdin read works correctly in TUI mode (previously the TUI owned stdin and the prompt hung) |
 | TUI-visible warnings | `src/log.rs:write` | WARN/ERROR from `zap_warn!`/`zap_error!` are forwarded via `TuiEvent::LlmChunk` so they appear in the TUI chat; previously invisible behind the alternate screen |
 | Removed redundant git tools | `src/tools/shell.rs`, `src/tools/mod.rs` | `git_status`, `git_pull`, `git_diff` removed — model uses `shell` directly; saves ~250 tokens per request |
 | Per-turn tool filtering | `src/session/mod.rs:select_tools_for_turn` | For OpenAI-compatible (local) providers, `web_fetch`/`web_search` are omitted unless the user mentions web/url/docs or web tools were already used this session; Anthropic sends all tools (cached) |
