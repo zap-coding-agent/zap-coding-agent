@@ -233,6 +233,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | API error URL in message | `src/llm_client.rs` | 404/40x errors include the exact constructed URL for instant diagnosis |
 | base_url used as-is | `src/llm_client.rs` | when set, `base_url` is posted to directly — no path appended; gateway handles routing |
 | Error log (screen + file) | `src/log.rs` | `zap_warn!`/`zap_error!` print to stdout AND append to `~/.zap/zap.log`; log path shown in `/config` |
+| LLM I/O log | `src/log.rs` + `src/llm_client.rs` | every request and response (pretty JSON) appended to `~/.zap/llm.log`; HTTP errors logged as ERROR blocks; image data redacted; path shown in `/config` |
 | MCP command validation | `src/mcp.rs:validate_mcp_command` | blocks non-absolute paths (allowlist: node/python/npx/deno/…), shell metacharacters, `..` traversal |
 | Shell dangerous-command guard | `src/tools/shell.rs:guard_shell` | blocks `rm -rf /~`, fork bomb, `mkfs`, `dd`, `curl\|sh`, `wget\|sh` — applies even in Auto mode |
 | `--budget N` token cap | `src/cli.rs`, `src/config.rs`, `src/session/mod.rs` | overrides model context limit for fill-% tracking; warns at 80%, hard-stops at 100% |

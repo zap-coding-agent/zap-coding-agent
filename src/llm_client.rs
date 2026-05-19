@@ -308,6 +308,13 @@ impl LlmProvider for AnthropicClient {
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
+        // Log request to ~/.zap/llm.log
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            if let Ok(pretty) = serde_json::to_string_pretty(&v) {
+                crate::log::write_llm("REQUEST [anthropic]", &pretty);
+            }
+        }
+
         let api_key = self.api_key.clone();
         let bearer_auth = self.bearer_auth;
         let resp = send_with_retry(&self.http, |http| {
@@ -328,6 +335,7 @@ impl LlmProvider for AnthropicClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            crate::log::write_llm("ERROR [anthropic]", &format!("HTTP {status} — {text}"));
             anyhow::bail!("Anthropic API returned {} (url: {}): {}", status, self.url, text);
         }
 
@@ -392,6 +400,32 @@ impl LlmProvider for AnthropicClient {
 
         // Stop spinner if no text was streamed (tool-use only response).
         if let Some(cb) = before_output.take() { cb(); }
+
+        // Log response to ~/.zap/llm.log
+        {
+            let resp_val = serde_json::json!({
+                "stop_reason": stop_reason,
+                "usage": {
+                    "input_tokens":       usage_acc.input_tokens,
+                    "output_tokens":      usage_acc.output_tokens,
+                    "cache_read_tokens":  usage_acc.cache_read_tokens,
+                    "cache_write_tokens": usage_acc.cache_write_tokens,
+                },
+                "content": content.iter().map(|b| match b {
+                    ContentBlock::Text { text } =>
+                        serde_json::json!({ "type": "text", "text": text }),
+                    ContentBlock::ToolUse { id, name, input } =>
+                        serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
+                    ContentBlock::ToolResult { tool_use_id, content } =>
+                        serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
+                    ContentBlock::Image { .. } =>
+                        serde_json::json!({ "type": "image", "data": "<redacted>" }),
+                }).collect::<Vec<_>>(),
+            });
+            if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
+                crate::log::write_llm("RESPONSE [anthropic]", &pretty);
+            }
+        }
 
         Ok(ApiResponse { content, stop_reason, usage: Some(usage_acc) })
     }
@@ -560,6 +594,13 @@ impl LlmProvider for OpenAiClient {
         }
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
+        // Log request to ~/.zap/llm.log
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+            if let Ok(pretty) = serde_json::to_string_pretty(&v) {
+                crate::log::write_llm("REQUEST [openai]", &pretty);
+            }
+        }
+
         let api_key = self.api_key.clone();
         let resp = send_with_retry(&self.http, |http| {
             let mut req = http
@@ -577,6 +618,7 @@ impl LlmProvider for OpenAiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            crate::log::write_llm("ERROR [openai]", &format!("HTTP {status} — {text}"));
             anyhow::bail!("OpenAI API returned {} (url: {}): {}", status, self.url, text);
         }
 
@@ -685,6 +727,30 @@ impl LlmProvider for OpenAiClient {
         } else {
             None
         };
+
+        // Log response to ~/.zap/llm.log
+        {
+            let resp_val = serde_json::json!({
+                "stop_reason": stop_reason,
+                "usage": {
+                    "input_tokens":  usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                    "output_tokens": usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+                },
+                "content": content.iter().map(|b| match b {
+                    ContentBlock::Text { text } =>
+                        serde_json::json!({ "type": "text", "text": text }),
+                    ContentBlock::ToolUse { id, name, input } =>
+                        serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
+                    ContentBlock::ToolResult { tool_use_id, content } =>
+                        serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
+                    ContentBlock::Image { .. } =>
+                        serde_json::json!({ "type": "image", "data": "<redacted>" }),
+                }).collect::<Vec<_>>(),
+            });
+            if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
+                crate::log::write_llm("RESPONSE [openai]", &pretty);
+            }
+        }
 
         Ok(ApiResponse { content, stop_reason, usage })
     }

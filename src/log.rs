@@ -2,6 +2,8 @@
 ///
 /// Use `zap_warn!` / `zap_error!` instead of `tracing::warn!` / `eprintln!`
 /// for anything the user should be able to see or diagnose later.
+///
+/// LLM request/response logging goes to ~/.zap/llm.log via `write_llm()`.
 use chrono::Utc;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -15,6 +17,26 @@ pub fn log_path() -> std::path::PathBuf {
         .join(".zap");
     std::fs::create_dir_all(&base).ok();
     base.join("zap.log")
+}
+
+pub fn llm_log_path() -> std::path::PathBuf {
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".zap");
+    std::fs::create_dir_all(&base).ok();
+    base.join("llm.log")
+}
+
+/// Append one LLM direction block to ~/.zap/llm.log.
+/// `direction` is e.g. "REQUEST [anthropic]" or "RESPONSE [anthropic]".
+/// `payload`   is the pretty-printed JSON string.
+pub fn write_llm(direction: &str, payload: &str) {
+    let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let path = llm_log_path();
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "\n=== {ts} {direction} ===");
+        let _ = writeln!(f, "{payload}");
+    }
 }
 
 pub fn write(level: &str, msg: &str) {

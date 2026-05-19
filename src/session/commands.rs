@@ -125,6 +125,7 @@ impl Session {
             kv("timeout",        &format!("{}s", self.config.timeout_secs));
         }
         kv("log file",           &crate::log::log_path().to_string_lossy());
+        kv("llm log",            &crate::log::llm_log_path().to_string_lossy());
         if !self.config.skill_paths.is_empty() {
             kv("skill_paths", &self.config.skill_paths.join(", "));
         }
