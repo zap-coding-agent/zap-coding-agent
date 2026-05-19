@@ -3,32 +3,113 @@ use async_trait::async_trait;
 
 use super::Tool;
 
-// ── Dangerous command patterns (blocked even in auto mode) ────────────────────
+// ── Hard-blocked patterns (rejected unconditionally, even with explicit approval) ─
 
-/// Substrings that indicate a destructive or exfiltration-prone command.
-/// These are rejected before the command runs regardless of permission mode.
+/// Commands matching any of these substrings are refused outright — no prompt,
+/// no override. They cover filesystem nukes, pipe-to-shell code-injection,
+/// reverse shells, and disk-level destruction.
 const BLOCKED_PATTERNS: &[&str] = &[
+    // Filesystem nukes
     "rm -rf /",
+    "rm -rf ~/",
     "rm -rf ~",
     "rm -rf $HOME",
-    ":(){ :|:&};:",   // fork bomb
+    "rm -rf ${HOME}",
+    "rm --no-preserve-root",
+
+    // Fork bomb
+    ":(){ :|:&};:",
+
+    // Raw disk writes / format
     "mkfs",
     "dd if=",
     "> /dev/sd",
+    "> /dev/hd",
+    "> /dev/nvme",
+    "shred /dev/",
+    "wipe /dev/",
+
+    // Pipe-to-shell (download + execute)
     "| sh\n", "| sh ",  "| sh\"", "|sh",
     "| bash\n","| bash ","| bash\"","|bash",
     "| zsh\n", "| zsh ", "| zsh\"", "|zsh",
-    "curl | ", "wget | ",
-    "curl|",   "wget|",
+    "| fish\n","| fish ","| fish\"","|fish",
+    "| python\n","| python ","| python3\n","| python3 ","|python","|python3",
+    "| perl\n", "| perl ", "|perl",
+    "| ruby\n", "| ruby ", "|ruby",
+    "| node\n", "| node ", "|node",
+    "curl | ", "curl|", "wget | ", "wget|",
+
+    // Base64-decode-then-execute
+    "base64 -d |", "base64 --decode |",
+    "base64 -d|",  "base64 --decode|",
+    "openssl base64 -d",
+
+    // Reverse shells
+    "/dev/tcp/",
+    "/dev/udp/",
+    "bash -i >&",
+    "bash -i >",
+    "nc -e /bin",
+    "ncat -e /bin",
+    "netcat -e /bin",
+    "0>&1",
+
+    // Kernel modules
+    "insmod ",
+    "modprobe ",
+
+    // Boot partition
+    "> /boot/",
+
+    // Anti-forensics (history wiping)
+    "history -c",
+    "unset histfile",          // matched case-insensitively via to_lowercase()
+    "export histfile=/dev/null",
+    "export histsize=0",
+    "export histfilesize=0",
 ];
+
+// ── Destructive patterns — require explicit confirmation even in auto mode ─────
+
+/// (pattern, human-readable reason) pairs checked case-insensitively.
+/// Commands matching any of these must be confirmed by the user even when the
+/// permission mode is Auto. They are still audited and logged.
+pub const DESTRUCTIVE_PATTERNS: &[(&str, &str)] = &[
+    ("rm -rf ",         "recursive forced deletion"),
+    ("rm -fr ",         "recursive forced deletion"),
+    ("git push --force","force-push overwrites remote history"),
+    ("git push -f ",    "force-push overwrites remote history"),
+    ("git push -f\n",   "force-push overwrites remote history"),
+    ("sudo ",           "superuser privilege escalation"),
+    ("drop table",      "SQL table deletion"),
+    ("drop database",   "SQL database deletion"),
+    ("truncate table",  "SQL table truncation"),
+    ("chmod -r 000",    "recursive permission removal"),
+    ("chmod -r 777",    "recursive world-writable permission"),
+    ("chown -r root",   "recursive ownership change to root"),
+];
+
+/// Returns Some(reason) if `command` matches a destructive pattern that requires
+/// explicit user confirmation even in Auto mode. None means the command is safe
+/// to run without extra confirmation (subject to the hard-blocked list).
+pub fn destructive_pattern(command: &str) -> Option<&'static str> {
+    let lower = command.to_lowercase();
+    for (pat, reason) in DESTRUCTIVE_PATTERNS {
+        if lower.contains(pat) {
+            return Some(reason);
+        }
+    }
+    None
+}
 
 fn guard_shell(command: &str) -> Result<()> {
     let lower = command.to_lowercase();
     for pat in BLOCKED_PATTERNS {
         if lower.contains(pat) {
             anyhow::bail!(
-                "shell: command contains a blocked pattern '{}'. \
-                 Destructive or pipe-to-shell commands cannot run automatically.",
+                "shell: command blocked — matches prohibited pattern '{}'.\n\
+                 Destructive or pipe-to-shell commands cannot run.",
                 pat.trim()
             );
         }

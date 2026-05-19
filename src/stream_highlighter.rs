@@ -18,6 +18,9 @@ pub struct StreamHighlighter {
     fence_lines: Vec<String>,
     /// Whether anything has been printed yet (used for before_output callback).
     pub printed_anything: bool,
+    /// When true, suppress all print! calls (used in TUI mode to avoid
+    /// writing to stdout behind the TUI).
+    pub suppress_print: bool,
 }
 
 impl StreamHighlighter {
@@ -28,17 +31,21 @@ impl StreamHighlighter {
             fence_lang: String::new(),
             fence_lines: Vec::new(),
             printed_anything: false,
+            suppress_print: false,
         }
     }
 
     /// Process one text chunk from the stream.
     pub fn push(&mut self, chunk: &str) {
+        // Forward to TUI channel if active (no-op when not in TUI mode)
+        crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(chunk.to_string()));
+
         for ch in chunk.chars() {
             if ch == '\n' {
                 let line = std::mem::take(&mut self.line_buf);
                 self.process_complete_line(line);
             } else {
-                if !self.in_fence {
+                if !self.in_fence && !self.suppress_print {
                     // In normal mode, print partial line immediately so text streams live.
                     print!("{}", ch);
                     self.printed_anything = true;
@@ -56,27 +63,34 @@ impl StreamHighlighter {
                 self.in_fence = true;
                 self.fence_lang = line.trim().trim_start_matches('`').to_string();
                 self.fence_lines.clear();
-                // Erase the partial line we may have already printed (the ```) by
-                // overwriting it. Since we printed it char-by-char in push(), we need
-                // to clear the line and reprint it styled.
-                // Use ANSI carriage-return + erase-line to clean up the partial.
-                print!("\r\x1b[2K{}\n", line.dimmed());
-                self.printed_anything = true;
+                if !self.suppress_print {
+                    // Erase the partial line we may have already printed (the ```) by
+                    // overwriting it. Since we printed it char-by-char in push(), we need
+                    // to clear the line and reprint it styled.
+                    // Use ANSI carriage-return + erase-line to clean up the partial.
+                    print!("\r\x1b[2K{}\n", line.dimmed());
+                    self.printed_anything = true;
+                }
             } else {
                 // Normal line — print it now (partial was already printed char-by-char).
-                println!();
-                self.printed_anything = true;
+                if !self.suppress_print {
+                    println!();
+                    self.printed_anything = true;
+                }
             }
         } else {
             // Inside a fence.
             if line.trim() == "```" || line.trim() == "~~~" {
                 // Closing fence — render the accumulated code block.
-                self.render_fence();
-                // Print closing fence dimly.
-                println!("{}", "```".dimmed());
-                self.printed_anything = true;
+                if !self.suppress_print {
+                    self.render_fence();
+                    // Print closing fence dimly.
+                    println!("{}", "```".dimmed());
+                    self.printed_anything = true;
+                }
                 self.in_fence = false;
                 self.fence_lang.clear();
+                self.fence_lines.clear();
             } else {
                 self.fence_lines.push(line);
             }
@@ -110,13 +124,17 @@ impl StreamHighlighter {
                 self.fence_lines.push(remaining);
             } else {
                 // Partial line already printed char-by-char; just end the line.
-                println!();
-                self.printed_anything = true;
+                if !self.suppress_print {
+                    println!();
+                    self.printed_anything = true;
+                }
             }
         }
         if self.in_fence {
             // Unclosed fence at end of stream — print what we have.
-            self.render_fence();
+            if !self.suppress_print {
+                self.render_fence();
+            }
             self.in_fence = false;
         }
     }

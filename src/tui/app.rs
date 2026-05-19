@@ -1,0 +1,275 @@
+/// App state for the TUI.
+use super::channel::TuiEvent;
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum AppState {
+    Idle,
+    Thinking,
+    ToolRunning(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum MsgRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolDone {
+    pub elapsed_ms: u64,
+    pub success: bool,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiToolCall {
+    pub id: String,
+    pub name: String,
+    pub label: String,
+    pub result: Option<ToolDone>,
+}
+
+/// A single rendered block inside a completed UiMessage.
+#[derive(Debug, Clone)]
+pub enum UiBlock {
+    Text(String),
+    Code { lang: String, lines: Vec<String> },
+    Tool(UiToolCall),
+    Diff { path: String, content: String },
+}
+
+/// An in-flight block during the current assistant turn.
+/// Preserves the interleaved ordering of text runs and tool calls exactly
+/// as they arrive from the LLM — text, then tool, then more text, etc.
+#[derive(Debug, Clone)]
+pub enum StreamingBlock {
+    /// Accumulated text chunk (may span multiple LlmChunk events).
+    Text(String),
+    Tool(UiToolCall),
+}
+
+#[derive(Debug, Clone)]
+pub struct UiMessage {
+    pub role: MsgRole,
+    pub blocks: Vec<UiBlock>,
+}
+
+// ── App ────────────────────────────────────────────────────────────────────────
+
+pub struct App {
+    /// Completed conversation messages.
+    pub messages: Vec<UiMessage>,
+
+    /// In-flight blocks for the current assistant turn.
+    /// Text and tool calls are interleaved in arrival order.
+    pub streaming_blocks: Vec<StreamingBlock>,
+
+    /// Current git branch, cached once on startup and refreshed after slash cmds.
+    pub branch: String,
+
+    // Input
+    pub input: String,
+    pub cursor: usize,
+    /// Set when Enter is pressed; consumed by the event loop to start a turn.
+    pub pending_input: Option<String>,
+
+    // Scrolling
+    pub scroll: usize,
+    pub auto_scroll: bool,
+
+    // Session state
+    pub state: AppState,
+    pub spinner_frame: usize,
+
+    // Header info
+    pub model: String,
+    pub context_pct: u8,
+    pub turn: usize,
+    pub total_cost_usd: f64,
+
+    pub error: Option<String>,
+
+    /// Currently highlighted row in the slash-command picker.
+    pub picker_sel: usize,
+
+    /// Current working directory, refreshed after /cd.
+    pub cwd: String,
+    /// Recent directories visited via /cd (newest first, max 4).
+    pub recent_dirs: Vec<String>,
+    
+    /// Expanded tool IDs (for collapsible tool output).
+    pub expanded_tools: std::collections::HashSet<String>,
+    
+    /// Git repository status.
+    pub git_dirty: bool,
+    pub git_ahead: usize,
+    pub git_behind: usize,
+}
+
+impl App {
+    pub fn new(model: &str, branch: &str) -> Self {
+        Self {
+            messages: Vec::new(),
+            streaming_blocks: Vec::new(),
+            branch: branch.to_string(),
+            input: String::new(),
+            cursor: 0,
+            pending_input: None,
+            scroll: 0,
+            auto_scroll: true,
+            state: AppState::Idle,
+            spinner_frame: 0,
+            model: model.to_string(),
+            context_pct: 0,
+            turn: 0,
+            total_cost_usd: 0.0,
+            error: None,
+            picker_sel: 0,
+            cwd: std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "?".to_string()),
+            recent_dirs: Vec::new(),
+            expanded_tools: std::collections::HashSet::new(),
+            git_dirty: false,
+            git_ahead: 0,
+            git_behind: 0,
+        }
+    }
+
+    pub fn tick_spinner(&mut self) {
+        self.spinner_frame = (self.spinner_frame + 1) % 10;
+    }
+
+    /// Apply an incoming TUI event to App state.
+    pub fn apply_event(&mut self, ev: TuiEvent) {
+        match ev {
+            TuiEvent::LlmChunk(text) => {
+                self.state = AppState::Thinking;
+                // Append to the last Text block, or create one if needed.
+                match self.streaming_blocks.last_mut() {
+                    Some(StreamingBlock::Text(ref mut s)) => s.push_str(&text),
+                    _ => self.streaming_blocks.push(StreamingBlock::Text(text)),
+                }
+            }
+            TuiEvent::ToolStart { id, name, label } => {
+                self.state = AppState::ToolRunning(name.clone());
+                self.streaming_blocks.push(StreamingBlock::Tool(UiToolCall {
+                    id,
+                    name,
+                    label,
+                    result: None,
+                }));
+            }
+            TuiEvent::ToolDone { id, elapsed_ms, success, preview } => {
+                // Find the matching pending tool call and fill in its result.
+                for sb in self.streaming_blocks.iter_mut().rev() {
+                    if let StreamingBlock::Tool(ref mut tc) = sb {
+                        if tc.id == id {
+                            tc.result = Some(ToolDone { elapsed_ms, success, preview });
+                            break;
+                        }
+                    }
+                }
+                self.state = AppState::Thinking;
+            }
+            TuiEvent::CostUpdate { total_usd } => {
+                self.total_cost_usd = total_usd;
+            }
+            TuiEvent::ContextUpdate { pct, turn } => {
+                self.context_pct = pct;
+                self.turn = turn;
+            }
+        }
+    }
+
+    /// Finalise the current streaming turn: parse accumulated text for code fences,
+    /// preserve interleaving with tool calls, push a completed UiMessage.
+    pub fn finalize_turn(&mut self) {
+        let blocks_in: Vec<StreamingBlock> = self.streaming_blocks.drain(..).collect();
+        if blocks_in.is_empty() { return; }
+
+        let mut blocks_out: Vec<UiBlock> = Vec::new();
+        for sb in blocks_in {
+            match sb {
+                StreamingBlock::Text(text) => {
+                    parse_text_into_blocks(&text, &mut blocks_out);
+                }
+                StreamingBlock::Tool(tc) => {
+                    blocks_out.push(UiBlock::Tool(tc));
+                }
+            }
+        }
+
+        if !blocks_out.is_empty() {
+            self.messages.push(UiMessage {
+                role: MsgRole::Assistant,
+                blocks: blocks_out,
+            });
+        }
+    }
+
+    pub fn total_lines(&self, width: u16) -> usize {
+        super::render::render_all_lines(self, width).len()
+    }
+
+    pub fn scroll_down(&mut self, n: usize, viewport_h: usize, total: usize) {
+        let max_scroll = total.saturating_sub(viewport_h);
+        self.scroll = (self.scroll + n).min(max_scroll);
+        if self.scroll >= max_scroll {
+            self.auto_scroll = true;
+        }
+    }
+
+    pub fn scroll_up(&mut self, n: usize) {
+        self.scroll = self.scroll.saturating_sub(n);
+        self.auto_scroll = false;
+    }
+}
+
+// ── Code-fence parser ──────────────────────────────────────────────────────────
+
+/// Split a raw text string into alternating Text and Code UiBlocks.
+/// Used by finalize_turn() to post-process accumulated streaming text.
+pub fn parse_text_into_blocks(text: &str, blocks: &mut Vec<UiBlock>) {
+    let mut current_text = String::new();
+    let mut in_fence = false;
+    let mut fence_lang = String::new();
+    let mut fence_lines: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        if !in_fence {
+            if line.trim_start().starts_with("```") {
+                if !current_text.is_empty() {
+                    blocks.push(UiBlock::Text(std::mem::take(&mut current_text)));
+                }
+                in_fence = true;
+                fence_lang = line.trim().trim_start_matches('`').to_string();
+                fence_lines.clear();
+            } else {
+                if !current_text.is_empty() {
+                    current_text.push('\n');
+                }
+                current_text.push_str(line);
+            }
+        } else if line.trim() == "```" || line.trim() == "~~~" {
+            blocks.push(UiBlock::Code {
+                lang: fence_lang.clone(),
+                lines: fence_lines.clone(),
+            });
+            in_fence = false;
+            fence_lang.clear();
+            fence_lines.clear();
+        } else {
+            fence_lines.push(line.to_string());
+        }
+    }
+
+    // Flush unclosed content.
+    if in_fence && !fence_lines.is_empty() {
+        blocks.push(UiBlock::Code { lang: fence_lang, lines: fence_lines });
+    } else if !current_text.is_empty() {
+        blocks.push(UiBlock::Text(current_text));
+    }
+}

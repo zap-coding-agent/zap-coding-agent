@@ -160,6 +160,17 @@ impl ThinkingSpinner {
     pub fn stop_signal(&self) -> Arc<AtomicBool> { self.stop.clone() }
     pub fn stopped_signal(&self) -> Arc<AtomicBool> { self.stopped.clone() }
 
+    /// A no-op spinner used in TUI mode where the TUI event loop handles animation.
+    /// No thread is spawned; all methods are safe no-ops.
+    pub fn noop() -> Self {
+        Self {
+            pb:      ProgressBar::hidden(),
+            stop:    Arc::new(AtomicBool::new(true)),
+            stopped: Arc::new(AtomicBool::new(true)),
+            thread:  None,
+        }
+    }
+
     pub fn finish_and_clear(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(t) = self.thread.take() { let _ = t.join(); }

@@ -205,6 +205,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### UI & UX
 | Feature | File | Notes |
 |---|---|---|
+| TUI (ratatui) | `src/tui/` | Scrollable conversation, header bar, input box, streaming; default mode; `--cli` for REPL |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |
 | Colored diff on edit | `src/ui.rs` | similar crate, red/green |
 | Token + cost display | `src/session.rs:handle_user_turn` | per-turn: skills t, msg t, ctx k, est. $ |

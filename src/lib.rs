@@ -1,4 +1,5 @@
 pub mod agent_core;
+pub mod tui;
 pub mod hooks;
 pub mod http;
 pub mod log;

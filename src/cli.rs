@@ -56,6 +56,11 @@ pub struct Args {
     ///   {"type":"error","message":"..."}
     #[arg(long)]
     pub sdk: bool,
+
+    /// Use the classic REPL mode instead of the TUI (default).
+    /// Also set by AGENT_NO_TUI=1.
+    #[arg(long)]
+    pub cli: bool,
 }
 
 // ── Banner ────────────────────────────────────────────────────────────────────
@@ -290,10 +295,16 @@ pub async fn run() -> Result<()> {
             crate::agent_core::run(&goal, &config).await
         }
         None => {
-            print_banner(&config);
-            let _ = <std::io::Stdout as std::io::Write>::flush(&mut std::io::stdout());
-            tracing::info!(model = %config.model, "interactive REPL mode");
-            crate::agent_core::run_repl(&config).await
+            let use_tui = !args.cli && std::env::var("AGENT_NO_TUI").is_err();
+            if use_tui {
+                tracing::info!(model = %config.model, "TUI mode");
+                crate::agent_core::run_tui(&config).await
+            } else {
+                print_banner(&config);
+                let _ = <std::io::Stdout as std::io::Write>::flush(&mut std::io::stdout());
+                tracing::info!(model = %config.model, "interactive REPL mode");
+                crate::agent_core::run_repl(&config).await
+            }
         }
     }
 }

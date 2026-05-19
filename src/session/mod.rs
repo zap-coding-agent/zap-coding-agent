@@ -247,35 +247,16 @@ impl Session {
         }
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let code_index = match crate::code_index::CodeIndex::open(&cwd) {
-            Ok(mut idx) => {
-                match idx.index_dir(&cwd) {
-                    Ok((0, _)) => {}
-                    Ok((files, syms)) => {
-                        if !config.is_subagent {
-                            println!(
-                                "  {} indexed {} file(s), {} symbol(s)",
-                                "◎".truecolor(100, 200, 255),
-                                files.to_string().cyan(),
-                                syms.to_string().cyan(),
-                            );
-                        }
-                    }
-                    Err(e) => crate::zap_warn!("code index: {}", e),
-                }
-                let arc = Arc::new(Mutex::new(idx));
-                crate::code_index::set_global(arc.clone());
-                arc
-            }
-            Err(e) => {
-                crate::zap_warn!("code index unavailable: {}", e);
-                Arc::new(Mutex::new(
-                    crate::code_index::CodeIndex::open(&cwd)
-                        .unwrap_or_else(|_| {
-                            crate::code_index::CodeIndex::open(std::path::Path::new("/tmp")).unwrap()
-                        }),
-                ))
-            }
+        // Open the index DB but do NOT scan on startup — scanning can be slow on
+        // large directories. Use /index to trigger a manual scan.
+        let code_index = {
+            let idx = crate::code_index::CodeIndex::open(&cwd)
+                .unwrap_or_else(|_| {
+                    crate::code_index::CodeIndex::open(std::path::Path::new("/tmp")).unwrap()
+                });
+            let arc = Arc::new(Mutex::new(idx));
+            crate::code_index::set_global(arc.clone());
+            arc
         };
 
         Ok(Self {
@@ -443,29 +424,39 @@ impl Session {
         for turn in 0..MAX_TURNS {
             tracing::info!(turn = turn, "calling LLM");
 
-            let mut spinner  = Self::make_spinner();
-            let pb_clone     = spinner.pb_clone();
-            let stop_clone   = spinner.stop_signal();
-            let stopped_clone = spinner.stopped_signal();
-            let model_label  = self.model.clone();
-            let before_output: BeforeOutput = Box::new(move || {
-                // Signal the spinner thread to stop and wait for it to fully
-                // exit before clearing the bar. Without this, indicatif can
-                // redraw after finish_and_clear() and erase streaming text
-                // (especially visible on Windows).
-                stop_clone.store(true, Ordering::Release);
-                let deadline = std::time::Instant::now()
-                    + std::time::Duration::from_millis(200);
-                while !stopped_clone.load(Ordering::Acquire)
-                    && std::time::Instant::now() < deadline
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                pb_clone.finish_and_clear();
-                println!("  {} {}",
-                    "╭─".truecolor(70, 65, 90),
-                    model_label.truecolor(100, 95, 130));
-            });
+            // In TUI mode use a no-op spinner — the TUI event loop animates via
+            // LlmChunk events. In CLI mode use the normal indicatif spinner.
+            let mut spinner = if crate::tui::channel::is_tui_mode() {
+                crate::ui::ThinkingSpinner::noop()
+            } else {
+                Self::make_spinner()
+            };
+            let before_output: BeforeOutput = if crate::tui::channel::is_tui_mode() {
+                Box::new(|| {})
+            } else {
+                let pb_clone      = spinner.pb_clone();
+                let stop_clone    = spinner.stop_signal();
+                let stopped_clone = spinner.stopped_signal();
+                let model_label   = self.model.clone();
+                Box::new(move || {
+                    // Signal the spinner thread to stop and wait for it to fully
+                    // exit before clearing the bar. Without this, indicatif can
+                    // redraw after finish_and_clear() and erase streaming text
+                    // (especially visible on Windows).
+                    stop_clone.store(true, Ordering::Release);
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_millis(200);
+                    while !stopped_clone.load(Ordering::Acquire)
+                        && std::time::Instant::now() < deadline
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    pb_clone.finish_and_clear();
+                    println!("  {} {}",
+                        "╭─".truecolor(70, 65, 90),
+                        model_label.truecolor(100, 95, 130));
+                })
+            };
 
             let result = self.client
                 .send(&effective_system, &self.messages, &self.tool_defs, Some(before_output))
@@ -497,21 +488,34 @@ impl Session {
                     bar.truecolor(100, 95, 130).to_string()
                 };
 
-                if parts.is_empty() {
-                    println!("  {} {}", "╰─".truecolor(70, 65, 90), cost_str.truecolor(100, 95, 130));
-                } else {
-                    println!("  {}", "╰─".truecolor(70, 65, 90));
-                    println!("  {} {}  {}  {}",
-                        "↳".truecolor(255, 200, 60),
-                        parts.join("  ").truecolor(100, 95, 130),
-                        "·".truecolor(70, 65, 90),
-                        cost_str.truecolor(100, 95, 130));
+                if !crate::tui::channel::is_tui_mode() {
+                    if parts.is_empty() {
+                        println!("  {} {}", "╰─".truecolor(70, 65, 90), cost_str.truecolor(100, 95, 130));
+                    } else {
+                        println!("  {}", "╰─".truecolor(70, 65, 90));
+                        println!("  {} {}  {}  {}",
+                            "↳".truecolor(255, 200, 60),
+                            parts.join("  ").truecolor(100, 95, 130),
+                            "·".truecolor(70, 65, 90),
+                            cost_str.truecolor(100, 95, 130));
+                    }
+                    if post_pct > 0 {
+                        println!("  {} {}", "↳".truecolor(255, 200, 60), bar_str);
+                    }
                 }
-                if post_pct > 0 {
-                    println!("  {} {}",
-                        "↳".truecolor(255, 200, 60),
-                        bar_str);
-                }
+
+                // Compute cumulative session cost and push to TUI header.
+                let (cost_in, cost_out) = crate::ui::cost_per_million(&self.model);
+                let total_usd = (self.session_usage.input_tokens  as f64 * cost_in
+                               + self.session_usage.output_tokens as f64 * cost_out)
+                               / 1_000_000.0;
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::CostUpdate {
+                    total_usd,
+                });
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ContextUpdate {
+                    pct: post_pct,
+                    turn: self.turn_count,
+                });
             }
 
             audit::record(&format!(
@@ -553,19 +557,35 @@ impl Session {
 
                 match self.permissions.quick_check(name) {
                     crate::permission_manager::QuickDecision::Allow => {
-                        match self.hooks.fire_pre_tool_use(name, input) {
-                            crate::hooks::HookDecision::Block(reason) => {
-                                audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
-                                tool_results.push(ContentBlock::ToolResult {
-                                    tool_use_id: id.clone(),
-                                    content:     format!("Blocked by hook: {}", reason),
-                                });
+                        // Even in Auto mode, destructive shell commands require
+                        // an explicit confirmation before executing.
+                        let force_prompt = if name == "shell" {
+                            if let Some(cmd) = input["command"].as_str() {
+                                crate::tools::shell::destructive_pattern(cmd)
+                                    .map(|reason| format!("[DESTRUCTIVE: {}]\n         {}", reason, ctx))
+                            } else {
+                                None
                             }
-                            crate::hooks::HookDecision::Allow => {
-                                approved.push(ApprovedCall {
-                                    id: id.clone(), name: name.clone(),
-                                    input: input.clone(), ctx,
-                                });
+                        } else {
+                            None
+                        };
+                        if let Some(destructive_ctx) = force_prompt {
+                            needs_prompt.push((id.clone(), name.clone(), destructive_ctx, input.clone()));
+                        } else {
+                            match self.hooks.fire_pre_tool_use(name, input) {
+                                crate::hooks::HookDecision::Block(reason) => {
+                                    audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
+                                    tool_results.push(ContentBlock::ToolResult {
+                                        tool_use_id: id.clone(),
+                                        content:     format!("Blocked by hook: {}", reason),
+                                    });
+                                }
+                                crate::hooks::HookDecision::Allow => {
+                                    approved.push(ApprovedCall {
+                                        id: id.clone(), name: name.clone(),
+                                        input: input.clone(), ctx,
+                                    });
+                                }
                             }
                         }
                     }
@@ -584,10 +604,13 @@ impl Session {
 
             // Batch prompt — one grouped UI for all pending calls.
             if !needs_prompt.is_empty() {
+                // Suspend TUI so inquire prompt can take over the terminal.
+                crate::tui::channel::suspend_for_prompt();
                 let batch: Vec<(String, String, String)> = needs_prompt.iter()
                     .map(|(id, name, ctx, _)| (id.clone(), name.clone(), ctx.clone()))
                     .collect();
                 let decisions = self.permissions.prompt_batch(&batch)?;
+                crate::tui::channel::resume_from_prompt();
                 for (i, (id, name, ctx, input)) in needs_prompt.into_iter().enumerate() {
                     if decisions[i] {
                         match self.hooks.fire_pre_tool_use(&name, &input) {
@@ -664,19 +687,27 @@ impl Session {
                     } else {
                         String::new()
                     };
-                    let ctx_display = if call.ctx.len() > 52 {
-                        format!("{}…", &call.ctx[..51])
+                    let ctx_display = if call.ctx.chars().count() > 52 {
+                        format!("{}…", call.ctx.chars().take(51).collect::<String>())
                     } else {
                         call.ctx.clone()
                     };
-                    println!(
-                        "  {} {} {}  {}{}",
-                        "╭─".truecolor(70, 65, 90),
-                        icon,
-                        call.name.truecolor(100, 210, 255).bold(),
-                        ctx_display.truecolor(130, 120, 155),
-                        cancel_hint,
-                    );
+                    // Notify TUI of tool start
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolStart {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        label: ctx_display.clone(),
+                    });
+                    if !crate::tui::channel::is_tui_mode() {
+                        println!(
+                            "  {} {} {}  {}{}",
+                            "╭─".truecolor(70, 65, 90),
+                            icon,
+                            call.name.truecolor(100, 210, 255).bold(),
+                            ctx_display.truecolor(130, 120, 155),
+                            cancel_hint,
+                        );
+                    }
                     let t0 = std::time::Instant::now();
                     match tool {
                         Some(t) => {
@@ -689,12 +720,22 @@ impl Session {
                                 Ok(output) => {
                                     let _ = audit::record(&format!("tool_success name={}", call.name));
                                     let ms = t0.elapsed().as_millis();
-                                    println!("  {} {}  {}",
-                                        "╰─".truecolor(70, 65, 90),
-                                        "✓".truecolor(80, 210, 120),
-                                        format!("{}ms", ms).truecolor(90, 85, 110));
-                                    if t.shows_inline_output() {
-                                        print_tool_output(&output);
+                                    let preview = output.lines().take(3).collect::<Vec<_>>().join("\n");
+                                    // Notify TUI of tool done
+                                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
+                                        id: call.id.clone(),
+                                        elapsed_ms: ms as u64,
+                                        success: true,
+                                        preview,
+                                    });
+                                    if !crate::tui::channel::is_tui_mode() {
+                                        println!("  {} {}  {}",
+                                            "╰─".truecolor(70, 65, 90),
+                                            "✓".truecolor(80, 210, 120),
+                                            format!("{}ms", ms).truecolor(90, 85, 110));
+                                        if t.shows_inline_output() {
+                                            print_tool_output(&output);
+                                        }
                                     }
                                     ContentBlock::ToolResult { tool_use_id: call.id, content: output }
                                 }
@@ -702,12 +743,21 @@ impl Session {
                                     let _ = audit::record(&format!("tool_error name={} err={}", call.name, e));
                                     let ms = t0.elapsed().as_millis();
                                     let err_str = format!("Error: {}", e);
-                                    println!("  {} {}  {}",
-                                        "╰─".truecolor(70, 65, 90),
-                                        "✗".truecolor(220, 80, 80),
-                                        format!("{}ms", ms).truecolor(90, 85, 110));
-                                    if t.shows_inline_output() {
-                                        println!("    {}", err_str.truecolor(220, 100, 100));
+                                    // Notify TUI of tool done (failure)
+                                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
+                                        id: call.id.clone(),
+                                        elapsed_ms: ms as u64,
+                                        success: false,
+                                        preview: err_str.clone(),
+                                    });
+                                    if !crate::tui::channel::is_tui_mode() {
+                                        println!("  {} {}  {}",
+                                            "╰─".truecolor(70, 65, 90),
+                                            "✗".truecolor(220, 80, 80),
+                                            format!("{}ms", ms).truecolor(90, 85, 110));
+                                        if t.shows_inline_output() {
+                                            println!("    {}", err_str.truecolor(220, 100, 100));
+                                        }
                                     }
                                     ContentBlock::ToolResult {
                                         tool_use_id: call.id,
@@ -718,8 +768,16 @@ impl Session {
                         }
                         None => {
                             let _ = audit::record(&format!("tool_unknown name={}", call.name));
-                            println!("  {} {} unknown tool",
-                                "╰─".truecolor(70, 65, 90), "✗".truecolor(220, 80, 80));
+                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
+                                id: call.id.clone(),
+                                elapsed_ms: 0,
+                                success: false,
+                                preview: format!("Unknown tool: {}", call.name),
+                            });
+                            if !crate::tui::channel::is_tui_mode() {
+                                println!("  {} {} unknown tool",
+                                    "╰─".truecolor(70, 65, 90), "✗".truecolor(220, 80, 80));
+                            }
                             ContentBlock::ToolResult {
                                 tool_use_id: call.id,
                                 content:     format!("Unknown tool: {}", call.name),

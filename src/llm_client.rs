@@ -275,6 +275,7 @@ impl LlmProvider for AnthropicClient {
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
+        highlighter.suppress_print = crate::tui::channel::is_tui_mode();
         if self.api_key.is_empty() {
             anyhow::bail!("ANTHROPIC_API_KEY is not set");
         }
@@ -544,6 +545,7 @@ impl LlmProvider for OpenAiClient {
     ) -> Result<ApiResponse> {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
+        highlighter.suppress_print = crate::tui::channel::is_tui_mode();
         let oai_messages = Self::encode_messages(system, messages);
         let oai_tools = Self::encode_tools(tools);
 

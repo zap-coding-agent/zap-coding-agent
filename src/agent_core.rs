@@ -46,6 +46,15 @@ pub async fn run(goal: &str, config: &Config) -> Result<()> {
     Ok(())
 }
 
+// ── TUI mode ─────────────────────────────────────────────────────────────────
+
+pub async fn run_tui(config: &Config) -> Result<()> {
+    audit::record(&format!("tui_start model={}", config.model))?;
+    crate::tui::run_tui(config).await?;
+    audit::record("tui_end")?;
+    Ok(())
+}
+
 // ── Interactive REPL ──────────────────────────────────────────────────────────
 
 pub async fn run_repl(config: &Config) -> Result<()> {
