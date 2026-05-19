@@ -178,6 +178,9 @@ impl App {
         match ev {
             TuiEvent::LlmChunk(text) => {
                 self.state = AppState::Thinking;
+                // Re-enable auto-scroll so the viewport follows active streaming
+                // even if the user scrolled up earlier in the turn.
+                self.auto_scroll = true;
                 // Append to the last Text block, or create one if needed.
                 match self.streaming_blocks.last_mut() {
                     Some(StreamingBlock::Text(ref mut s)) => s.push_str(&text),
