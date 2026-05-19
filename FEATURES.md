@@ -64,7 +64,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/index files` | `src/session/commands.rs:cmd_index`, `src/code_index.rs:list_indexed_files` | Lists all files in the code index with their symbol count; sorted by symbol count desc |
 | `/index db` | `src/session/commands.rs:cmd_index` | Shows agent.db summary: session count, memory entries, branches, last 10 sessions and all memory key-value pairs |
 | Ctrl+Q confirmation | `src/tui/input.rs`, `src/tui/app.rs` | First Ctrl+Q shows "Press Ctrl+Q again to quit" notice; any other key cancels; second Ctrl+Q quits — prevents accidental exits |
-| Extended thinking (`/think`) | `src/session/commands.rs:cmd_think`, `src/llm_client.rs`, `src/tui/` | `/think on` (8k budget), `/think off`, `/think <N>` tokens; thinking streams in TUI as dimmed italic text with last 3 lines visible; collapses to "🧠 Thinking (N chars)" after turn completes; thinking blocks preserved in multi-turn history (with Anthropic signature); OpenAI providers ignore the budget |
+| Extended thinking (`/think`) | `src/session/commands.rs:cmd_think`, `src/llm_client.rs`, `src/tui/` | `/think on` (8k budget), `/think off`, `/think <N>` tokens; thinking streams in TUI as dimmed italic text with last 3 lines visible; collapses to "🧠 Thinking (N chars)" after turn completes; thinking blocks preserved in multi-turn history (with Anthropic signature); OpenAI providers ignore the budget; budget clamped to MAX_TOKENS-1 to satisfy Anthropic constraint; /think handled inline in TUI (no suspend/Press-Enter) |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 

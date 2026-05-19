@@ -412,8 +412,10 @@ impl LlmProvider for AnthropicClient {
             }
         }
 
-        let thinking = if thinking_budget > 0 {
-            Some(serde_json::json!({"type": "enabled", "budget_tokens": thinking_budget}))
+        // budget_tokens must be strictly less than max_tokens per Anthropic's API.
+        let effective_budget = thinking_budget.min(MAX_TOKENS.saturating_sub(1));
+        let thinking = if effective_budget > 0 {
+            Some(serde_json::json!({"type": "enabled", "budget_tokens": effective_budget}))
         } else {
             None
         };

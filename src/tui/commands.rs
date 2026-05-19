@@ -95,6 +95,41 @@ pub fn handle_inline(
             session.permissions.mode = new_mode;
             Some(format!("Permission mode: {}", arg))
         }
+        "/think" => {
+            let budget = session.thinking_budget;
+            match arg {
+                "" | "status" => {
+                    let status = if budget == 0 {
+                        "off".to_string()
+                    } else {
+                        format!("{} token budget", budget)
+                    };
+                    Some(format!(
+                        "Extended thinking: {}\nUsage: /think on|off|<tokens>  (Anthropic only; requires claude-3-7-sonnet+)",
+                        status
+                    ))
+                }
+                "off" | "0" => {
+                    session.thinking_budget = 0;
+                    Some("Extended thinking disabled.".to_string())
+                }
+                "on" => {
+                    session.thinking_budget = 8000;
+                    Some("Extended thinking enabled (8000 token budget). Requires claude-3-7-sonnet or newer.".to_string())
+                }
+                n => match n.parse::<u32>() {
+                    Ok(0) => {
+                        session.thinking_budget = 0;
+                        Some("Extended thinking disabled.".to_string())
+                    }
+                    Ok(v) => {
+                        session.thinking_budget = v;
+                        Some(format!("Extended thinking enabled ({} token budget).", v))
+                    }
+                    Err(_) => Some("Usage: /think on|off|<budget_tokens>  e.g. /think 8000".to_string()),
+                }
+            }
+        }
         "/cd" => {
             if arg.is_empty() {
                 Some(format!(
@@ -139,6 +174,7 @@ fn help_text() -> String {
             ("/models",                   "list models on server"),
             ("/provider",                 "switch provider interactively"),
             ("/permissions ask|auto|deny","change permission mode"),
+            ("/think [on|off|N]",         "extended thinking (Anthropic only)"),
         ]),
         ("code", &[
             ("/tasks",                    "browse & execute task sessions"),
