@@ -170,12 +170,14 @@ pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
             config.model.clone(),
             config.base_url.clone(),
             suppress,
+            config.disable_stream,
         )),
         Provider::OpenAi => Box::new(OpenAiClient::new(
             config.api_key.clone(),
             config.model.clone(),
             config.base_url.clone(),
             suppress,
+            config.disable_stream,
         )),
     }
 }
@@ -284,16 +286,15 @@ struct AnthropicClient {
     url: String,
     suppress_stream: bool,
     bearer_auth: bool,
+    disable_stream: bool,
 }
 
 impl AnthropicClient {
-    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
+    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let bearer_auth = base_url.is_some();
-        // Use base_url exactly as provided — the gateway handles routing.
-        // Fall back to the public Anthropic endpoint only when no base_url is set.
         let url = base_url
             .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
-        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth }
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth, disable_stream }
     }
 
     fn process_event(
@@ -425,7 +426,7 @@ impl LlmProvider for AnthropicClient {
             system: system_blocks,
             messages: encode_messages_anthropic(messages),
             tools: cached_tools,
-            stream: true,
+            stream: !self.disable_stream,
             thinking,
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
@@ -478,73 +479,121 @@ impl LlmProvider for AnthropicClient {
             anyhow::bail!("Anthropic API returned {} (url: {}): {}", status, self.url, text);
         }
 
-        // ── Parse SSE stream ──────────────────────────────────────────────────
-        let mut stream = resp.bytes_stream();
-        let mut buf = String::new();
-        let mut blocks: std::collections::HashMap<usize, BlockAccum> = Default::default();
-        let mut stop_reason = "end_turn".to_string();
-        let mut usage_acc = Usage::default();
+        // ── Parse response: plain JSON (disable_stream) or SSE ───────────────
+        let (content, stop_reason, usage_acc) = if self.disable_stream {
+            let text = resp.text().await.context("failed to read Anthropic response")?;
+            let json: serde_json::Value = serde_json::from_str(&text)
+                .context("failed to parse Anthropic JSON response")?;
 
-        while let Some(chunk) = stream.next().await {
-            let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
-            buf.push_str(&String::from_utf8_lossy(&bytes));
+            let stop_reason = json["stop_reason"].as_str().unwrap_or("end_turn").to_string();
+            let usage_acc = if let Some(u) = json["usage"].as_object() {
+                Usage {
+                    input_tokens:       u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    output_tokens:      u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    cache_read_tokens:  u.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    cache_write_tokens: u.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                }
+            } else {
+                Usage::default()
+            };
 
-            while let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim_end_matches('\r').to_string();
-                buf = buf[pos + 1..].to_string();
-
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" {
-                        break;
-                    }
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        Self::process_event(
-                            &event,
-                            &mut blocks,
-                            &mut stop_reason,
-                            &mut before_output,
-                            &mut usage_acc,
-                            self.suppress_stream,
-                            &mut highlighter,
-                        );
+            let mut content: Vec<ContentBlock> = Vec::new();
+            if let Some(blocks) = json["content"].as_array() {
+                for block in blocks {
+                    match block["type"].as_str().unwrap_or("") {
+                        "text" => {
+                            let t = block["text"].as_str().unwrap_or("").to_string();
+                            if !t.is_empty() {
+                                if !self.suppress_stream {
+                                    if let Some(cb) = before_output.take() { cb(); }
+                                    highlighter.push(&t);
+                                    highlighter.flush();
+                                }
+                                content.push(ContentBlock::Text { text: t });
+                            }
+                        }
+                        "tool_use" => {
+                            let id    = block["id"].as_str().unwrap_or("").to_string();
+                            let name  = block["name"].as_str().unwrap_or("").to_string();
+                            let input = block["input"].clone();
+                            content.push(ContentBlock::ToolUse { id, name, input });
+                        }
+                        "thinking" => {
+                            let thinking  = block["thinking"].as_str().unwrap_or("").to_string();
+                            let signature = block["signature"].as_str().unwrap_or("").to_string();
+                            if !thinking.is_empty() {
+                                content.push(ContentBlock::Thinking { thinking, signature });
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
-        }
+            if let Some(cb) = before_output.take() { cb(); }
+            (content, stop_reason, usage_acc)
+        } else {
+            // ── SSE streaming path ────────────────────────────────────────────
+            let mut stream = resp.bytes_stream();
+            let mut buf = String::new();
+            let mut blocks: std::collections::HashMap<usize, BlockAccum> = Default::default();
+            let mut stop_reason = "end_turn".to_string();
+            let mut usage_acc = Usage::default();
 
-        // ── Assemble content blocks in index order ────────────────────────────
-        let mut pairs: Vec<(usize, BlockAccum)> = blocks.into_iter().collect();
-        pairs.sort_by_key(|(idx, _)| *idx);
+            while let Some(chunk) = stream.next().await {
+                let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
+                buf.push_str(&String::from_utf8_lossy(&bytes));
 
-        let had_text = pairs.iter().any(|(_, a)| a.kind == "text" && !a.text.is_empty());
-        if had_text && !self.suppress_stream {
-            highlighter.flush();
-            // StreamHighlighter already printed newlines as needed.
-        }
+                while let Some(pos) = buf.find('\n') {
+                    let line = buf[..pos].trim_end_matches('\r').to_string();
+                    buf = buf[pos + 1..].to_string();
 
-        let mut content: Vec<ContentBlock> = Vec::new();
-        for (_, acc) in pairs {
-            match acc.kind.as_str() {
-                "text" if !acc.text.is_empty() => {
-                    content.push(ContentBlock::Text { text: acc.text });
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" { break; }
+                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                            Self::process_event(
+                                &event,
+                                &mut blocks,
+                                &mut stop_reason,
+                                &mut before_output,
+                                &mut usage_acc,
+                                self.suppress_stream,
+                                &mut highlighter,
+                            );
+                        }
+                    }
                 }
-                "tool_use" => {
-                    let input: serde_json::Value =
-                        serde_json::from_str(&acc.input_json).unwrap_or(serde_json::json!({}));
-                    content.push(ContentBlock::ToolUse { id: acc.id, name: acc.name, input });
-                }
-                "thinking" if !acc.text.is_empty() => {
-                    content.push(ContentBlock::Thinking {
-                        thinking: acc.text,
-                        signature: acc.signature,
-                    });
-                }
-                _ => {}
             }
-        }
 
-        // Stop spinner if no text was streamed (tool-use only response).
-        if let Some(cb) = before_output.take() { cb(); }
+            let mut pairs: Vec<(usize, BlockAccum)> = blocks.into_iter().collect();
+            pairs.sort_by_key(|(idx, _)| *idx);
+
+            let had_text = pairs.iter().any(|(_, a)| a.kind == "text" && !a.text.is_empty());
+            if had_text && !self.suppress_stream {
+                highlighter.flush();
+            }
+
+            let mut content: Vec<ContentBlock> = Vec::new();
+            for (_, acc) in pairs {
+                match acc.kind.as_str() {
+                    "text" if !acc.text.is_empty() =>
+                        content.push(ContentBlock::Text { text: acc.text }),
+                    "tool_use" => {
+                        let input: serde_json::Value =
+                            serde_json::from_str(&acc.input_json).unwrap_or(serde_json::json!({}));
+                        content.push(ContentBlock::ToolUse { id: acc.id, name: acc.name, input });
+                    }
+                    "thinking" if !acc.text.is_empty() =>
+                        content.push(ContentBlock::Thinking {
+                            thinking: acc.text,
+                            signature: acc.signature,
+                        }),
+                    _ => {}
+                }
+            }
+
+            if let Some(cb) = before_output.take() { cb(); }
+            (content, stop_reason, usage_acc)
+        };
 
         // Log response to ~/.zap/llm.log
         {
@@ -596,15 +645,14 @@ struct OpenAiClient {
     model: String,
     url: String,
     suppress_stream: bool,
+    disable_stream: bool,
 }
 
 impl OpenAiClient {
-    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool) -> Self {
-        // Use base_url exactly as provided — the gateway handles routing.
-        // Fall back to the public OpenAI chat completions endpoint when not set.
+    fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let url = base_url
             .unwrap_or_else(|| format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE));
-        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream }
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream }
     }
 
     /// Convert our internal messages to the OpenAI wire format.
@@ -731,12 +779,20 @@ impl LlmProvider for OpenAiClient {
         let oai_messages = Self::encode_messages(system, messages);
         let oai_tools = Self::encode_tools(tools);
 
-        let mut body = serde_json::json!({
-            "model": self.model,
-            "messages": oai_messages,
-            "stream": true,
-            "stream_options": { "include_usage": true },
-        });
+        let mut body = if self.disable_stream {
+            serde_json::json!({
+                "model": self.model,
+                "messages": oai_messages,
+                "stream": false,
+            })
+        } else {
+            serde_json::json!({
+                "model": self.model,
+                "messages": oai_messages,
+                "stream": true,
+                "stream_options": { "include_usage": true },
+            })
+        };
         if !oai_tools.is_empty() {
             body["tools"] = serde_json::json!(oai_tools);
         }
@@ -798,117 +854,159 @@ impl LlmProvider for OpenAiClient {
             anyhow::bail!("OpenAI API returned {} (url: {}): {}", status, self.url, text);
         }
 
-        // ── Parse SSE stream ──────────────────────────────────────────────────
-        let mut stream = resp.bytes_stream();
-        let mut buf = String::new();
-        let mut text_acc = String::new();
-        let mut tool_accums: std::collections::HashMap<usize, OaiToolAccum> = Default::default();
-        let mut finish_reason = "stop".to_string();
-        let mut usage_acc = Usage::default();
+        // ── Parse response: plain JSON (disable_stream) or SSE ───────────────
+        let (content, stop_reason, usage) = if self.disable_stream {
+            let text = resp.text().await.context("failed to read OpenAI response")?;
+            let json: serde_json::Value = serde_json::from_str(&text)
+                .context("failed to parse OpenAI JSON response")?;
 
-        'outer: while let Some(chunk) = stream.next().await {
-            let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
-            buf.push_str(&String::from_utf8_lossy(&bytes));
+            let choice = &json["choices"][0];
+            let message = &choice["message"];
+            let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop").to_string();
 
-            while let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim_end_matches('\r').to_string();
-                buf = buf[pos + 1..].to_string();
-
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" {
-                        break 'outer;
+            let mut content: Vec<ContentBlock> = Vec::new();
+            if let Some(t) = message["content"].as_str() {
+                if !t.is_empty() {
+                    if !self.suppress_stream {
+                        if let Some(cb) = before_output.take() { cb(); }
+                        highlighter.push(t);
+                        highlighter.flush();
                     }
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        let choice = &event["choices"][0];
-                        let delta = &choice["delta"];
+                    content.push(ContentBlock::Text { text: t.to_string() });
+                }
+            }
+            if let Some(tool_calls) = message["tool_calls"].as_array() {
+                for tc in tool_calls {
+                    let id    = tc["id"].as_str().unwrap_or("").to_string();
+                    let name  = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                    let args  = tc["function"]["arguments"].as_str().unwrap_or("{}");
+                    let input: serde_json::Value =
+                        serde_json::from_str(args).unwrap_or(serde_json::json!({}));
+                    content.push(ContentBlock::ToolUse { id, name, input });
+                }
+            }
 
-                        // Text delta — stream immediately (unless suppressed).
-                        if let Some(text) = delta["content"].as_str() {
-                            if !text.is_empty() {
-                                if !self.suppress_stream {
-                                    if let Some(cb) = before_output.take() { cb(); }
-                                    highlighter.push(text);
-                                    let _ = std::io::Write::flush(&mut std::io::stdout());
-                                }
-                                text_acc.push_str(text);
-                            }
-                        }
+            // Plain-text tool-call detection still applies.
+            if message["tool_calls"].is_null() && finish_reason == "stop" {
+                if let Some(t) = message["content"].as_str() {
+                    check_text_mode_tool_call(t, tools_were_sent);
+                }
+            }
 
-                        // Tool-call deltas — accumulate by index.
-                        if let Some(tc_arr) = delta["tool_calls"].as_array() {
-                            for tc in tc_arr {
-                                let idx = tc["index"].as_u64().unwrap_or(0) as usize;
-                                let acc = tool_accums.entry(idx).or_default();
-                                if let Some(id) = tc["id"].as_str() {
-                                    acc.id = id.to_string();
-                                }
-                                if let Some(name) = tc["function"]["name"].as_str() {
-                                    acc.name = name.to_string();
-                                }
-                                if let Some(args) = tc["function"]["arguments"].as_str() {
-                                    acc.arguments.push_str(args);
-                                }
-                            }
-                        }
+            let usage_acc = if let Some(u) = json["usage"].as_object() {
+                Usage {
+                    input_tokens:  u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    output_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    ..Usage::default()
+                }
+            } else {
+                Usage::default()
+            };
 
-                        // Finish reason.
-                        if let Some(fr) = choice["finish_reason"].as_str() {
-                            if !fr.is_empty() {
-                                finish_reason = fr.to_string();
-                            }
-                        }
+            if let Some(cb) = before_output.take() { cb(); }
 
-                        // Usage (arrives in the final chunk when stream_options.include_usage).
-                        if let Some(u) = event["usage"].as_object() {
-                            if let Some(v) = u.get("prompt_tokens").and_then(|v| v.as_u64()) {
-                                usage_acc.input_tokens = v as u32;
+            let stop_reason = match finish_reason.as_str() {
+                "tool_calls" => "tool_use".to_string(),
+                _ => "end_turn".to_string(),
+            };
+            let usage = if usage_acc.input_tokens > 0 || usage_acc.output_tokens > 0 {
+                Some(usage_acc)
+            } else {
+                None
+            };
+            (content, stop_reason, usage)
+        } else {
+            // ── SSE streaming path ────────────────────────────────────────────
+            let mut stream = resp.bytes_stream();
+            let mut buf = String::new();
+            let mut text_acc = String::new();
+            let mut tool_accums: std::collections::HashMap<usize, OaiToolAccum> = Default::default();
+            let mut finish_reason = "stop".to_string();
+            let mut usage_acc = Usage::default();
+
+            'outer: while let Some(chunk) = stream.next().await {
+                let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
+                buf.push_str(&String::from_utf8_lossy(&bytes));
+
+                while let Some(pos) = buf.find('\n') {
+                    let line = buf[..pos].trim_end_matches('\r').to_string();
+                    buf = buf[pos + 1..].to_string();
+
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" { break 'outer; }
+                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                            let choice = &event["choices"][0];
+                            let delta = &choice["delta"];
+
+                            if let Some(text) = delta["content"].as_str() {
+                                if !text.is_empty() {
+                                    if !self.suppress_stream {
+                                        if let Some(cb) = before_output.take() { cb(); }
+                                        highlighter.push(text);
+                                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                                    }
+                                    text_acc.push_str(text);
+                                }
                             }
-                            if let Some(v) = u.get("completion_tokens").and_then(|v| v.as_u64()) {
-                                usage_acc.output_tokens = v as u32;
+
+                            if let Some(tc_arr) = delta["tool_calls"].as_array() {
+                                for tc in tc_arr {
+                                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+                                    let acc = tool_accums.entry(idx).or_default();
+                                    if let Some(id) = tc["id"].as_str() { acc.id = id.to_string(); }
+                                    if let Some(name) = tc["function"]["name"].as_str() { acc.name = name.to_string(); }
+                                    if let Some(args) = tc["function"]["arguments"].as_str() { acc.arguments.push_str(args); }
+                                }
+                            }
+
+                            if let Some(fr) = choice["finish_reason"].as_str() {
+                                if !fr.is_empty() { finish_reason = fr.to_string(); }
+                            }
+
+                            if let Some(u) = event["usage"].as_object() {
+                                if let Some(v) = u.get("prompt_tokens").and_then(|v| v.as_u64()) {
+                                    usage_acc.input_tokens = v as u32;
+                                }
+                                if let Some(v) = u.get("completion_tokens").and_then(|v| v.as_u64()) {
+                                    usage_acc.output_tokens = v as u32;
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        if !text_acc.is_empty() && !self.suppress_stream {
-            highlighter.flush();
-        }
+            if !text_acc.is_empty() && !self.suppress_stream {
+                highlighter.flush();
+            }
+            if let Some(cb) = before_output.take() { cb(); }
 
-        // Stop spinner if no text was streamed.
-        if let Some(cb) = before_output.take() { cb(); }
+            if tool_accums.is_empty() && finish_reason == "stop" {
+                check_text_mode_tool_call(&text_acc, tools_were_sent);
+            }
 
-        // ── Assemble content blocks ───────────────────────────────────────────
-        // If the model returned text with no native tool calls but we sent tools,
-        // check whether it tried to emit tool calls as plain-text JSON — a sign
-        // the gateway silently stripped the tools field from the request.
-        if tool_accums.is_empty() && finish_reason == "stop" {
-            check_text_mode_tool_call(&text_acc, tools_were_sent);
-        }
+            let mut content: Vec<ContentBlock> = Vec::new();
+            if !text_acc.is_empty() {
+                content.push(ContentBlock::Text { text: text_acc });
+            }
+            let mut pairs: Vec<(usize, OaiToolAccum)> = tool_accums.into_iter().collect();
+            pairs.sort_by_key(|(idx, _)| *idx);
+            for (_, acc) in pairs {
+                let input: serde_json::Value =
+                    serde_json::from_str(&acc.arguments).unwrap_or(serde_json::json!({}));
+                content.push(ContentBlock::ToolUse { id: acc.id, name: acc.name, input });
+            }
 
-        let mut content: Vec<ContentBlock> = Vec::new();
-        if !text_acc.is_empty() {
-            content.push(ContentBlock::Text { text: text_acc });
-        }
-
-        let mut pairs: Vec<(usize, OaiToolAccum)> = tool_accums.into_iter().collect();
-        pairs.sort_by_key(|(idx, _)| *idx);
-        for (_, acc) in pairs {
-            let input: serde_json::Value =
-                serde_json::from_str(&acc.arguments).unwrap_or(serde_json::json!({}));
-            content.push(ContentBlock::ToolUse { id: acc.id, name: acc.name, input });
-        }
-
-        let stop_reason = match finish_reason.as_str() {
-            "tool_calls" => "tool_use".to_string(),
-            _ => "end_turn".to_string(),
-        };
-
-        let usage = if usage_acc.input_tokens > 0 || usage_acc.output_tokens > 0 {
-            Some(usage_acc)
-        } else {
-            None
+            let stop_reason = match finish_reason.as_str() {
+                "tool_calls" => "tool_use".to_string(),
+                _ => "end_turn".to_string(),
+            };
+            let usage = if usage_acc.input_tokens > 0 || usage_acc.output_tokens > 0 {
+                Some(usage_acc)
+            } else {
+                None
+            };
+            (content, stop_reason, usage)
         };
 
         // Log response to ~/.zap/llm.log

@@ -58,6 +58,9 @@ pub struct Config {
     /// Extra skill directories to scan in addition to ~/.zap/skills/ and .zap/skills/.
     /// Set in ~/.agent.toml as: skill_paths = [".kiro/skills", "~/shared-skills"]
     pub skill_paths: Vec<String>,
+    /// When true, send stream:false and parse a plain JSON response instead of SSE.
+    /// Required for corporate proxies that mangle SSE and return empty tool_use blocks.
+    pub disable_stream: bool,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -78,6 +81,7 @@ struct FileConfig {
     tls_skip_verify: Option<bool>,
     timeout_secs:    Option<u64>,
     skill_paths:     Option<Vec<String>>,
+    disable_stream:  Option<bool>,
 }
 
 impl FileConfig {
@@ -183,11 +187,15 @@ impl Config {
 
         let skill_paths = file.skill_paths.unwrap_or_default();
 
+        let disable_stream = env::var("AGENT_DISABLE_STREAM")
+            .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
+            .unwrap_or(file.disable_stream.unwrap_or(false));
+
         Ok(Self {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
-            budget: None, skill_paths,
+            budget: None, skill_paths, disable_stream,
         })
     }
 
@@ -233,6 +241,9 @@ impl Config {
         }
         if self.timeout_secs != 120 {
             writeln!(f, "timeout_secs = {}", self.timeout_secs)?;
+        }
+        if self.disable_stream {
+            writeln!(f, "disable_stream = true")?;
         }
 
         // Restrict to owner-read/write only — file contains API keys.

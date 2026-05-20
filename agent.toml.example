@@ -31,3 +31,10 @@ api_key = ""
 # "auto"  → approve everything silently
 # "deny"  → read-only, never execute writes
 permission_mode = "ask"
+
+# ── Streaming ─────────────────────────────────────────────────────────────────
+# Set to true if you are behind a corporate proxy that mangles SSE (Server-Sent
+# Events). When true, zap sends stream:false and parses a plain JSON response
+# instead. Tool calls work correctly through proxies that break SSE.
+# Can also be set via env var: AGENT_DISABLE_STREAM=true
+# disable_stream = false
