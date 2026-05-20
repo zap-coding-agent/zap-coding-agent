@@ -635,7 +635,6 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                     lines.extend(text_to_lines(text, width));
                 }
                 StreamingBlock::Tool(tc) => {
-                    // In-flight tool calls are never expanded.
                     lines.extend(tool_call_lines(tc, false, width));
                 }
             }
@@ -669,9 +668,20 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     if let Some(err) = &app.error {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("  ✗ Error: ".to_string(), Style::default().fg(Color::Red).bold()),
+            Span::styled("  \u{2717} Error: ".to_string(), Style::default().fg(Color::Red).bold()),
             Span::styled(err.clone(), Style::default().fg(Color::Red)),
         ]));
+    }
+
+    // ── Global safety net: hard-clip every line to width ──────────────────────
+    // Prevents any line source (markdown, code blocks, tool output) from
+    // overflowing into the sidebar or wrapping as scattered characters.
+    let max_w = (width as usize).saturating_sub(2).max(20);
+    for line in &mut lines {
+        let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+        if total > max_w {
+            line.spans = truncate_spans(std::mem::take(&mut line.spans), max_w);
+        }
     }
 
     lines
@@ -739,25 +749,38 @@ pub fn role_line(role: &MsgRole) -> Line<'static> {
 }
 
 pub fn text_to_lines(text: &str, width: u16) -> Vec<Line<'static>> {
-    // Try to parse as markdown first
-    let md_lines = super::syntax::parse_markdown(text);
-    
-    // If markdown parsing produced good results, use it
-    if !md_lines.is_empty() && md_lines.len() > 1 {
-        let mut result = Vec::new();
-        for line in md_lines {
-            // Add indentation
-            let mut spans = vec![Span::raw("  ")];
-            spans.extend(line.spans);
-            result.push(Line::from(spans));
-        }
-        return result;
-    }
-    
-    // Fallback to plain text wrapping
     let wrap_width = (width as usize).saturating_sub(4).max(20);
-    let mut lines = Vec::new();
 
+    // Try markdown — but only use styled output if every line fits within wrap_width.
+    // If any markdown line is too long (e.g. a long prose paragraph without breaks),
+    // fall through to the plain word-wrap path which correctly reflows the text.
+    let md_lines = super::syntax::parse_markdown(text);
+    if !md_lines.is_empty() && md_lines.len() > 1 {
+        let all_fit = md_lines.iter().all(|l| {
+            l.spans.iter().map(|s| s.content.chars().count()).sum::<usize>() + 2 <= wrap_width
+        });
+        if all_fit {
+            let mut result = Vec::new();
+            for line in md_lines {
+                let mut spans = vec![Span::raw("  ")];
+                spans.extend(line.spans);
+                result.push(Line::from(spans));
+            }
+            return result;
+        }
+        // Some line is too wide — extract plain text from markdown spans and word-wrap below.
+        let plain: String = md_lines.iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        return word_wrap_plain(&plain, wrap_width);
+    }
+
+    word_wrap_plain(text, wrap_width)
+}
+
+fn word_wrap_plain(text: &str, wrap_width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
     for raw_line in text.lines() {
         if raw_line.is_empty() {
             lines.push(Line::from("  ".to_string()));
@@ -771,17 +794,17 @@ pub fn text_to_lines(text: &str, width: u16) -> Vec<Line<'static>> {
             } else {
                 let slice: String = remaining.chars().take(wrap_width).collect();
                 match slice.rfind(' ') {
-                    Some(p) => slice[..p].chars().count() + 1,
-                    None    => wrap_width,
+                    Some(p) if p > 0 => slice[..p].chars().count(),
+                    _ => wrap_width,
                 }
             };
             let chunk: String = remaining.chars().take(take_chars).collect();
             let byte_len: usize = chunk.len();
             lines.push(Line::from(Span::styled(
                 format!("  {}", chunk),
-                Style::default().fg(Color::Rgb(210, 205, 230))
+                Style::default().fg(Color::Rgb(210, 205, 230)),
             )));
-            remaining = remaining[byte_len..].trim_start();
+            remaining = remaining[byte_len..].trim_start_matches(' ');
         }
     }
     lines
@@ -830,6 +853,25 @@ pub fn code_block_lines(lang: &str, code_lines: &[String]) -> Vec<Line<'static>>
         Span::styled("  +--".to_string(), Style::default().fg(border_c)),
     ]));
     lines
+}
+
+/// Truncate a span list to at most `max_chars` visible characters, appending "…" if cut.
+fn truncate_spans(spans: Vec<Span<'static>>, max_chars: usize) -> Vec<Span<'static>> {
+    let mut result = Vec::new();
+    let mut remaining = max_chars;
+    for span in spans {
+        if remaining == 0 { break; }
+        let len = span.content.chars().count();
+        if len <= remaining {
+            remaining -= len;
+            result.push(span);
+        } else {
+            let cut: String = span.content.chars().take(remaining.saturating_sub(1)).collect::<String>() + "\u{2026}";
+            result.push(Span::styled(cut, span.style));
+            remaining = 0;
+        }
+    }
+    result
 }
 
 /// Expand tab characters to 4 spaces and truncate to `max_chars`.
