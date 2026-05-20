@@ -23,7 +23,11 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| ".".to_string());
     let platform = std::env::consts::OS;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    let shell = if cfg!(windows) {
+        "PowerShell".to_string()
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string())
+    };
 
     sections.push(format!(
         "## Environment\n\
@@ -86,11 +90,15 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
            understands what the command will do before approving it.\n\
          - Never run commands that modify the system outside the working directory \
            without explicit user instruction.\n\
-         - **Background processes:** When starting a long-running server, watcher, \
-           or any process that doesn't exit on its own, ALWAYS use:\n\
-           `nohup <cmd> > /tmp/<name>.log 2>&1 &`\n\
-           Never use `cmd 2>&1 &` — that keeps the stdout pipe open and blocks zap \
-           until the 60s timeout. Use nohup + redirect to a log file instead.\n\
+         - **On Windows the shell is PowerShell.** Use PowerShell syntax: \
+           `Get-ChildItem` (or `ls`), `Start-Sleep -Seconds N` (or `sleep N`), \
+           `$env:VAR` for env vars, `cmd /C` only when explicitly needed for \
+           cmd.exe-specific behaviour. Do NOT use bash syntax (`&&`, `||`, \
+           `$(...)`, `nohup`) on Windows — use PowerShell equivalents.\n\
+         - **Background processes:**\n\
+           On Linux/macOS: `nohup <cmd> > /tmp/<name>.log 2>&1 &`\n\
+           On Windows (PowerShell): `Start-Process powershell -ArgumentList \"-NoProfile -NonInteractive -Command <cmd>\" -RedirectStandardOutput C:\\tmp\\out.log -WindowStyle Hidden`\n\
+           Never run a long-lived process in the foreground — it will time out.\n\
          \n\
          **Search:**\n\
          - Use `find_definition` or `code_map` (AST index) before `search_code`.\n\

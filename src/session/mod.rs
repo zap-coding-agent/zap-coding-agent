@@ -729,13 +729,15 @@ impl Session {
 
             // Batch prompt — one grouped UI for all pending calls.
             if !needs_prompt.is_empty() {
-                // Suspend TUI so inquire prompt can take over the terminal.
-                crate::tui::channel::suspend_for_prompt();
+                // In TUI mode the permission dialog renders in-place (raw mode stays on).
+                // Only suspend for CLI / inquire prompts that need a full terminal.
+                let in_tui = crate::tui::channel::is_tui_mode();
+                if !in_tui { crate::tui::channel::suspend_for_prompt(); }
                 let batch: Vec<(String, String, String)> = needs_prompt.iter()
                     .map(|(id, name, ctx, _)| (id.clone(), name.clone(), ctx.clone()))
                     .collect();
                 let decisions = self.permissions.prompt_batch(&batch)?;
-                crate::tui::channel::resume_from_prompt();
+                if !in_tui { crate::tui::channel::resume_from_prompt(); }
                 for (i, (id, name, ctx, input)) in needs_prompt.into_iter().enumerate() {
                     if decisions[i] {
                         match self.hooks.fire_pre_tool_use(&name, &input) {

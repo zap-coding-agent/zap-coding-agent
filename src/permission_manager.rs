@@ -115,48 +115,73 @@ impl PermissionManager {
         Ok(vec![allowed; pending.len()])
     }
 
-    /// TUI-native permission prompt that stays within the TUI interface.
+    /// TUI-native permission prompt — renders at the bottom of the screen while
+    /// raw mode stays active. Called with the alternate screen still open.
     fn prompt_batch_tui(
         &mut self,
         pending: &[(String, String, String)],
     ) -> Result<Vec<bool>> {
-        use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+        use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+        use crossterm::{cursor, execute, terminal};
         use std::time::Duration;
 
-        // Build the prompt message
-        let mut prompt_lines = Vec::new();
-        prompt_lines.push("┌─ Permission Required ─────────────────────────────────────┐".to_string());
-        
+        // Build the dialog box.
+        let width: usize = 62;
+        let bar = "─".repeat(width - 2);
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(format!("┌{}┐", bar));
+
         if pending.len() == 1 {
             let (_, name, ctx) = &pending[0];
-            prompt_lines.push(format!("│ Tool: {}                                                  │", name));
+            lines.push(format!("│  Tool : {:<51} │", &name[..name.len().min(51)]));
             if !ctx.is_empty() {
-                let ctx_short = if ctx.len() > 54 { format!("{}…", &ctx[..53]) } else { ctx.clone() };
-                prompt_lines.push(format!("│ What: {:<54} │", ctx_short));
+                let s = if ctx.chars().count() > 51 {
+                    format!("{}…", ctx.chars().take(50).collect::<String>())
+                } else {
+                    ctx.clone()
+                };
+                lines.push(format!("│  What : {:<51} │", s));
             }
         } else {
-            prompt_lines.push(format!("│ Agent wants to run {} operations:                        │", pending.len()));
+            lines.push(format!("│  Agent wants to run {} operation(s):{:<25} │", pending.len(), ""));
             for (_, name, ctx) in pending.iter().take(5) {
-                let ctx_short = if ctx.len() > 40 { format!("{}…", &ctx[..39]) } else { ctx.clone() };
-                prompt_lines.push(format!("│   · {:<12} {:<40} │", name, ctx_short));
+                let s = if ctx.chars().count() > 38 {
+                    format!("{}…", ctx.chars().take(37).collect::<String>())
+                } else {
+                    ctx.clone()
+                };
+                lines.push(format!("│    · {:<12}  {:<38} │", name, s));
             }
             if pending.len() > 5 {
-                prompt_lines.push(format!("│   ... and {} more                                         │", pending.len() - 5));
+                lines.push(format!("│    … and {} more{:<44} │", pending.len() - 5, ""));
             }
         }
-        
-        prompt_lines.push("│                                                            │".to_string());
-        prompt_lines.push("│ [Y] Allow    [N] Deny    [A] Always allow                 │".to_string());
-        prompt_lines.push("└────────────────────────────────────────────────────────────┘".to_string());
 
-        // Print the prompt
-        println!("\n{}", prompt_lines.join("\n"));
+        lines.push(format!("│{:<width$}│", "", width = width - 2));
+        lines.push(format!("│  [Y] Allow   [N] Deny   [A] Always allow{:<21}│", ""));
+        lines.push(format!("└{}┘", bar));
+
+        // Position at the bottom of the terminal, clear that area, print.
+        let (_, rows) = terminal::size().unwrap_or((80, 24));
+        let dialog_h = lines.len() as u16;
+        let start_row = rows.saturating_sub(dialog_h + 1);
+
+        execute!(
+            io::stdout(),
+            cursor::MoveTo(0, start_row),
+            terminal::Clear(terminal::ClearType::FromCursorDown),
+        )?;
+        for line in &lines {
+            print!("\r{}\r\n", line);
+        }
         io::stdout().flush()?;
 
-        // Wait for user input
+        // Read a single keypress — raw mode is still active, no competition.
         let decision = loop {
-            if event::poll(Duration::from_millis(100))? {
+            if event::poll(Duration::from_millis(200))? {
                 if let Event::Key(key) = event::read()? {
+                    // Skip Release events (Windows fires Press+Release per key).
+                    if key.kind == KeyEventKind::Release { continue; }
                     match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => break "y",
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => break "n",
@@ -170,21 +195,27 @@ impl PermissionManager {
 
         let allowed = matches!(decision, "y" | "a");
 
+        // Show brief feedback in the same area, then clear (TUI will repaint).
+        let msg = match decision {
+            "a" => "  ✓ Always allowed",
+            "y" => "  ✓ Allowed",
+            _   => "  ✗ Denied",
+        };
+        execute!(
+            io::stdout(),
+            cursor::MoveTo(0, start_row),
+            terminal::Clear(terminal::ClearType::FromCursorDown),
+        )?;
+        print!("\r{}\r\n", msg);
+        io::stdout().flush()?;
+
         if decision == "a" {
             for (_, name, _) in pending {
                 for related in tool_grant_class(name) {
                     self.session_grants.insert(related.to_string(), true);
                 }
             }
-            println!("  → Auto-approved for the rest of this session.\n");
-        } else if allowed {
-            println!("  → Allowed\n");
-        } else {
-            println!("  → Denied\n");
         }
-
-        io::stdout().flush()?;
-        std::thread::sleep(Duration::from_millis(500)); // Brief pause so user sees the result
 
         tracing::info!(allowed, count = pending.len(), "TUI batch permission decision");
         Ok(vec![allowed; pending.len()])

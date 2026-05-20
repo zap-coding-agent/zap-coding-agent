@@ -14,15 +14,15 @@ pub struct ShellOutput {
 }
 
 /// Run an arbitrary shell string.
-/// Uses `cmd.exe /C` on Windows, `sh -c` everywhere else.
+/// Uses PowerShell on Windows, `sh -c` everywhere else.
 /// Only use this for the user-facing `shell` tool.  Internal tools must use
 /// `run_args` / `run_args_in` to avoid shell-injection.
 pub async fn run_command(command: &str) -> Result<ShellOutput> {
     tracing::info!(command = %command, "executing shell command");
     #[cfg(windows)]
     let mut cmd = {
-        let mut c = Command::new("cmd");
-        c.args(["/C", command]);
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
         c
     };
     #[cfg(not(windows))]
