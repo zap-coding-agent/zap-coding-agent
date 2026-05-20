@@ -929,46 +929,46 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<
     ]));
 
     // ── Preview lines ─────────────────────────────────────────────────────────
+    // Collapsed (default): just a line-count hint — no inline content to overflow.
+    // Expanded (Ctrl+O):   show full content with diff-aware colouring.
     if let Some(ref done) = tc.result {
         let all_lines: Vec<&str> = done.preview.lines().collect();
-        let truncate_at = 6usize;
-        let shown = if expanded { all_lines.len() } else { all_lines.len().min(truncate_at) };
+        let hint_color = Color::Rgb(100, 95, 125);
 
-        for raw in &all_lines[..shown] {
-            let display = expand_tabs_and_truncate(raw, max_w);
-            let line_style = if raw.starts_with("+++") || raw.starts_with("---") {
-                Style::default().fg(Color::Rgb(120, 115, 145))
-            } else if raw.starts_with('+') {
-                Style::default().fg(Color::Rgb(100, 210, 120))
-            } else if raw.starts_with('-') {
-                Style::default().fg(Color::Rgb(220,  80,  80))
-            } else if raw.starts_with("@@") {
-                Style::default().fg(Color::Rgb(100, 180, 255))
-            } else {
-                Style::default().fg(Color::Rgb(205, 200, 225))
-            };
-            lines.push(Line::from(vec![
-                Span::styled("    ", Style::default().fg(border)),
-                Span::styled(display, line_style),
-            ]));
-        }
-
-        // Truncation hint / collapse hint
-        if !expanded && all_lines.len() > truncate_at {
-            let remaining = all_lines.len() - truncate_at;
+        if expanded {
+            for raw in &all_lines {
+                let display = expand_tabs_and_truncate(raw, max_w);
+                let line_style = if raw.starts_with("+++") || raw.starts_with("---") {
+                    Style::default().fg(Color::Rgb(120, 115, 145))
+                } else if raw.starts_with('+') {
+                    Style::default().fg(Color::Rgb(100, 210, 120))
+                } else if raw.starts_with('-') {
+                    Style::default().fg(Color::Rgb(220,  80,  80))
+                } else if raw.starts_with("@@") {
+                    Style::default().fg(Color::Rgb(100, 180, 255))
+                } else {
+                    Style::default().fg(Color::Rgb(205, 200, 225))
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default().fg(border)),
+                    Span::styled(display, line_style),
+                ]));
+            }
+            if !all_lines.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default().fg(border)),
+                    Span::styled(
+                        "  Ctrl+O to collapse".to_string(),
+                        Style::default().fg(hint_color).add_modifier(Modifier::ITALIC),
+                    ),
+                ]));
+            }
+        } else if !all_lines.is_empty() {
             lines.push(Line::from(vec![
                 Span::styled("    ", Style::default().fg(border)),
                 Span::styled(
-                    format!("  +{} lines  Ctrl+O to expand", remaining),
-                    Style::default().fg(Color::Rgb(100, 95, 125)).add_modifier(Modifier::ITALIC),
-                ),
-            ]));
-        } else if expanded && all_lines.len() > truncate_at {
-            lines.push(Line::from(vec![
-                Span::styled("    ", Style::default().fg(border)),
-                Span::styled(
-                    "  Ctrl+O to collapse".to_string(),
-                    Style::default().fg(Color::Rgb(100, 95, 125)).add_modifier(Modifier::ITALIC),
+                    format!("  {} lines  Ctrl+O to expand", all_lines.len()),
+                    Style::default().fg(hint_color).add_modifier(Modifier::ITALIC),
                 ),
             ]));
         }
