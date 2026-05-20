@@ -45,8 +45,10 @@ impl Tool for WebFetchTool {
         let text = strip_html(&body);
 
         if text.len() > max_chars {
-            Ok(format!("{}\n\n[…truncated to {} chars of {}]",
-                &text[..max_chars], max_chars, text.len()))
+            let mut cut = max_chars;
+            while cut > 0 && !text.is_char_boundary(cut) { cut -= 1; }
+            Ok(format!("{}\n\n[…truncated to {} bytes of {}]",
+                &text[..cut], cut, text.len()))
         } else {
             Ok(text)
         }

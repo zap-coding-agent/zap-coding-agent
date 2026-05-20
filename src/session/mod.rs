@@ -855,13 +855,18 @@ impl Session {
                                         }
                                     }
                                     // Cap tool result size so large outputs don't blow the context.
-                                    const MAX_TOOL_CHARS: usize = 20_000;
-                                    let content = if output.len() > MAX_TOOL_CHARS {
+                                    const MAX_TOOL_BYTES: usize = 20_000;
+                                    let content = if output.len() > MAX_TOOL_BYTES {
+                                        // Walk back to a valid UTF-8 char boundary.
+                                        let mut cut = MAX_TOOL_BYTES;
+                                        while cut > 0 && !output.is_char_boundary(cut) {
+                                            cut -= 1;
+                                        }
                                         format!(
-                                            "{}\n\n[... truncated — output was {} chars, showing first {}]",
-                                            &output[..MAX_TOOL_CHARS],
+                                            "{}\n\n[... truncated — output was {} bytes, showing first {}]",
+                                            &output[..cut],
                                             output.len(),
-                                            MAX_TOOL_CHARS,
+                                            cut,
                                         )
                                     } else {
                                         output
