@@ -198,7 +198,9 @@ impl Tool for EditFileTool {
             .await
             .with_context(|| format!("edit_file: cannot write '{}'", path))?;
 
-        print_diff(content.as_str(), new_content.as_str());
+        if !crate::tui::channel::is_tui_mode() {
+            print_diff(content.as_str(), new_content.as_str());
+        }
 
         Ok(format!(
             "edited '{}': replaced {} occurrence(s) ({} → {} bytes)",
@@ -352,7 +354,9 @@ impl Tool for BatchEditTool {
             .await
             .with_context(|| format!("batch_edit: cannot write '{}'", path))?;
 
-        print_diff(original.as_str(), content.as_str());
+        if !crate::tui::channel::is_tui_mode() {
+            print_diff(original.as_str(), content.as_str());
+        }
 
         Ok(format!(
             "batch_edit '{}': {} edit(s) applied, {} replacement(s) ({} → {} bytes)",
