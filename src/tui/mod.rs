@@ -77,6 +77,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
 
     // 4. Create App state.
     let mut app = App::new(&session.model, &branch);
+    app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
     let (dirty, ahead, behind) = git_status();
     app.git_dirty = dirty;
     app.git_ahead = ahead;
@@ -173,6 +174,10 @@ async fn tui_loop(
                     app.git_dirty = dirty;
                     app.git_ahead = ahead;
                     app.git_behind = behind;
+                    // Keep skill_names in sync (e.g. after /skill list reloads from disk).
+                    if input.trim_start().starts_with("/skill") {
+                        app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
+                    }
                     // If /cd succeeded, update cwd and push to recent_dirs.
                     if input.trim_start().starts_with("/cd ") {
                         let new_cwd = std::env::current_dir()
@@ -235,8 +240,10 @@ async fn tui_loop(
                                 app.tick_spinner();
                                 terminal.draw(|frame| render::draw(frame, app))?;
 
-                                // Check for Ctrl+C
-                                if crossterm::event::poll(Duration::ZERO)? {
+                                // Check for Ctrl+C — skip while permission dialog owns the queue.
+                                if !channel::is_permission_prompt_active()
+                                    && crossterm::event::poll(Duration::ZERO)?
+                                {
                                     if let Ok(Event::Key(k)) = crossterm::event::read() {
                                         if k.code == KeyCode::Char('c')
                                             && k.modifiers.contains(KeyModifiers::CONTROL)

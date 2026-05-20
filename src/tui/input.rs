@@ -89,7 +89,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             if matches!(app.state, AppState::Idle) {
                 if picker_active(app) {
                     // Submit the currently highlighted picker item.
-                    let items = filter_commands(&app.input);
+                    let items = filter_commands(&app.input, &app.skill_names);
                     let sel = app.picker_sel.min(items.len().saturating_sub(1));
                     if let Some((cmd, _)) = items.get(sel) {
                         let text = cmd.to_string();
@@ -133,7 +133,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
 
         KeyCode::Down => {
             if picker_active(app) {
-                let count = filter_commands(&app.input).len();
+                let count = filter_commands(&app.input, &app.skill_names).len();
                 if count > 0 {
                     app.picker_sel = (app.picker_sel + 1).min(count - 1);
                 }
@@ -145,7 +145,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
 
         KeyCode::Tab => {
             if picker_active(app) {
-                let items = filter_commands(&app.input);
+                let items = filter_commands(&app.input, &app.skill_names);
                 let sel = app.picker_sel.min(items.len().saturating_sub(1));
                 if let Some((cmd, _)) = items.get(sel) {
                     app.input = cmd.to_string();

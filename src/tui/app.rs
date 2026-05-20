@@ -134,6 +134,9 @@ pub struct App {
 
     /// True after first Ctrl+Q press; second press confirms quit.
     pub quit_confirm: bool,
+
+    /// Skill names available in this session, used for dynamic picker completions.
+    pub skill_names: Vec<String>,
 }
 
 impl App {
@@ -166,6 +169,7 @@ impl App {
             file_browser: None,
             session_picker: None,
             quit_confirm: false,
+            skill_names: Vec::new(),
         }
     }
 

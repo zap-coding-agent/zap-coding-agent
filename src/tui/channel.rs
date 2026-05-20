@@ -2,8 +2,25 @@
 ///
 /// All tui_send() calls are no-ops when not in TUI mode, so they can be
 /// added unconditionally to session/stream_highlighter without side-effects.
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
+
+/// Set while `prompt_batch_tui` owns the crossterm event queue so the TUI
+/// tick loop skips its own `event::poll` and doesn't steal Y/N/A keypresses.
+static PERM_PROMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn enter_permission_prompt() {
+    PERM_PROMPT_ACTIVE.store(true, Ordering::SeqCst);
+}
+
+pub fn exit_permission_prompt() {
+    PERM_PROMPT_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+pub fn is_permission_prompt_active() -> bool {
+    PERM_PROMPT_ACTIVE.load(Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone)]
 pub enum TuiEvent {

@@ -279,6 +279,17 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
     let para = Paragraph::new(all_lines)
         .scroll((scroll.min(u16::MAX as usize) as u16, 0));
     frame.render_widget(para, area);
+
+    // Scrollbar overlay — only when content overflows the viewport.
+    if total > viewport_h {
+        let mut sb_state = ScrollbarState::new(total.saturating_sub(viewport_h))
+            .position(scroll);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut sb_state,
+        );
+    }
 }
 
 // ── Command picker overlay ─────────────────────────────────────────────────────
@@ -288,7 +299,7 @@ fn draw_picker_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let items = filter_commands(&app.input);
+    let items = filter_commands(&app.input, &app.skill_names);
     if items.is_empty() {
         return;
     }

@@ -195,6 +195,8 @@ impl PermissionManager {
         }
         io::stdout().flush()?;
 
+        // Claim the event queue so the TUI tick loop skips its Ctrl+C poll.
+        crate::tui::channel::enter_permission_prompt();
         // Read a single keypress — raw mode is still active, no competition.
         let decision = loop {
             if event::poll(Duration::from_millis(200))? {
@@ -212,6 +214,7 @@ impl PermissionManager {
             }
         };
 
+        crate::tui::channel::exit_permission_prompt();
         let allowed = matches!(decision, "y" | "a");
 
         // Show brief feedback in the same area, then clear (TUI will repaint).

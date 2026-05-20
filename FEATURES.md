@@ -248,6 +248,9 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Panic hook + log | `src/main.rs` | restores terminal on panic, writes `[PANIC]` to `~/.zap/zap.log` |
 | Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
+| TUI permission event-race fix | `src/tui/channel.rs`, `src/permission_manager.rs`, `src/tui/mod.rs` | `PERM_PROMPT_ACTIVE` AtomicBool: set while `prompt_batch_tui` owns the crossterm queue; TUI tick loop skips its own `event::poll` so Y/N/A keypresses aren't stolen — fixes MCP/shell dialogs hanging silently |
+| TUI scrollbar | `src/tui/render.rs:draw_messages` | `Scrollbar`/`ScrollbarState` overlay on the messages area; only shown when content overflows the viewport height |
+| Dynamic skill picker | `src/tui/commands.rs:filter_commands` | `/skill ` shows sub-commands (list/use/unuse/show/scope); `/skill use <name>` auto-completes loaded skill names; `filter_commands` now accepts `skill_names: &[String]`; `App::skill_names` populated at session start and refreshed after `/skill` commands |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |
 | Colored diff on edit | `src/ui.rs` | similar crate, red/green |
 | Token + cost display | `src/session.rs:handle_user_turn` | per-turn: skills t, msg t, ctx k, est. $ |
@@ -281,6 +284,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | MCP command validation: known interpreters, Windows .exe variants, absolute paths, metacharacter/traversal rejection | `src/mcp.rs` | 9 |
 | Destructive pattern detection, safe commands, ShellTool permission_context newline contract | `src/tools/shell.rs` | 6 |
 | `spawn_agent` char-based truncation regression (byte-slice panic fix) | `src/tools/agent.rs` | 3 |
+| `filter_commands` skill completions | `src/tui/commands.rs` | 8 |
 | Pre-push hook | `.git/hooks/pre-push` | runs `cargo test` before every push |
 
 ---
