@@ -12,11 +12,67 @@ pub const SPINNER_FRAMES: &[&str] = &[
     "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
 ];
 
-/// Words that rotate while the LLM is generating — changes roughly every 2s at 16ms tick.
+/// Words that rotate while the LLM is generating — changes roughly every 1.3s at 16ms tick.
 const THINKING_WORDS: &[&str] = &[
-    "Thinking", "Analyzing", "Planning", "Reasoning",
-    "Reviewing", "Processing", "Evaluating", "Considering",
-    "Reflecting", "Synthesizing", "Exploring", "Drafting",
+    // Cognitive core
+    "Thinking",        "Analyzing",       "Reasoning",       "Reflecting",
+    "Considering",     "Contemplating",   "Pondering",       "Deliberating",
+    "Cogitating",      "Musing",          "Speculating",     "Theorizing",
+    "Inferring",       "Deducing",        "Synthesizing",    "Integrating",
+    "Processing",      "Computing",       "Calculating",     "Estimating",
+    // Creative / generative
+    "Planning",        "Drafting",        "Designing",       "Architecting",
+    "Brainstorming",   "Ideating",        "Conceptualizing", "Envisioning",
+    "Formulating",     "Composing",       "Constructing",    "Crafting",
+    "Generating",      "Developing",      "Imagining",       "Prototyping",
+    "Sketching",       "Outlining",       "Scaffolding",     "Blueprinting",
+    // Analytical
+    "Evaluating",      "Reviewing",       "Inspecting",      "Auditing",
+    "Examining",       "Scrutinizing",    "Investigating",   "Researching",
+    "Studying",        "Parsing",         "Decoding",        "Interpreting",
+    "Comprehending",   "Absorbing",       "Assessing",       "Comparing",
+    "Contrasting",     "Distinguishing",  "Benchmarking",    "Profiling",
+    // Problem-solving
+    "Solving",         "Debugging",       "Troubleshooting", "Diagnosing",
+    "Probing",         "Testing",         "Verifying",       "Validating",
+    "Correcting",      "Patching",        "Refining",        "Improving",
+    "Optimizing",      "Enhancing",       "Tuning",          "Adjusting",
+    "Calibrating",     "Fixing",          "Resolving",       "Untangling",
+    // Code-specific
+    "Refactoring",     "Rewriting",       "Abstracting",     "Mapping",
+    "Tracing",         "Traversing",      "Navigating",      "Compiling",
+    "Linting",         "Modularizing",    "Encapsulating",   "Decoupling",
+    "Wiring",          "Bootstrapping",   "Instrumenting",   "Annotating",
+    // Organizing
+    "Documenting",     "Organizing",      "Structuring",     "Arranging",
+    "Sequencing",      "Categorizing",    "Classifying",     "Sorting",
+    "Filtering",       "Locating",        "Identifying",     "Recognizing",
+    "Correlating",     "Connecting",      "Associating",     "Contextualizing",
+    "Framing",         "Scoping",         "Prioritizing",    "Grouping",
+    // Gathering / retrieval
+    "Clustering",      "Gathering",       "Collecting",      "Aggregating",
+    "Summarizing",     "Distilling",      "Extracting",      "Deriving",
+    "Projecting",      "Approximating",   "Retrieving",      "Querying",
+    "Fetching",        "Loading",         "Indexing",        "Searching",
+    // Exploratory
+    "Exploring",       "Discovering",     "Uncovering",      "Revealing",
+    "Illuminating",    "Elucidating",     "Deciphering",     "Unraveling",
+    "Dissecting",      "Deconstructing",  "Reconstructing",  "Reframing",
+    "Rethinking",      "Reimagining",     "Revisiting",      "Deep-diving",
+    // Verification / hardening
+    "Cross-checking",  "Fact-checking",   "Sanity-checking", "Stress-testing",
+    "Hardening",       "Streamlining",    "Consolidating",   "Normalizing",
+    "Standardizing",   "Harmonizing",     "Aligning",        "Balancing",
+    "Weighing",        "Confirming",      "Polishing",       "Finalizing",
+    // Clarifying / finishing
+    "Simplifying",     "Clarifying",      "Disambiguating",  "Reconciling",
+    "Merging",         "Combining",       "Explaining",      "Modeling",
+    "Simulating",      "Forecasting",     "Measuring",       "Quantifying",
+    "Experimenting",   "Hypothesizing",   "Homing in",       "Focusing",
+    // Meta / flow
+    "Concentrating",   "Drilling down",   "Backtracking",    "Unpacking",
+    "Decomposing",     "Iterating",       "Converging",      "Coalescing",
+    "Scanning",        "Vetting",         "Extrapolating",   "Interpolating",
 ];
 
 fn tool_verb(name: &str) -> &'static str {
