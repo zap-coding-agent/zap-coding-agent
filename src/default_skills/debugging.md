@@ -1,4 +1,5 @@
 ---
+category: practice
 name: debugging
 description: Systematic approach to diagnosing and fixing bugs.
 trigger: ["debug", "error", "bug", "crash", "panic", "not working", "broken", "trace", "exception", "stacktrace", "segfault", "undefined", "wrong output"]

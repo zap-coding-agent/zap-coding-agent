@@ -183,6 +183,8 @@ pub struct Session {
     /// Images staged with /attach, sent with the next user turn then cleared.
     pub staged_images: Vec<(String, String)>,
     pub skills:        Vec<crate::skill_manager::Skill>,
+    /// Names of Domain skills active this session. Empty = no restriction (all Domain candidates).
+    pub domain_scope:  std::collections::HashSet<String>,
     pub current_branch: String,
     pub code_index:    Arc<Mutex<crate::code_index::CodeIndex>>,
     pub store:         persistence::Store,
@@ -234,38 +236,58 @@ impl Session {
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
 
-        let skills      = crate::skill_manager::load_all_skills(&config.skill_paths);
-        let always_on   = crate::skill_manager::always_on_skills(&skills);
-        let stack_skills = crate::skill_manager::detect_stack_skills(&skills);
+        let skills    = crate::skill_manager::load_all_skills(&config.skill_paths);
+        let always_on = crate::skill_manager::always_on_skills(&skills);
 
-        // Bake always-on skills into the base system prompt once at startup.
+        // Bake Core skills into the base system prompt once at startup.
         if !always_on.is_empty() {
             let block = crate::skill_manager::build_always_on_prompt(&always_on);
             system.push_str("\n\n");
             system.push_str(&block);
         }
 
-        if !skills.is_empty() {
+        // Build domain scope: auto-detect from manifests, then optionally ask.
+        let detected = crate::skill_manager::detect_domain_scope(&skills);
+        let domain_scope: std::collections::HashSet<String> = if !detected.is_empty() {
+            detected.iter().cloned().collect()
+        } else if !config.is_subagent {
+            // Nothing auto-detected — ask the user once (interactive sessions only).
+            crate::skill_manager::prompt_domain_scope(&skills)
+                .map(|v| v.into_iter().collect())
+                .unwrap_or_default()
+        } else {
+            std::collections::HashSet::new()
+        };
+
+        if !skills.is_empty() && !config.is_subagent {
+            let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
             let mut notes: Vec<String> = Vec::new();
-            if !always_on.is_empty() {
-                let names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
-                notes.push(format!("always-on: {}", names.join(", ")));
+            if !core_names.is_empty() {
+                notes.push(format!("core: {}", core_names.join(", ")));
             }
-            if !stack_skills.is_empty() {
-                let names: Vec<_> = stack_skills.iter().map(|s| s.name.as_str()).collect();
-                notes.push(format!("auto: {}", names.join(", ")));
+            if !domain_scope.is_empty() {
+                let mut names: Vec<&str> = domain_scope.iter().map(String::as_str).collect();
+                names.sort_unstable();
+                notes.push(format!("scope: {}", names.join(", ")));
             }
             let note = if notes.is_empty() { String::new() } else {
                 format!("  {}", notes.join("  ·  ").dimmed())
             };
-            if !config.is_subagent {
-                println!(
-                    "  {} {} skill(s) loaded{}",
-                    "◎".truecolor(255, 200, 60),
-                    skills.len().to_string().cyan(),
-                    note,
-                );
-            }
+            let practice_count = skills.iter()
+                .filter(|s| s.category == crate::skill_manager::SkillCategory::Practice)
+                .count();
+            let domain_count = skills.iter()
+                .filter(|s| s.category == crate::skill_manager::SkillCategory::Domain)
+                .count();
+            println!(
+                "  {} {} skill(s): {} core · {} practice · {} domain{}",
+                "◎".truecolor(255, 200, 60),
+                skills.len().to_string().cyan(),
+                always_on.len(),
+                practice_count,
+                domain_count,
+                note,
+            );
         }
 
         let hooks = crate::hooks::HookRunner::load();
@@ -336,6 +358,7 @@ impl Session {
             config: config.clone(),
             staged_images: Vec::new(),
             skills,
+            domain_scope,
             current_branch: "main".to_string(),
             code_index,
             store,
@@ -447,7 +470,7 @@ impl Session {
         }
 
         let matched_skills: Vec<&crate::skill_manager::Skill> =
-            crate::skill_manager::match_skills(input, &self.skills);
+            crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 
         let effective_system = if matched_skills.is_empty() {

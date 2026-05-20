@@ -1,4 +1,5 @@
 ---
+category: domain
 name: rust
 trigger: ["rust", "cargo", "crate", "fn ", "struct ", "enum ", "impl ", "trait ", "tokio", "async fn", "clippy", "rustfmt", ".rs"]
 tokens: ~700

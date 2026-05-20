@@ -1,4 +1,5 @@
 ---
+category: domain
 name: bash
 trigger: ["bash", "shell script", "#!/bin/bash", "#!/bin/sh", "shellcheck", ".sh", "posix shell", "zsh script", "sh script", "awk ", "sed ", "grep ", "cron", "makefile"]
 tokens: ~550

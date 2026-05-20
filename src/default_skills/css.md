@@ -1,4 +1,5 @@
 ---
+category: domain
 name: css
 trigger: ["css", "scss", "sass", "less", "stylesheet", ".css", ".scss", "tailwind", "flexbox", "grid", "media query", "animation", "keyframe", "styled-components", "css modules", "postcss"]
 tokens: ~540

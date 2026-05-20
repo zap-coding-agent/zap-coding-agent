@@ -60,6 +60,7 @@ impl Session {
                 ("/memory set <k> <v>",      "write a memory entry"),
                 ("/memory del <key>",        "delete a memory entry"),
                 ("/skill list",              "list available skills"),
+                ("/skill scope",             "show/change domain skill scope for this session"),
                 ("/skill show <name>",       "preview a skill"),
                 ("/skill create <name>",     "create a skill file"),
                 ("/audit [N]",               "show last N audit log lines"),
@@ -1017,13 +1018,18 @@ impl Session {
                 println!();
                 println!("  {} {}", "Skills".bold(), format!("({} total)", skills.len()).dimmed());
                 println!("  {}", "──────────────────────────────────────────────────────────".dimmed());
-                let (always_on, triggered): (Vec<_>, Vec<_>) =
-                    skills.iter().partition(|s| s.is_always_on());
-                for group_label in &["Always-on", "Triggered"] {
-                    let group = if *group_label == "Always-on" { &always_on } else { &triggered };
+
+                use crate::skill_manager::SkillCategory;
+                let groups: &[(&str, SkillCategory)] = &[
+                    ("Core  (always injected)", SkillCategory::Core),
+                    ("Practice  (always trigger-matchable)", SkillCategory::Practice),
+                    ("Domain  (session-scoped)", SkillCategory::Domain),
+                ];
+                for (label, cat) in groups {
+                    let group: Vec<_> = skills.iter().filter(|s| &s.category == cat).collect();
                     if group.is_empty() { continue; }
-                    println!("  {} {}", "▸".truecolor(255, 210, 50), group_label.truecolor(150, 140, 170).bold());
-                    for s in group {
+                    println!("  {} {}", "▸".truecolor(255, 210, 50), label.truecolor(150, 140, 170).bold());
+                    for s in &group {
                         let (glyph, src_color) = match &s.source {
                             crate::skill_manager::SkillSource::Project =>
                                 ("▶", s.name.truecolor(100, 230, 130).bold()),
@@ -1035,6 +1041,15 @@ impl Session {
                                 ("◉", s.name.truecolor(255, 200, 100).bold()),
                         };
                         let src_tag = format!("[{}]", crate::skill_manager::source_label(&s.source));
+                        let scope_marker = if cat == &SkillCategory::Domain {
+                            if self.domain_scope.is_empty() || self.domain_scope.contains(&s.name) {
+                                " ✓".truecolor(100, 230, 130).to_string()
+                            } else {
+                                "  ".to_string()
+                            }
+                        } else {
+                            String::new()
+                        };
                         let detail = if s.is_always_on() {
                             "always-on".truecolor(255, 200, 60).to_string()
                         } else {
@@ -1042,9 +1057,10 @@ impl Session {
                         };
                         let desc = if s.description.is_empty() { String::new() }
                                    else { format!("  {}", s.description.truecolor(120, 115, 140)) };
-                        println!("    {} {}  {}  ~{}t  {}{}",
+                        println!("    {} {}{}  {}  ~{}t  {}{}",
                             glyph.truecolor(150, 145, 170),
                             src_color,
+                            scope_marker,
                             src_tag.truecolor(100, 95, 130),
                             s.tokens(),
                             detail,
@@ -1052,6 +1068,19 @@ impl Session {
                         );
                     }
                     println!();
+                }
+                if !self.domain_scope.is_empty() {
+                    println!("  {} domain scope: {} — {} to clear or {} to add",
+                        "tip:".truecolor(100, 95, 130),
+                        self.domain_scope.iter().cloned().collect::<Vec<_>>().join(", ").cyan(),
+                        "/skill scope reset".cyan(),
+                        "/skill scope add <name>".cyan(),
+                    );
+                } else {
+                    println!("  {} all domain skills active — use {} to restrict",
+                        "tip:".truecolor(100, 95, 130),
+                        "/skill scope add <name>".cyan(),
+                    );
                 }
                 println!("  {} {} | {} | {} | {} | {}",
                     "tip:".truecolor(100, 95, 130),
@@ -1062,6 +1091,45 @@ impl Session {
                     "/skill create <name>".cyan(),
                 );
                 println!();
+            }
+            "scope" => {
+                let arg = name.trim();
+                if arg.is_empty() {
+                    // Show current scope
+                    println!();
+                    if self.domain_scope.is_empty() {
+                        println!("  Domain scope: {} (all domain skills are trigger-matchable)", "unrestricted".truecolor(255, 200, 60));
+                    } else {
+                        let mut names: Vec<_> = self.domain_scope.iter().cloned().collect();
+                        names.sort_unstable();
+                        println!("  Domain scope: {}", names.join(", ").cyan());
+                    }
+                    println!("  {} {} {} {}",
+                        "tip:".truecolor(100, 95, 130),
+                        "/skill scope add <name>  ·".dimmed(),
+                        "/skill scope remove <name>  ·".dimmed(),
+                        "/skill scope reset".dimmed(),
+                    );
+                    println!();
+                } else if let Some(skill_name) = arg.strip_prefix("add ").map(str::trim) {
+                    if self.skills.iter().any(|s| s.name == skill_name && s.category == crate::skill_manager::SkillCategory::Domain) {
+                        self.domain_scope.insert(skill_name.to_string());
+                        println!("  {} '{}' added to domain scope", "✓".green(), skill_name);
+                    } else {
+                        println!("  {} no domain skill named '{}'", "✗".red(), skill_name);
+                    }
+                } else if let Some(skill_name) = arg.strip_prefix("remove ").map(str::trim) {
+                    if self.domain_scope.remove(skill_name) {
+                        println!("  {} '{}' removed from domain scope", "✓".green(), skill_name);
+                    } else {
+                        println!("  {} '{}' was not in scope", "✗".red(), skill_name);
+                    }
+                } else if arg == "reset" {
+                    self.domain_scope.clear();
+                    println!("  {} domain scope cleared — all domain skills are now trigger-matchable", "✓".green());
+                } else {
+                    println!("  {} /skill scope  |  scope add <name>  |  scope remove <name>  |  scope reset", "usage:".truecolor(100, 95, 130));
+                }
             }
             "show" => {
                 if name.is_empty() { println!("  Usage: /skill show <name>"); return; }
@@ -1158,7 +1226,7 @@ impl Session {
                     Err(e) => println!("  {} capture failed: {}", "✗".red(), e),
                 }
             }
-            _ => println!("  {} /skill list | show <name> | create <name> | capture <name> [--global]", "✗".red()),
+            _ => println!("  {} /skill list | scope [add|remove|reset] | show <name> | create <name> | capture <name> [--global]", "✗".red()),
         }
     }
 }

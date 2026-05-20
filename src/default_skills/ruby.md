@@ -1,4 +1,5 @@
 ---
+category: domain
 name: ruby
 trigger: ["ruby", ".rb", "rails", "gem", "bundler", "rspec", "rake", "rubocop", "gemfile", "minitest", "erb", "sinatra", "activerecord", "def ", "end\n", "do |"]
 tokens: ~560

@@ -1,4 +1,5 @@
 ---
+category: domain
 name: php
 trigger: ["php", ".php", "composer", "laravel", "symfony", "wordpress", "<?php", "artisan", "phpunit", "pest", "eloquent", "blade", "namespace ", "use "]
 tokens: ~560

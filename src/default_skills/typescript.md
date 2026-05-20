@@ -1,4 +1,5 @@
 ---
+category: domain
 name: typescript
 trigger: ["typescript", "javascript", "node", "npm", "yarn", "pnpm", "package.json", ".ts", ".js", "express", "fastify", "bun"]
 tokens: ~500

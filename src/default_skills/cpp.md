@@ -1,4 +1,5 @@
 ---
+category: domain
 name: cpp
 trigger: ["c++", "cpp", ".cpp", ".hpp", ".cc", ".hxx", "std::", "#include <", "cmake", "clang++", "g++", "template<", "namespace ", "virtual ", "nullptr"]
 tokens: ~630

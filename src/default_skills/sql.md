@@ -1,4 +1,5 @@
 ---
+category: domain
 name: sql
 trigger: ["sql", "select ", "insert into", "create table", "postgres", "postgresql", "mysql", "sqlite", "migration", "query", "index", "schema", "join ", "where ", "group by", "stored procedure", "orm"]
 tokens: ~590

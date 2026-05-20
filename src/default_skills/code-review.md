@@ -1,4 +1,5 @@
 ---
+category: practice
 name: code-review
 trigger: ["review", "code review", "pr review", "pull request", "feedback", "lgtm", "approve", "critique"]
 tokens: ~450

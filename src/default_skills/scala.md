@@ -1,4 +1,5 @@
 ---
+category: domain
 name: scala
 trigger: ["scala", ".scala", "sbt", "akka", "spark", "pekko", "cats", "zio", "case class", "object ", "trait ", "implicit ", "given ", "for comprehension", "val ", "def "]
 tokens: ~560

@@ -1,4 +1,5 @@
 ---
+category: core
 name: karpathy-guidelines
 description: Behavioral guidelines to reduce common LLM coding mistakes. Injected on every turn.
 license: MIT

@@ -1,4 +1,5 @@
 ---
+category: practice
 name: security
 description: Security best practices for auth, secrets, input validation, and crypto.
 trigger: ["auth", "authentication", "authorization", "password", "secret", "api key", "token", "jwt", "oauth", "session", "login", "xss", "sql injection", "csrf", "encrypt", "hash", "sanitize", "validate input"]

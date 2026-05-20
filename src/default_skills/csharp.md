@@ -1,4 +1,5 @@
 ---
+category: domain
 name: csharp
 trigger: ["csharp", "c#", ".cs", "dotnet", ".net", "nuget", "using System", "namespace ", "async Task", "linq", "entity framework", "asp.net", "blazor", "maui", "xamarin"]
 tokens: ~620

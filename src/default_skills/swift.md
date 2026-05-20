@@ -1,4 +1,5 @@
 ---
+category: domain
 name: swift
 trigger: ["swift", ".swift", "swiftui", "xcode", "ios", "macos", "watchos", "tvos", "func ", "guard let", "if let", "struct ", "protocol ", "actor ", "async throws", "combine"]
 tokens: ~600

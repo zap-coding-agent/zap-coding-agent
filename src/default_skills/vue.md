@@ -1,4 +1,5 @@
 ---
+category: domain
 name: vue
 trigger: ["vue", "vuejs", "vue.js", "nuxt", "pinia", "vuex", "vite", ".vue", "<template>", "<script setup>", "composable", "ref(", "reactive(", "computed(", "defineProps"]
 tokens: ~560

@@ -1,4 +1,5 @@
 ---
+category: domain
 name: go
 trigger: ["golang", "go mod", "goroutine", "channel", "interface{}", "go.mod", ".go", "func ", "gofmt", "golangci"]
 tokens: ~500

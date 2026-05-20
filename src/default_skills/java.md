@@ -1,4 +1,5 @@
 ---
+category: domain
 name: java
 trigger: ["java", "maven", "gradle", "spring", "jvm", ".java", "public class", "implements ", "extends ", "junit", "lombok", "jakarta", "record ", "interface "]
 tokens: ~650

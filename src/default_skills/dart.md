@@ -1,4 +1,5 @@
 ---
+category: domain
 name: dart
 trigger: ["dart", "flutter", ".dart", "widget", "stateful", "stateless", "pubspec", "pub.dev", "riverpod", "bloc", "provider", "async/await", "future<", "stream<", "buildcontext"]
 tokens: ~570

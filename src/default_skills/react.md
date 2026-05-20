@@ -1,4 +1,5 @@
 ---
+category: domain
 name: react
 trigger: ["react", "component", "jsx", "tsx", "hook", "usestate", "useeffect", "useref", "usememo", "usecallback", "props", "next.js", "nextjs", "vite"]
 tokens: ~650

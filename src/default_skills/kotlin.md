@@ -1,4 +1,5 @@
 ---
+category: domain
 name: kotlin
 trigger: ["kotlin", ".kt", ".kts", "fun ", "data class", "coroutine", "kotlinx", "gradle.kts", "jetpack", "compose", "flow", "suspend fun", "sealed class"]
 tokens: ~580

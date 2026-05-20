@@ -4,20 +4,30 @@
 ///   - `~/.zap/skills/`    (global, shared across all projects)
 ///   - `.zap/skills/`      (project-local, checked into the repo)
 ///
-/// Format: YAML frontmatter + markdown body:
+/// Three categories control when a skill is active:
+///   - Core     — injected into every session's system prompt (no trigger needed)
+///   - Practice — always a trigger candidate; useful across any stack (git, debugging…)
+///   - Domain   — session-scoped; only trigger-matchable after being activated at startup
+///               (auto-detected from manifests, or selected via the startup prompt)
+///
+/// Frontmatter format:
 /// ```markdown
 /// ---
-/// name: conventional-commits
-/// trigger: ["commit", "git log", "stage", "push", "changelog"]
-/// tokens: 800
-/// extends: []
+/// name: rust
+/// category: domain
+/// trigger: ["rust", "cargo", "fn "]
+/// tokens: ~700
 /// ---
-/// When committing code, always use the Conventional Commits format:
-/// `<type>(<scope>): <description>`
-/// Types: feat, fix, docs, style, refactor, perf, test, chore
 /// ```
 use anyhow::Result;
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SkillCategory {
+    Core,     // always injected into the base system prompt
+    Practice, // always a trigger candidate regardless of session scope
+    Domain,   // only trigger-matchable when in session scope
+}
 
 #[derive(Debug, Clone)]
 pub struct Skill {
@@ -28,6 +38,7 @@ pub struct Skill {
     pub token_estimate: usize,
     pub content:        String,
     pub source:         SkillSource,
+    pub category:       SkillCategory,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,9 +50,9 @@ pub enum SkillSource {
 }
 
 impl Skill {
-    /// Skills with no triggers are injected on every turn (meta-guidance).
+    /// Core skills are injected into the system prompt every session.
     pub fn is_always_on(&self) -> bool {
-        self.triggers.is_empty()
+        self.category == SkillCategory::Core
     }
 
     /// Returns true if any trigger keyword appears in the query (case-insensitive).
@@ -218,8 +229,12 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
 
     if let Some(content_after_fence) = raw.strip_prefix("---") {
         if let Some(end_idx) = content_after_fence.find("\n---") {
-            let fm   = parse_frontmatter(&content_after_fence[..end_idx]);
-            let body = content_after_fence[end_idx + 4..].trim_start().to_string();
+            let fm       = parse_frontmatter(&content_after_fence[..end_idx]);
+            let body     = content_after_fence[end_idx + 4..].trim_start().to_string();
+            let category = fm.category.unwrap_or_else(|| {
+                // Backwards compat: no triggers → Core; triggers present → Practice
+                if fm.triggers.is_empty() { SkillCategory::Core } else { SkillCategory::Practice }
+            });
             return Ok(Skill {
                 name,
                 description:    fm.description,
@@ -228,11 +243,12 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
                 token_estimate: fm.tokens,
                 content:        body,
                 source,
+                category,
             });
         }
     }
 
-    // No frontmatter — treat entire file as skill body, always-on (no triggers).
+    // No frontmatter — treat as Core (always-on), backwards compatible.
     Ok(Skill {
         name,
         description:    String::new(),
@@ -241,6 +257,7 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
         token_estimate: 0,
         content:        raw,
         source,
+        category:       SkillCategory::Core,
     })
 }
 
@@ -249,6 +266,7 @@ struct ParsedFrontmatter {
     license:     Option<String>,
     triggers:    Vec<String>,
     tokens:      usize,
+    category:    Option<SkillCategory>,
 }
 
 fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
@@ -256,6 +274,7 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
     let mut license     = None;
     let mut triggers    = Vec::new();
     let mut tokens      = 0usize;
+    let mut category    = None;
 
     for line in fm.lines() {
         let line = line.trim();
@@ -277,10 +296,18 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
             let val = line.trim_start_matches("tokens:").trim();
             let clean: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
             tokens = clean.parse().unwrap_or(0);
+        } else if line.starts_with("category:") {
+            let val = line.trim_start_matches("category:").trim().trim_matches('"').trim_matches('\'');
+            category = match val {
+                "core"     => Some(SkillCategory::Core),
+                "practice" => Some(SkillCategory::Practice),
+                "domain"   => Some(SkillCategory::Domain),
+                _          => None,
+            };
         }
     }
 
-    ParsedFrontmatter { description, license, triggers, tokens }
+    ParsedFrontmatter { description, license, triggers, tokens, category }
 }
 
 // ── Bundled default skills ────────────────────────────────────────────────────
@@ -288,26 +315,42 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
 /// Skills shipped with the binary. User skills of the same name override these.
 fn bundled_skills() -> Vec<Skill> {
     const BUNDLED: &[(&str, &str)] = &[
-        // Always-on meta-skills (no triggers — injected every session)
+        // Core — always injected
         ("karpathy-guidelines", include_str!("default_skills/karpathy-guidelines.md")),
-        // Language skills (trigger on stack detection or keywords)
-        ("rust",         include_str!("default_skills/rust.md")),
-        ("react",        include_str!("default_skills/react.md")),
-        ("typescript",   include_str!("default_skills/typescript.md")),
-        ("python",       include_str!("default_skills/python.md")),
-        ("go",           include_str!("default_skills/go.md")),
-        // Practice skills (trigger on task keywords)
+        // Practice — always trigger-matchable, any session
         ("git",          include_str!("default_skills/git.md")),
         ("code-review",  include_str!("default_skills/code-review.md")),
         ("debugging",    include_str!("default_skills/debugging.md")),
         ("security",     include_str!("default_skills/security.md")),
+        // Domain — session-scoped language/framework skills
+        ("bash",         include_str!("default_skills/bash.md")),
+        ("cpp",          include_str!("default_skills/cpp.md")),
+        ("csharp",       include_str!("default_skills/csharp.md")),
+        ("css",          include_str!("default_skills/css.md")),
+        ("dart",         include_str!("default_skills/dart.md")),
+        ("go",           include_str!("default_skills/go.md")),
+        ("java",         include_str!("default_skills/java.md")),
+        ("kotlin",       include_str!("default_skills/kotlin.md")),
+        ("php",          include_str!("default_skills/php.md")),
+        ("python",       include_str!("default_skills/python.md")),
+        ("react",        include_str!("default_skills/react.md")),
+        ("ruby",         include_str!("default_skills/ruby.md")),
+        ("rust",         include_str!("default_skills/rust.md")),
+        ("scala",        include_str!("default_skills/scala.md")),
+        ("sql",          include_str!("default_skills/sql.md")),
+        ("swift",        include_str!("default_skills/swift.md")),
+        ("typescript",   include_str!("default_skills/typescript.md")),
+        ("vue",          include_str!("default_skills/vue.md")),
     ];
 
     BUNDLED.iter().filter_map(|(name, raw)| {
         if let Some(after_fence) = raw.strip_prefix("---") {
             if let Some(end_idx) = after_fence.find("\n---") {
-                let fm   = parse_frontmatter(&after_fence[..end_idx]);
-                let body = after_fence[end_idx + 4..].trim_start().to_string();
+                let fm       = parse_frontmatter(&after_fence[..end_idx]);
+                let body     = after_fence[end_idx + 4..].trim_start().to_string();
+                let category = fm.category.unwrap_or_else(|| {
+                    if fm.triggers.is_empty() { SkillCategory::Core } else { SkillCategory::Practice }
+                });
                 return Some(Skill {
                     name:           name.to_string(),
                     description:    fm.description,
@@ -316,6 +359,7 @@ fn bundled_skills() -> Vec<Skill> {
                     token_estimate: fm.tokens,
                     content:        body,
                     source:         SkillSource::Bundled,
+                    category,
                 });
             }
         }
@@ -325,37 +369,114 @@ fn bundled_skills() -> Vec<Skill> {
 
 // ── Stack auto-detection ──────────────────────────────────────────────────────
 
-/// Detect the project's tech stack from well-known manifest files and return
-/// any loaded skills whose name matches a detected stack.
-pub fn detect_stack_skills<'a>(skills: &'a [Skill]) -> Vec<&'a Skill> {
+/// Map manifest file → candidate domain skill names.
+const STACK_MANIFESTS: &[(&str, &[&str])] = &[
+    ("Cargo.toml",       &["rust"]),
+    ("go.mod",           &["go"]),
+    ("package.json",     &["typescript", "react", "vue"]),
+    ("pyproject.toml",   &["python"]),
+    ("setup.py",         &["python"]),
+    ("pom.xml",          &["java"]),
+    ("build.gradle",     &["java"]),
+    ("build.gradle.kts", &["kotlin"]),
+    ("Gemfile",          &["ruby"]),
+    ("composer.json",    &["php"]),
+    ("pubspec.yaml",     &["dart"]),
+    ("CMakeLists.txt",   &["cpp"]),
+    ("build.sbt",        &["scala"]),
+];
+
+/// Detect the project's tech stack and return skill names that match.
+/// Used to auto-populate domain_scope at session startup.
+pub fn detect_domain_scope(skills: &[Skill]) -> Vec<String> {
     let cwd = std::env::current_dir().unwrap_or_default();
+    let mut found: Vec<String> = Vec::new();
 
-    // Map manifest filename → candidate skill names (first match wins per stack)
-    let stacks: &[(&str, &[&str])] = &[
-        ("Cargo.toml",                   &["rust"]),
-        ("go.mod",                        &["go"]),
-        ("package.json",                  &["typescript", "node", "javascript"]),
-        ("pyproject.toml",                &["python"]),
-        ("setup.py",                      &["python"]),
-        ("pom.xml",                       &["java"]),
-        ("build.gradle",                  &["java"]),
-    ];
-
-    let mut detected_names: Vec<&str> = Vec::new();
-    for (manifest, candidates) in stacks {
+    for (manifest, candidates) in STACK_MANIFESTS {
         if cwd.join(manifest).exists() {
             for &candidate in *candidates {
-                if skills.iter().any(|s| s.name == candidate) {
-                    detected_names.push(candidate);
-                    break; // one skill per stack
+                if skills.iter().any(|s| s.name == candidate && s.category == SkillCategory::Domain)
+                    && !found.contains(&candidate.to_string())
+                {
+                    found.push(candidate.to_string());
                 }
             }
         }
     }
 
-    skills.iter()
-        .filter(|s| detected_names.contains(&s.name.as_str()))
-        .collect()
+    // C# — check for any .csproj file
+    if std::fs::read_dir(&cwd).map_or(false, |mut e| {
+        e.any(|en| en.map_or(false, |en| en.path().extension().is_some_and(|x| x == "csproj")))
+    }) && skills.iter().any(|s| s.name == "csharp" && s.category == SkillCategory::Domain) {
+        found.push("csharp".to_string());
+    }
+
+    found
+}
+
+/// Backwards-compatible: returns skill refs for the startup banner.
+pub fn detect_stack_skills<'a>(skills: &'a [Skill]) -> Vec<&'a Skill> {
+    let names = detect_domain_scope(skills);
+    skills.iter().filter(|s| names.contains(&s.name)).collect()
+}
+
+/// Match Practice skills + session-scoped Domain skills against a query.
+/// `domain_scope` empty = no restriction (all Domain skills are candidates).
+pub fn match_skills_scoped<'a>(
+    query: &str,
+    skills: &'a [Skill],
+    domain_scope: &std::collections::HashSet<String>,
+) -> Vec<&'a Skill> {
+    let mut matched: Vec<&Skill> = Vec::new();
+    for skill in skills {
+        let eligible = match skill.category {
+            SkillCategory::Core     => false, // already in system prompt
+            SkillCategory::Practice => true,
+            SkillCategory::Domain   => domain_scope.is_empty() || domain_scope.contains(&skill.name),
+        };
+        if eligible && skill.matches(query) {
+            if let Some(existing) = matched.iter_mut().find(|s| s.name == skill.name) {
+                if skill.source == SkillSource::Project { *existing = skill; }
+            } else {
+                matched.push(skill);
+            }
+        }
+    }
+    matched
+}
+
+/// All domain skills, sorted by name. Used to build the startup scope prompt.
+pub fn all_domain_skills(skills: &[Skill]) -> Vec<&Skill> {
+    let mut v: Vec<&Skill> = skills.iter()
+        .filter(|s| s.category == SkillCategory::Domain)
+        .collect();
+    v.sort_by(|a, b| a.name.cmp(&b.name));
+    v
+}
+
+/// Show an interactive multi-select to let the user choose domain skills for this session.
+/// Returns `None` if the user cancels (Esc) or selects nothing — callers treat that as
+/// "no restriction" (all domain skills remain candidates).
+pub fn prompt_domain_scope(skills: &[Skill]) -> Option<Vec<String>> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() { return None; }
+
+    let domain = all_domain_skills(skills);
+    if domain.is_empty() { return None; }
+
+    let options: Vec<String> = domain.iter().map(|s| s.name.clone()).collect();
+
+    match inquire::MultiSelect::new(
+        "Which languages/frameworks will you use this session?",
+        options,
+    )
+    .with_help_message("↑↓ navigate  Space select  Enter confirm  Esc = no restriction")
+    .with_render_config(crate::ui::inquire_render_config())
+    .prompt()
+    {
+        Ok(selected) if !selected.is_empty() => Some(selected),
+        _ => None,
+    }
 }
 
 /// Save a skill captured from conversation.

@@ -1,4 +1,5 @@
 ---
+category: domain
 name: python
 trigger: ["python", "django", "fastapi", "flask", "pytest", "pip", "poetry", "pyproject", "pydantic", ".py", "def ", "class "]
 tokens: ~550
