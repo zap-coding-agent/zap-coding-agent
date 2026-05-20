@@ -64,6 +64,9 @@ pub struct Config {
     /// When true, skip the interactive `prompt_domain_scope` CLI prompt.
     /// Used by TUI mode, which shows its own in-TUI picker instead.
     pub skip_domain_prompt: bool,
+    /// When true, suppress all startup println!s (skills, hooks, MCP).
+    /// TUI mode shows this info in its welcome message instead.
+    pub tui_mode: bool,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -198,7 +201,7 @@ impl Config {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
-            budget: None, skill_paths, disable_stream, skip_domain_prompt: false,
+            budget: None, skill_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
         })
     }
 

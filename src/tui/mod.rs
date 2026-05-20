@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, MsgRole, SessionEntry, SessionPickerState, UiBlock, UiMessage};
+use app::{App, AppState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, UiBlock, UiMessage};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -33,36 +33,12 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     //    Skip the CLI domain-scope prompt — we show a TUI picker instead.
     let mut tui_config = config.clone();
     tui_config.skip_domain_prompt = true;
+    tui_config.tui_mode = true;
     let config = &tui_config;
     let mut session = Session::new(config).await?;
     session.hooks.fire_session_start();
 
-    // 2. Mode picker — runs on normal terminal before alternate screen.
-    let mode = crate::task_planner::pick_session_mode();
-    let mut task_intro: Option<String> = None;
-    if mode == crate::task_planner::SessionMode::Task {
-        match crate::task_planner::run_task_planning(
-            session.client.as_ref(),
-            &session.model,
-            &session.skills,
-        )
-        .await
-        {
-            Ok(Some(plan)) => {
-                task_intro = Some(format!(
-                    "I'm starting a task session. Goal: {}\n\n\
-                     The tasks.md has been created at .zap/tasks/{}/tasks.md\n\
-                     Please read it and confirm you understand the plan before we start.",
-                    plan.goal, plan.folder_name
-                ));
-            }
-            Ok(None) => {}
-            Err(e) => {
-                use colored::Colorize;
-                println!("  {} Planning failed: {} — continuing in Vibe mode.", "⚠".yellow(), e);
-            }
-        }
-    }
+    // Mode picker is now handled inside the TUI (see mode_picker overlay).
 
     // Fetch branch while still in the normal terminal.
     let branch = git_branch();
@@ -83,7 +59,10 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let mut app = App::new(&session.model, &branch);
     app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
 
-    // Show domain picker when no scope was auto-detected and domain skills exist.
+    // Always show the Vibe/Task mode picker as the first TUI overlay.
+    app.mode_picker = Some(ModePickerState { cursor: 0 });
+
+    // Queue domain picker (behind mode picker — shows after mode is chosen).
     if session.domain_scope.is_empty() {
         let domain_options = crate::skill_manager::all_domain_skill_names(&session.skills);
         if !domain_options.is_empty() {
@@ -92,7 +71,6 @@ pub async fn run_tui(config: &Config) -> Result<()> {
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| ".".to_string());
             let mut picker = app::DomainPickerState::new(domain_options, project_name);
-            // Pre-check anything we can detect from file extensions.
             let ext_detected = crate::skill_manager::detect_from_extensions(&session.skills);
             for (i, opt) in picker.options.iter().enumerate() {
                 if ext_detected.contains(opt) {
@@ -102,29 +80,33 @@ pub async fn run_tui(config: &Config) -> Result<()> {
             app.domain_picker = Some(picker);
         }
     }
+
     let (dirty, ahead, behind) = git_status();
     app.git_dirty = dirty;
     app.git_ahead = ahead;
     app.git_behind = behind;
 
-    // Show welcome message in conversation area
-    let mode_hint = if task_intro.is_some() { " · task mode" } else { " · vibe mode" };
+    // Build rich welcome line (replaces the startup println!s we suppressed).
+    let skill_note = {
+        let always_on_count = crate::skill_manager::always_on_skills(&session.skills).len();
+        let practice_count = session.skills.iter()
+            .filter(|s| s.category == crate::skill_manager::SkillCategory::Practice).count();
+        let domain_count = session.skills.iter()
+            .filter(|s| s.category == crate::skill_manager::SkillCategory::Domain).count();
+        if session.skills.is_empty() {
+            String::new()
+        } else {
+            format!("  ·  {} skills ({} core · {} practice · {} domain)",
+                session.skills.len(), always_on_count, practice_count, domain_count)
+        }
+    };
     app.messages.push(UiMessage {
         role: MsgRole::Assistant,
         blocks: vec![UiBlock::Text(format!(
-            "Ready. {} tools loaded{}. Type your message or / for commands.",
-            session.tool_count, mode_hint
+            "Ready. {} tools loaded{}.",
+            session.tool_count, skill_note
         ))],
     });
-
-    // If task mode, prime the first turn so zap reads the tasks.md immediately.
-    if let Some(intro) = task_intro {
-        app.messages.push(UiMessage {
-            role: MsgRole::User,
-            blocks: vec![UiBlock::Text("Starting task session…".to_string())],
-        });
-        app.pending_input = Some(intro);
-    }
 
     // 5. Main event loop
     let result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
@@ -474,6 +456,21 @@ async fn tui_loop(
                         }
                         InputAction::CloseSessionPicker => {}
                         InputAction::ClearInput => {}
+                        InputAction::SelectMode(is_task) => {
+                            if is_task {
+                                suspend_tui(terminal)?;
+                                let task_intro = run_task_planning_tui(session).await;
+                                resume_tui(terminal)?;
+                                if let Some(intro) = task_intro {
+                                    app.messages.push(UiMessage {
+                                        role: MsgRole::User,
+                                        blocks: vec![UiBlock::Text("Starting task session…".to_string())],
+                                    });
+                                    app.pending_input = Some(intro);
+                                }
+                            }
+                            // Vibe: nothing extra needed, just proceed
+                        }
                         InputAction::ToggleLastToolExpand => {
                             if let Some(id) = last_tool_id_with_result(app) {
                                 if app.expanded_tools.contains(&id) {
@@ -664,6 +661,41 @@ if ($dialog.ShowDialog() -eq 'OK') {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         None
+    }
+}
+
+/// Run task planning in the normal terminal (TUI suspended) and return the
+/// intro message to prime the first TUI turn, or None if aborted.
+async fn run_task_planning_tui(session: &crate::session::Session) -> Option<String> {
+    match crate::task_planner::run_task_planning(
+        session.client.as_ref(),
+        &session.model,
+        &session.skills,
+    )
+    .await
+    {
+        Ok(Some(plan)) => {
+            println!();
+            print!("  \x1b[2m── Press Enter to enter task session ──\x1b[0m ");
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+            let mut buf = String::new();
+            std::io::stdin().read_line(&mut buf).ok();
+            Some(format!(
+                "I'm starting a task session. Goal: {}\n\n\
+                 The tasks.md has been created at .zap/tasks/{}/tasks.md\n\
+                 Please read it and confirm you understand the plan before we start.",
+                plan.goal, plan.folder_name
+            ))
+        }
+        Ok(None) => None,
+        Err(e) => {
+            use colored::Colorize;
+            println!("  {} Planning failed: {} — continuing in Vibe mode.", "⚠".yellow(), e);
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+            None
+        }
     }
 }
 

@@ -249,7 +249,7 @@ impl Session {
             std::collections::HashSet::new()
         };
 
-        if !skills.is_empty() && !config.is_subagent {
+        if !skills.is_empty() && !config.is_subagent && !config.tui_mode {
             let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
             let mut notes: Vec<String> = Vec::new();
             if !core_names.is_empty() {
@@ -281,7 +281,7 @@ impl Session {
         }
 
         let hooks = crate::hooks::HookRunner::load();
-        if !hooks.is_empty() && !config.is_subagent {
+        if !hooks.is_empty() && !config.is_subagent && !config.tui_mode {
             println!(
                 "  {} {} hook(s) loaded",
                 "◎".truecolor(255, 160, 80),
@@ -289,7 +289,7 @@ impl Session {
             );
         }
 
-        if !mcp_connect_results.is_empty() && !config.is_subagent {
+        if !mcp_connect_results.is_empty() && !config.is_subagent && !config.tui_mode {
             let total_tools: usize = mcp_connect_results.iter()
                 .filter_map(|(_, r)| r.as_ref().ok())
                 .map(|names| names.len())
@@ -319,7 +319,7 @@ impl Session {
                     err.to_string().truecolor(220, 80, 80),
                 );
             }
-        } else if mcp_had_config && !config.is_subagent {
+        } else if mcp_had_config && !config.is_subagent && !config.tui_mode {
             println!(
                 "  {} {}",
                 "○".truecolor(180, 120, 60),
@@ -327,7 +327,7 @@ impl Session {
             );
         }
 
-        if !config.is_subagent {
+        if !config.is_subagent && !config.tui_mode {
             if let Some(summary) = crate::http::network_summary(config) {
                 println!(
                     "  {} {}",

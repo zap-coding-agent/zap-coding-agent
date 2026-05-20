@@ -19,6 +19,8 @@ pub enum InputAction {
     CloseSessionPicker,
     /// Ctrl+O: toggle expansion of the last tool call with output.
     ToggleLastToolExpand,
+    /// Vibe/Task mode selected: true = Task, false = Vibe.
+    SelectMode(bool),
     /// Domain picker confirmed — carries the selected skill names (may be empty = no restriction).
     ConfirmDomainScope(Vec<String>),
 }
@@ -29,7 +31,12 @@ fn picker_active(app: &App) -> bool {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
-    // Domain picker takes priority when open (shown at session start).
+    // Mode picker is shown first, before everything else.
+    if app.mode_picker.is_some() {
+        return handle_mode_picker_key(app, key);
+    }
+
+    // Domain picker follows mode picker.
     if app.domain_picker.is_some() {
         return handle_domain_picker_key(app, key);
     }
@@ -242,6 +249,36 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
+}
+
+/// Handle keys when the Vibe/Task mode picker overlay is open.
+fn handle_mode_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let picker = app.mode_picker.as_mut().unwrap();
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            picker.cursor = picker.cursor.saturating_sub(1);
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            picker.cursor = picker.cursor.saturating_add(1).min(1);
+            InputAction::None
+        }
+        KeyCode::Tab => {
+            picker.cursor = 1 - picker.cursor;
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            let is_task = picker.cursor == 1;
+            app.mode_picker = None;
+            InputAction::SelectMode(is_task)
+        }
+        KeyCode::Esc => {
+            // Esc defaults to Vibe
+            app.mode_picker = None;
+            InputAction::SelectMode(false)
+        }
+        _ => InputAction::None,
+    }
 }
 
 /// Handle keys when the domain/language scope picker is open.

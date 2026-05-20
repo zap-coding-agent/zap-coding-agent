@@ -158,6 +158,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_file_browser(frame, app, size);
     }
 
+    // Mode picker shown first (before domain picker).
+    if app.mode_picker.is_some() {
+        draw_mode_picker(frame, app, size);
+        return; // nothing else rendered until mode is chosen
+    }
+
     // Draw domain/language picker overlay if open (shown once at session start).
     if app.domain_picker.is_some() {
         draw_domain_picker(frame, app, size);
@@ -1246,4 +1252,69 @@ fn draw_domain_picker(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     frame.render_widget(Paragraph::new(rows), content_area);
+}
+
+// ── Vibe / Task mode picker overlay ───────────────────────────────────────────
+
+fn draw_mode_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let picker = match app.mode_picker.as_ref() {
+        Some(p) => p,
+        None    => return,
+    };
+
+    let w = 52u16.min(area.width);
+    let h = 10u16.min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let border_c = Color::Rgb(255, 200, 50);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .title(Span::styled(
+            " ⚡ How do you want to work? ",
+            Style::default().fg(border_c).add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    // Two options + hint
+    let opts: &[(&str, &str)] = &[
+        ("Vibe",  "start talking — no structure"),
+        ("Task",  "plan first, then execute"),
+    ];
+
+    let sel_bg = Color::Rgb(60, 55, 80);
+    let mut rows: Vec<Line<'static>> = vec![Line::from("")];
+    for (i, (name, desc)) in opts.iter().enumerate() {
+        let is_sel = i == picker.cursor;
+        let marker = if is_sel { " ❯ " } else { "   " };
+        let line = if is_sel {
+            Line::from(vec![
+                Span::styled(marker.to_string(), Style::default().fg(border_c).bg(sel_bg).bold()),
+                Span::styled(format!("{:<6}", name), Style::default().fg(border_c).bg(sel_bg).bold()),
+                Span::styled(format!("  {}", desc), Style::default().fg(Color::Rgb(170, 165, 195)).bg(sel_bg)),
+                Span::styled(" ".repeat(w as usize), Style::default().bg(sel_bg)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(marker.to_string(), Style::default().fg(Color::Rgb(80, 75, 100))),
+                Span::styled(format!("{:<6}", name), Style::default().fg(Color::Rgb(140, 135, 165))),
+                Span::styled(format!("  {}", desc), Style::default().fg(Color::Rgb(80, 75, 100))),
+            ])
+        };
+        rows.push(line);
+    }
+    rows.push(Line::from(""));
+    rows.push(Line::from(Span::styled(
+        "  ↑↓ navigate   Enter confirm   Esc = Vibe",
+        Style::default().fg(Color::Rgb(60, 55, 80)),
+    )));
+
+    frame.render_widget(Paragraph::new(rows), inner);
 }

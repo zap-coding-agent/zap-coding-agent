@@ -60,6 +60,13 @@ pub struct UiMessage {
     pub blocks: Vec<UiBlock>,
 }
 
+// ── Session mode picker ────────────────────────────────────────────────────────
+
+pub struct ModePickerState {
+    /// 0 = Vibe, 1 = Task
+    pub cursor: usize,
+}
+
 // ── Domain / language scope picker ────────────────────────────────────────────
 
 pub struct DomainPickerState {
@@ -156,6 +163,9 @@ pub struct App {
     /// File browser state (None when closed).
     pub file_browser: Option<super::file_browser::FileBrowser>,
 
+    /// Vibe/Task mode picker shown at session start before domain picker.
+    pub mode_picker: Option<ModePickerState>,
+
     /// Language/framework domain picker shown once at session start (None after confirmed).
     pub domain_picker: Option<DomainPickerState>,
 
@@ -197,6 +207,7 @@ impl App {
             git_ahead: 0,
             git_behind: 0,
             file_browser: None,
+            mode_picker: None,
             domain_picker: None,
             session_picker: None,
             quit_confirm: false,
