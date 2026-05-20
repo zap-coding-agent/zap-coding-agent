@@ -83,47 +83,64 @@ pub fn highlight_code(lang: &str, code: &str) -> Vec<Line<'static>> {
 }
 
 /// Parse markdown text and return styled spans.
-/// Supports: **bold**, *italic*, `code`, # headers
+/// Supports: **bold**, *italic*, `code`, # headers, list items
 pub fn parse_markdown(text: &str) -> Vec<Line<'static>> {
     use pulldown_cmark::{Event, Parser, Tag};
-    
+
+    let base   = Style::default().fg(Color::Rgb(210, 205, 230));
+    let strong = Style::default().fg(Color::Rgb(230, 225, 255)).add_modifier(Modifier::BOLD);
+    let em     = Style::default().fg(Color::Rgb(180, 175, 205)).add_modifier(Modifier::ITALIC);
+    let code   = Style::default().fg(Color::Rgb(130, 215, 255)).bg(Color::Rgb(38, 44, 72));
+
     let parser = Parser::new(text);
-    let mut lines = Vec::new();
-    let mut current_line = Vec::new();
-    let mut style_stack: Vec<Style> = vec![Style::default()];
-    
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_line: Vec<Span<'static>> = Vec::new();
+    let mut style_stack: Vec<Style> = vec![base];
+    let mut list_depth: usize = 0;
+
     for event in parser {
         match event {
             Event::Start(tag) => {
-                let new_style = match tag {
+                let new_style = match &tag {
                     Tag::Heading(level, _, _) => {
                         use pulldown_cmark::HeadingLevel;
-                        let color = match level {
-                            HeadingLevel::H1 => Color::Cyan,
-                            HeadingLevel::H2 => Color::Blue,
-                            HeadingLevel::H3 => Color::Green,
-                            _ => Color::Yellow,
+                        let (c, sz) = match level {
+                            HeadingLevel::H1 => (Color::Rgb(255, 200, 50), true),
+                            HeadingLevel::H2 => (Color::Rgb(100, 210, 255), true),
+                            HeadingLevel::H3 => (Color::Rgb(100, 210, 120), false),
+                            _               => (Color::Rgb(175, 170, 200), false),
                         };
-                        Style::default().fg(color).add_modifier(Modifier::BOLD)
+                        let s = Style::default().fg(c).add_modifier(Modifier::BOLD);
+                        if sz { s } else { s }
                     }
-                    Tag::Strong => style_stack.last().unwrap().add_modifier(Modifier::BOLD),
-                    Tag::Emphasis => style_stack.last().unwrap().add_modifier(Modifier::ITALIC),
-                    Tag::CodeBlock(_) => Style::default().fg(Color::Green),
-                    Tag::List(_) => *style_stack.last().unwrap(),
-                    Tag::Item => *style_stack.last().unwrap(),
-                    Tag::Link(_, _, _) => Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
-                    _ => *style_stack.last().unwrap(),
+                    Tag::Strong    => strong,
+                    Tag::Emphasis  => em,
+                    Tag::CodeBlock(_) => Style::default().fg(Color::Rgb(130, 215, 255)),
+                    Tag::List(_)   => { list_depth += 1; *style_stack.last().unwrap() }
+                    Tag::Item      => {
+                        // Bullet marker for list items
+                        let indent = "  ".repeat(list_depth);
+                        current_line.push(Span::styled(
+                            format!("{}• ", indent),
+                            Style::default().fg(Color::Rgb(255, 200, 50)),
+                        ));
+                        *style_stack.last().unwrap()
+                    }
+                    Tag::Link(..)  => Style::default().fg(Color::Rgb(100, 180, 255)).add_modifier(Modifier::UNDERLINED),
+                    _              => *style_stack.last().unwrap(),
                 };
                 style_stack.push(new_style);
             }
             Event::End(tag) => {
-                if style_stack.len() > 1 {
-                    style_stack.pop();
-                }
-                
-                // Add newline after certain blocks
+                if style_stack.len() > 1 { style_stack.pop(); }
                 match tag {
-                    Tag::Heading(_, _, _) | Tag::Paragraph | Tag::Item => {
+                    Tag::Heading(..) | Tag::Paragraph | Tag::Item | Tag::CodeBlock(_) => {
+                        if !current_line.is_empty() {
+                            lines.push(Line::from(std::mem::take(&mut current_line)));
+                        }
+                    }
+                    Tag::List(_) => {
+                        list_depth = list_depth.saturating_sub(1);
                         if !current_line.is_empty() {
                             lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
@@ -131,13 +148,12 @@ pub fn parse_markdown(text: &str) -> Vec<Line<'static>> {
                     _ => {}
                 }
             }
-            Event::Text(text) => {
-                let style = *style_stack.last().unwrap();
-                current_line.push(Span::styled(text.to_string(), style));
+            Event::Text(t) => {
+                current_line.push(Span::styled(t.to_string(), *style_stack.last().unwrap()));
             }
-            Event::Code(code) => {
-                let style = Style::default().fg(Color::Green).bg(Color::DarkGray);
-                current_line.push(Span::styled(format!("`{}`", code), style));
+            Event::Code(c) => {
+                // Inline code: space-padded for visual breathing room
+                current_line.push(Span::styled(format!(" {} ", c), code));
             }
             Event::SoftBreak | Event::HardBreak => {
                 if !current_line.is_empty() {
@@ -147,17 +163,12 @@ pub fn parse_markdown(text: &str) -> Vec<Line<'static>> {
             _ => {}
         }
     }
-    
-    // Flush remaining line
     if !current_line.is_empty() {
         lines.push(Line::from(current_line));
     }
-    
-    // If no lines were generated, return the original text
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled(text.to_string(), Style::default().fg(Color::White))));
+        lines.push(Line::from(Span::styled(text.to_string(), base)));
     }
-    
     lines
 }
 

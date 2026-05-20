@@ -13,7 +13,7 @@ pub const SPINNER_FRAMES: &[&str] = &[
     "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
 ];
 
-/// Words that rotate while the LLM is generating — changes roughly every 1.3s at 16ms tick.
+/// Words that rotate while the LLM is generating — changes roughly every 3s at 16ms tick.
 const THINKING_WORDS: &[&str] = &[
     // Cognitive core
     "Thinking",        "Analyzing",       "Reasoning",       "Reflecting",
@@ -424,12 +424,13 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 188)) % THINKING_WORDS.len();
+    let elapsed_secs = app.turn_tick / 62;
     let (state_icon, state_color, state_text): (&str, Color, String) = match &app.state {
         AppState::Idle => ("●", Color::Green, "idle".to_string()),
         AppState::Thinking => (
             spin, Color::Yellow,
-            format!("{}…", THINKING_WORDS[word_idx]),
+            format!("{}… {}s", THINKING_WORDS[word_idx], elapsed_secs),
         ),
         AppState::ToolRunning { name, label } => {
             let verb = tool_verb(name);
@@ -587,11 +588,12 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 188)) % THINKING_WORDS.len();
+    let elapsed_secs = app.turn_tick / 62;
     let (hint, hint_color) = match &app.state {
         AppState::Idle => (String::new(), Color::DarkGray),
         AppState::Thinking => (
-            format!("  {} {}…  │", spin, THINKING_WORDS[word_idx]),
+            format!("  {} {}… {}s  │", spin, THINKING_WORDS[word_idx], elapsed_secs),
             Color::Yellow,
         ),
         AppState::ToolRunning { name, .. } => (
@@ -643,7 +645,8 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         match &app.state {
             AppState::Thinking | AppState::ToolRunning { .. } => {
                 let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-                let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
+                let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 188)) % THINKING_WORDS.len();
+                let elapsed_secs = app.turn_tick / 62;
                 let (label, color) = match &app.state {
                     AppState::ToolRunning { name, label } => {
                         let verb = tool_verb(name);
@@ -653,7 +656,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                         (format!("  {} {}  {}", spin, verb, short), Color::Cyan)
                     }
                     _ => (
-                        format!("  {} {}…", spin, THINKING_WORDS[word_idx]),
+                        format!("  {} {}… {}s", spin, THINKING_WORDS[word_idx], elapsed_secs),
                         Color::Yellow,
                     ),
                 };
@@ -750,33 +753,73 @@ pub fn role_line(role: &MsgRole) -> Line<'static> {
 
 pub fn text_to_lines(text: &str, width: u16) -> Vec<Line<'static>> {
     let wrap_width = (width as usize).saturating_sub(4).max(20);
-
-    // Try markdown — but only use styled output if every line fits within wrap_width.
-    // If any markdown line is too long (e.g. a long prose paragraph without breaks),
-    // fall through to the plain word-wrap path which correctly reflows the text.
     let md_lines = super::syntax::parse_markdown(text);
-    if !md_lines.is_empty() && md_lines.len() > 1 {
-        let all_fit = md_lines.iter().all(|l| {
-            l.spans.iter().map(|s| s.content.chars().count()).sum::<usize>() + 2 <= wrap_width
-        });
-        if all_fit {
-            let mut result = Vec::new();
-            for line in md_lines {
-                let mut spans = vec![Span::raw("  ")];
-                spans.extend(line.spans);
-                result.push(Line::from(spans));
-            }
-            return result;
+    if !md_lines.is_empty() {
+        let mut result = Vec::new();
+        for line in md_lines {
+            result.extend(wrap_markdown_line(line, wrap_width, "  "));
         }
-        // Some line is too wide — extract plain text from markdown spans and word-wrap below.
-        let plain: String = md_lines.iter()
-            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n");
-        return word_wrap_plain(&plain, wrap_width);
+        return result;
+    }
+    word_wrap_plain(text, wrap_width)
+}
+
+/// Span-aware word wrap: if `line` fits within `max_w - indent`, return it with indent prepended.
+/// Otherwise split on word boundaries while preserving each span's style across the new lines.
+fn wrap_markdown_line(line: Line<'static>, max_w: usize, indent: &str) -> Vec<Line<'static>> {
+    let indent_len = indent.chars().count();
+    let available = max_w.saturating_sub(indent_len).max(1);
+
+    let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+    if total <= available {
+        let mut spans = vec![Span::raw(indent.to_string())];
+        spans.extend(line.spans);
+        return vec![Line::from(spans)];
     }
 
-    word_wrap_plain(text, wrap_width)
+    // Tokenise each span into (word, style, needs_space_before) triples.
+    let mut tokens: Vec<(String, Style, bool)> = Vec::new();
+    for span in line.spans {
+        let started_space = span.content.starts_with(|c: char| c.is_whitespace());
+        for (i, word) in span.content.split_whitespace().enumerate() {
+            let space_before = i > 0 || (i == 0 && started_space && !tokens.is_empty());
+            tokens.push((word.to_string(), span.style, space_before));
+        }
+    }
+
+    let mut result_lines: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_len: usize = 0;
+
+    for (text, style, space_before) in tokens {
+        let sep = if space_before && current_len > 0 { 1usize } else { 0 };
+        let tok_len = text.chars().count();
+
+        if current_len > 0 && current_len + sep + tok_len > available {
+            // Flush current line and start a new one.
+            let mut ls = vec![Span::raw(indent.to_string())];
+            ls.extend(current_spans.drain(..));
+            result_lines.push(Line::from(ls));
+            current_len = 0;
+            current_spans.push(Span::styled(text, style));
+            current_len = tok_len;
+        } else {
+            let t = if sep > 0 { format!(" {}", text) } else { text };
+            current_len += t.chars().count();
+            current_spans.push(Span::styled(t, style));
+        }
+    }
+
+    if !current_spans.is_empty() {
+        let mut ls = vec![Span::raw(indent.to_string())];
+        ls.extend(current_spans);
+        result_lines.push(Line::from(ls));
+    }
+
+    if result_lines.is_empty() {
+        result_lines.push(Line::from(indent.to_string()));
+    }
+    result_lines
 }
 
 fn word_wrap_plain(text: &str, wrap_width: usize) -> Vec<Line<'static>> {

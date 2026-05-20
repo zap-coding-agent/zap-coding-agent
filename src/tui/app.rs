@@ -137,6 +137,8 @@ pub struct App {
     pub spinner_frame: usize,
     /// Monotonically increasing tick counter — never clamped, used for word rotation.
     pub word_tick: usize,
+    /// Tick counter reset to 0 each time a new turn starts — used for elapsed-time display.
+    pub turn_tick: usize,
 
     // Header info
     pub model: String,
@@ -195,6 +197,7 @@ impl App {
             state: AppState::Idle,
             spinner_frame: 0,
             word_tick: 0,
+            turn_tick: 0,
             model: model.to_string(),
             context_pct: 0,
             turn: 0,
@@ -221,12 +224,16 @@ impl App {
     pub fn tick_spinner(&mut self) {
         self.spinner_frame = (self.spinner_frame + 1) % 10;
         self.word_tick = self.word_tick.wrapping_add(1);
+        self.turn_tick = self.turn_tick.wrapping_add(1);
     }
 
     /// Apply an incoming TUI event to App state.
     pub fn apply_event(&mut self, ev: TuiEvent) {
         match ev {
             TuiEvent::LlmChunk(text) => {
+                if matches!(self.state, AppState::Idle) {
+                    self.turn_tick = 0;
+                }
                 self.state = AppState::Thinking;
                 // Re-enable auto-scroll so the viewport follows active streaming
                 // even if the user scrolled up earlier in the turn.
@@ -238,6 +245,9 @@ impl App {
                 }
             }
             TuiEvent::ThinkingChunk(text) => {
+                if matches!(self.state, AppState::Idle) {
+                    self.turn_tick = 0;
+                }
                 self.state = AppState::Thinking;
                 match self.streaming_blocks.last_mut() {
                     Some(StreamingBlock::Thinking(ref mut s)) => s.push_str(&text),
