@@ -28,7 +28,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/init",              "create CLAUDE.md for this project"),
     ("/run",               "run a workflow"),
     ("/memory",            "manage memory entries"),
-    ("/skill",             "list available skills"),
+    ("/skill",             "list, use, show skills"),
     ("/audit",             "show last N audit log lines"),
     ("/hooks",             "list configured hooks"),
     ("/mcp",               "view/edit MCP server configs"),
@@ -148,7 +148,94 @@ pub fn handle_inline(
                 }
             }
         }
+        "/skill" => Some(handle_skill_inline(session, arg)),
         _ => None,
+    }
+}
+
+fn handle_skill_inline(session: &mut Session, arg: &str) -> String {
+    let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+    let subcmd = parts.first().copied().unwrap_or("list");
+    let name   = parts.get(1).copied().unwrap_or("").trim();
+
+    match subcmd {
+        "" | "list" => {
+            // Reload skills from disk so project skills appear immediately.
+            session.skills = crate::skill_manager::load_all_skills(&session.config.skill_paths);
+            crate::session::commands::skill_list_text(
+                &session.skills,
+                &session.domain_scope,
+                &session.pinned_skills,
+            )
+        }
+        "use" => {
+            if name.is_empty() {
+                return "Usage: /skill use <name>".to_string();
+            }
+            if session.skills.iter().any(|s| s.name == name) {
+                session.pinned_skills.insert(name.to_string());
+                format!("✓ '{}' pinned — injected every turn. Use /skill unuse {} to remove.", name, name)
+            } else {
+                format!("✗ Skill '{}' not found. Run /skill list to see available skills.", name)
+            }
+        }
+        "unuse" | "drop" | "unpin" => {
+            if name.is_empty() {
+                return "Usage: /skill unuse <name>".to_string();
+            }
+            if session.pinned_skills.remove(name) {
+                format!("✓ '{}' unpinned.", name)
+            } else {
+                format!("'{}' was not pinned.", name)
+            }
+        }
+        "show" => {
+            if name.is_empty() {
+                return "Usage: /skill show <name>".to_string();
+            }
+            match crate::skill_manager::load_all_skills(&session.config.skill_paths)
+                .into_iter()
+                .find(|s| s.name == name)
+            {
+                Some(sk) => crate::session::commands::skill_show_text(&sk),
+                None     => format!("✗ Skill '{}' not found.", name),
+            }
+        }
+        "scope" => {
+            let scope_arg = name.trim();
+            if scope_arg.is_empty() {
+                // Show current scope
+                if session.domain_scope.is_empty() {
+                    "Domain scope: unrestricted (all domain skills are trigger-matchable).\n\
+                     Use /skill scope add <name> to restrict.".to_string()
+                } else {
+                    let names: Vec<&str> = session.domain_scope.iter().map(String::as_str).collect();
+                    format!(
+                        "Domain scope: {}\n/skill scope add <name>  ·  /skill scope remove <name>  ·  /skill scope reset",
+                        names.join(", ")
+                    )
+                }
+            } else if let Some(n) = scope_arg.strip_prefix("add ").map(str::trim) {
+                if session.skills.iter().any(|s| s.name == n && s.category == crate::skill_manager::SkillCategory::Domain) {
+                    session.domain_scope.insert(n.to_string());
+                    format!("✓ '{}' added to domain scope.", n)
+                } else {
+                    format!("✗ No domain skill named '{}'.", n)
+                }
+            } else if let Some(n) = scope_arg.strip_prefix("remove ").map(str::trim) {
+                if session.domain_scope.remove(n) {
+                    format!("✓ '{}' removed from domain scope.", n)
+                } else {
+                    format!("'{}' was not in scope.", n)
+                }
+            } else if scope_arg == "reset" {
+                session.domain_scope.clear();
+                "✓ Domain scope cleared — all domain skills are now trigger-matchable.".to_string()
+            } else {
+                "Usage: /skill scope  |  scope add <name>  |  scope remove <name>  |  scope reset".to_string()
+            }
+        }
+        _ => "Usage: /skill [list | use <name> | unuse <name> | show <name> | scope [...]]".to_string(),
     }
 }
 
@@ -187,7 +274,10 @@ fn help_text() -> String {
             ("/memory list",              "list memory entries"),
             ("/memory get <key>",         "read a memory entry"),
             ("/memory set <k> <v>",       "write a memory entry"),
-            ("/skill list",              "list available skills"),
+            ("/skill list",              "list all skills (built-in, global, project)"),
+            ("/skill use <name>",        "pin a skill — injected every turn"),
+            ("/skill unuse <name>",      "unpin a skill"),
+            ("/skill show <name>",       "preview a skill's content"),
             ("/audit [N]",               "show last N audit log lines"),
             ("/hooks",                   "list configured hooks"),
             ("/mcp [list|edit|path]",    "view/edit MCP server configs"),

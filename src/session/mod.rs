@@ -185,6 +185,8 @@ pub struct Session {
     pub skills:        Vec<crate::skill_manager::Skill>,
     /// Names of Domain skills active this session. Empty = no restriction (all Domain candidates).
     pub domain_scope:  std::collections::HashSet<String>,
+    /// Skills the user has explicitly pinned via `/skill use <name>` — injected every turn.
+    pub pinned_skills: std::collections::HashSet<String>,
     pub current_branch: String,
     pub code_index:    Arc<Mutex<crate::code_index::CodeIndex>>,
     pub store:         persistence::Store,
@@ -359,6 +361,7 @@ impl Session {
             staged_images: Vec::new(),
             skills,
             domain_scope,
+            pinned_skills: std::collections::HashSet::new(),
             current_branch: "main".to_string(),
             code_index,
             store,
@@ -469,8 +472,16 @@ impl Session {
             );
         }
 
-        let matched_skills: Vec<&crate::skill_manager::Skill> =
+        let mut matched_skills: Vec<&crate::skill_manager::Skill> =
             crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
+        // Inject explicitly pinned skills every turn regardless of trigger matching.
+        for skill in &self.skills {
+            if self.pinned_skills.contains(&skill.name)
+                && !matched_skills.iter().any(|s| s.name == skill.name)
+            {
+                matched_skills.push(skill);
+            }
+        }
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 
         let effective_system = if matched_skills.is_empty() {

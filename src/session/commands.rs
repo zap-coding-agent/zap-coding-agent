@@ -1226,9 +1226,116 @@ impl Session {
                     Err(e) => println!("  {} capture failed: {}", "✗".red(), e),
                 }
             }
-            _ => println!("  {} /skill list | scope [add|remove|reset] | show <name> | create <name> | capture <name> [--global]", "✗".red()),
+            "use" => {
+                if name.is_empty() { println!("  Usage: /skill use <name>"); return; }
+                if self.skills.iter().any(|s| s.name == name) {
+                    self.pinned_skills.insert(name.to_string());
+                    println!("  {} '{}' pinned — injected every turn until /skill unuse {}", "✓".green(), name, name);
+                } else {
+                    println!("  {} skill '{}' not found. Run /skill list to see available skills.", "✗".red(), name);
+                }
+            }
+            "unuse" | "drop" | "unpin" => {
+                if name.is_empty() { println!("  Usage: /skill unuse <name>"); return; }
+                if self.pinned_skills.remove(name) {
+                    println!("  {} '{}' unpinned", "✓".green(), name);
+                } else {
+                    println!("  {} '{}' was not pinned", "·".dimmed(), name);
+                }
+            }
+            _ => println!("  {} /skill list | use <name> | unuse <name> | scope [add|remove|reset] | show <name> | create <name> | capture <name> [--global]", "✗".red()),
         }
     }
+}
+
+// ── Skill helpers (pure text, used by TUI inline handler) ────────────────────
+
+/// Build a plain-text skill listing for inline TUI display (no ANSI escape codes).
+pub fn skill_list_text(
+    skills: &[crate::skill_manager::Skill],
+    domain_scope: &std::collections::HashSet<String>,
+    pinned_skills: &std::collections::HashSet<String>,
+) -> String {
+    use crate::skill_manager::{SkillCategory, SkillSource, source_label};
+    let mut s = String::new();
+    if skills.is_empty() {
+        s.push_str("No skills found.\nCreate one: /skill create <name> or add .md files to .zap/skills/");
+        return s;
+    }
+    s.push_str(&format!("## Skills ({} total)\n\n", skills.len()));
+    let groups: &[(&str, SkillCategory)] = &[
+        ("Core — always injected", SkillCategory::Core),
+        ("Practice — always trigger-matchable", SkillCategory::Practice),
+        ("Domain — session-scoped", SkillCategory::Domain),
+    ];
+    for (label, cat) in groups {
+        let group: Vec<_> = skills.iter().filter(|sk| &sk.category == cat).collect();
+        if group.is_empty() { continue; }
+        s.push_str(&format!("### {}\n", label));
+        for sk in &group {
+            let src = source_label(&sk.source);
+            let src_icon = match &sk.source {
+                SkillSource::Project  => "▶",
+                SkillSource::Global   => "●",
+                SkillSource::Bundled  => "◆",
+                SkillSource::External(_) => "◉",
+            };
+            let pin_mark = if pinned_skills.contains(&sk.name) { " 📌" } else { "" };
+            let scope_mark = if *cat == SkillCategory::Domain {
+                if domain_scope.is_empty() || domain_scope.contains(&sk.name) { " ✓" } else { "" }
+            } else { "" };
+            let trigger_info = if sk.is_always_on() {
+                "always-on".to_string()
+            } else {
+                sk.triggers.join(", ")
+            };
+            s.push_str(&format!(
+                "{} **{}**{}{}  [{}]  ~{}t  {}\n",
+                src_icon, sk.name, scope_mark, pin_mark, src, sk.tokens(), trigger_info,
+            ));
+            if !sk.description.is_empty() {
+                s.push_str(&format!("  {}\n", sk.description));
+            }
+        }
+        s.push('\n');
+    }
+    // Scope hint
+    if !domain_scope.is_empty() {
+        let names: Vec<&str> = domain_scope.iter().map(String::as_str).collect();
+        s.push_str(&format!("Scope: {}  ·  /skill scope reset to clear\n", names.join(", ")));
+    } else {
+        s.push_str("All domain skills active  ·  /skill scope add <name> to restrict\n");
+    }
+    // Pinned hint
+    if !pinned_skills.is_empty() {
+        let names: Vec<&str> = pinned_skills.iter().map(String::as_str).collect();
+        s.push_str(&format!("Pinned: {}  ·  /skill unuse <name> to remove\n", names.join(", ")));
+    }
+    s.push_str("\n◆ built-in  ● global (~/.zap/skills/)  ▶ project (.zap/skills/)  ◉ external\n");
+    s.push_str("/skill use <name> · /skill show <name> · /skill create <name>");
+    s
+}
+
+/// Build plain-text for a single skill's detail view.
+pub fn skill_show_text(skill: &crate::skill_manager::Skill) -> String {
+    use crate::skill_manager::source_label;
+    let mut s = String::new();
+    let trigger_display = if skill.is_always_on() {
+        "always-on".to_string()
+    } else {
+        format!("triggers: {}", skill.triggers.join(", "))
+    };
+    s.push_str(&format!("## {}  [{}]  ~{}t\n", skill.name, source_label(&skill.source), skill.tokens()));
+    if !skill.description.is_empty() {
+        s.push_str(&format!("{}\n", skill.description));
+    }
+    s.push_str(&format!("{}\n", trigger_display));
+    if let Some(ref lic) = skill.license {
+        s.push_str(&format!("license: {}\n", lic));
+    }
+    s.push_str("─────────────────────────────────────────\n");
+    s.push_str(&skill.content);
+    s
 }
 
 // ── Workflow ──────────────────────────────────────────────────────────────────

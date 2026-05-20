@@ -89,10 +89,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Skill prompt builder | `src/skill_manager.rs:build_skill_prompt` | for triggered skills per turn |
 | Always-on prompt builder | `src/skill_manager.rs:build_always_on_prompt` | baked into base system at session start |
 | `source_label()` | `src/skill_manager.rs:source_label` | built-in / global / project display |
-| `/skill list` | `src/session.rs:cmd_skill` | grouped: always-on / triggered; source glyph |
-| `/skill show` | `src/session.rs:cmd_skill` | description, license, content preview |
+| `/skill list` | `src/session.rs:cmd_skill`, `src/tui/commands.rs` | grouped: Core/Practice/Domain; source glyph; inline in TUI (no CLI break-out) |
+| `/skill use <name>` | `src/session/commands.rs`, `src/tui/commands.rs` | pin a skill — injected every turn regardless of triggers; 📌 shown in list; inline in TUI |
+| `/skill unuse <name>` | `src/session/commands.rs`, `src/tui/commands.rs` | unpin a skill; inline in TUI |
+| `/skill show <name>` | `src/session.rs:cmd_skill`, `src/tui/commands.rs` | description, license, content preview; inline in TUI |
+| `/skill scope` | `src/session/commands.rs`, `src/tui/commands.rs` | show/change domain scope; inline in TUI |
 | `/skill create` | `src/session.rs:cmd_skill` | scaffolds frontmatter template |
 | `/skill capture` | `src/session.rs:cmd_skill` | LLM extracts session rules → skill file |
+| Pinned skills | `src/session/mod.rs:pinned_skills` | `HashSet` of skills pinned via `/skill use`; merged into per-turn matched skills before prompt build |
+| Project skills | `src/skill_manager.rs:skill_dirs` | `.zap/skills/` in CWD scanned at session start and on `/skill list`; highest priority, overrides same-name global/built-in |
 | Frontmatter: name, description, license, trigger, tokens | `src/skill_manager.rs:parse_frontmatter` | SKILL.md standard + zap extensions |
 
 ### Built-in skills (src/default_skills/)
