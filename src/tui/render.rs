@@ -701,19 +701,19 @@ pub fn diff_block_lines(path: &str, content: &str) -> Vec<Line<'static>> {
     ]));
 
     for raw in content.lines() {
-        let (style, marker) = if raw.starts_with("+++") || raw.starts_with("---") {
-            (Style::default().fg(Color::Rgb(100, 100, 100)), "  │ ")
+        let style = if raw.starts_with("+++") || raw.starts_with("---") {
+            Style::default().fg(Color::Rgb(120, 115, 145))
         } else if raw.starts_with('+') {
-            (Style::default().fg(Color::Rgb(100, 210, 120)), "  │ ")
+            Style::default().fg(Color::Rgb(100, 210, 120))
         } else if raw.starts_with('-') {
-            (Style::default().fg(Color::Rgb(220,  80,  80)), "  │ ")
+            Style::default().fg(Color::Rgb(220,  80,  80))
         } else if raw.starts_with("@@") {
-            (Style::default().fg(Color::Rgb(100, 180, 255)), "  │ ")
+            Style::default().fg(Color::Rgb(100, 180, 255))
         } else {
-            (Style::default().fg(Color::Rgb(110, 105, 135)), "  │ ")
+            Style::default().fg(Color::Rgb(175, 170, 200))
         };
         lines.push(Line::from(vec![
-            Span::styled(marker.to_string(), Style::default().fg(border)),
+            Span::styled("    ", Style::default().fg(border)),
             Span::styled(raw.to_string(), style),
         ]));
     }
@@ -788,21 +788,23 @@ pub fn text_to_lines(text: &str, width: u16) -> Vec<Line<'static>> {
 pub fn code_block_lines(lang: &str, code_lines: &[String]) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let lang_label = if lang.is_empty() { String::new() } else { format!(" {} ", lang) };
+    let border_c = Color::Rgb(80, 75, 100);
+    let linenum_c = Color::Rgb(110, 105, 135);
     lines.push(Line::from(vec![
-        Span::styled(format!("  ┌─{}", lang_label), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("  +--{}", lang_label), Style::default().fg(border_c)),
     ]));
-    
+
     // Use syntax highlighting if language is specified
     if !lang.is_empty() && !code_lines.is_empty() {
         let code = code_lines.join("\n");
         let highlighted = super::syntax::highlight_code(lang, &code);
-        
+
         let num_width = code_lines.len().to_string().len().max(2);
         for (i, hl_line) in highlighted.iter().enumerate() {
             let line_num = format!("{:>w$}", i + 1, w = num_width);
             let mut spans = vec![
-                Span::styled("  │  ".to_string(), Style::default().fg(Color::DarkGray)),
-                Span::styled(line_num, Style::default().fg(Color::DarkGray)),
+                Span::styled("  |  ".to_string(), Style::default().fg(border_c)),
+                Span::styled(line_num, Style::default().fg(linenum_c)),
                 Span::styled("  ".to_string(), Style::default()),
             ];
             spans.extend(hl_line.spans.clone());
@@ -814,16 +816,16 @@ pub fn code_block_lines(lang: &str, code_lines: &[String]) -> Vec<Line<'static>>
         for (i, code_line) in code_lines.iter().enumerate() {
             let line_num = format!("{:>w$}", i + 1, w = num_width);
             lines.push(Line::from(vec![
-                Span::styled("  │  ".to_string(), Style::default().fg(Color::DarkGray)),
-                Span::styled(line_num, Style::default().fg(Color::DarkGray)),
+                Span::styled("  |  ".to_string(), Style::default().fg(border_c)),
+                Span::styled(line_num, Style::default().fg(linenum_c)),
                 Span::styled("  ".to_string(), Style::default()),
-                Span::styled(code_line.clone(), Style::default().fg(Color::White)),
+                Span::styled(code_line.clone(), Style::default().fg(Color::Rgb(215, 210, 235))),
             ]));
         }
     }
-    
+
     lines.push(Line::from(vec![
-        Span::styled("  └".to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled("  +--".to_string(), Style::default().fg(border_c)),
     ]));
     lines
 }
@@ -851,14 +853,14 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
         .map(|d| format!("  {}ms", d.elapsed_ms))
         .unwrap_or_default();
     let elapsed_color = tc.result.as_ref().map(|d|
-        if d.success { Color::Rgb(80, 110, 80) } else { Color::Rgb(150, 60, 60) }
-    ).unwrap_or(Color::DarkGray);
+        if d.success { Color::Rgb(100, 175, 100) } else { Color::Rgb(210, 80, 80) }
+    ).unwrap_or(Color::Rgb(100, 95, 125));
 
     lines.push(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(icon, Style::default().fg(icon_color).bold()),
-        Span::styled(format!(" {}", tc.name), Style::default().fg(Color::Rgb(140, 135, 165)).bold()),
-        Span::styled(format!("  {}", label_short), Style::default().fg(Color::Rgb(110, 105, 135))),
+        Span::styled(format!(" {}", tc.name), Style::default().fg(Color::Rgb(175, 170, 205)).bold()),
+        Span::styled(format!("  {}", label_short), Style::default().fg(Color::Rgb(145, 140, 170))),
         Span::styled(elapsed, Style::default().fg(elapsed_color)),
     ]));
 
@@ -869,19 +871,19 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
         let shown = if expanded { all_lines.len() } else { all_lines.len().min(truncate_at) };
 
         for raw in &all_lines[..shown] {
-            let (line_style, marker) = if raw.starts_with("+++") || raw.starts_with("---") {
-                (Style::default().fg(Color::Rgb(100, 100, 100)), "  │ ")
+            let line_style = if raw.starts_with("+++") || raw.starts_with("---") {
+                Style::default().fg(Color::Rgb(120, 115, 145))
             } else if raw.starts_with('+') {
-                (Style::default().fg(Color::Rgb(100, 210, 120)), "  │ ")
+                Style::default().fg(Color::Rgb(100, 210, 120))
             } else if raw.starts_with('-') {
-                (Style::default().fg(Color::Rgb(220,  80,  80)), "  │ ")
+                Style::default().fg(Color::Rgb(220,  80,  80))
             } else if raw.starts_with("@@") {
-                (Style::default().fg(Color::Rgb(100, 180, 255)), "  │ ")
+                Style::default().fg(Color::Rgb(100, 180, 255))
             } else {
-                (Style::default().fg(Color::Rgb(130, 125, 155)), "  │ ")
+                Style::default().fg(Color::Rgb(205, 200, 225))
             };
             lines.push(Line::from(vec![
-                Span::styled(marker.to_string(), Style::default().fg(border)),
+                Span::styled("    ", Style::default().fg(border)),
                 Span::styled(raw.to_string(), line_style),
             ]));
         }
@@ -890,18 +892,18 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
         if !expanded && all_lines.len() > truncate_at {
             let remaining = all_lines.len() - truncate_at;
             lines.push(Line::from(vec![
-                Span::styled("  │ ".to_string(), Style::default().fg(border)),
+                Span::styled("    ", Style::default().fg(border)),
                 Span::styled(
                     format!("  +{} lines  Ctrl+O to expand", remaining),
-                    Style::default().fg(Color::Rgb(80, 75, 100)).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(Color::Rgb(100, 95, 125)).add_modifier(Modifier::ITALIC),
                 ),
             ]));
         } else if expanded && all_lines.len() > truncate_at {
             lines.push(Line::from(vec![
-                Span::styled("  │ ".to_string(), Style::default().fg(border)),
+                Span::styled("    ", Style::default().fg(border)),
                 Span::styled(
                     "  Ctrl+O to collapse".to_string(),
-                    Style::default().fg(Color::Rgb(80, 75, 100)).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(Color::Rgb(100, 95, 125)).add_modifier(Modifier::ITALIC),
                 ),
             ]));
         }
@@ -914,19 +916,20 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
 /// Thinking shown while streaming: up to 4 dimmed lines of reasoning text.
 pub fn thinking_streaming_lines(text: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let thinking_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+    let dim = Color::Rgb(100, 95, 125);
+    let thinking_style = Style::default().fg(dim).add_modifier(Modifier::ITALIC);
     lines.push(Line::from(vec![
-        Span::styled("  🧠 ".to_string(), Style::default().fg(Color::DarkGray)),
-        Span::styled("Thinking…", thinking_style),
+        Span::styled("  \u{1f9e0} ".to_string(), Style::default().fg(dim)),
+        Span::styled("Thinking\u{2026}", thinking_style),
     ]));
     for line in text.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev() {
         let display: String = if line.chars().count() > 80 {
-            format!("{}…", line.chars().take(79).collect::<String>())
+            format!("{}\u{2026}", line.chars().take(79).collect::<String>())
         } else {
             line.to_string()
         };
         lines.push(Line::from(vec![
-            Span::styled("  │  ".to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled("     ".to_string(), Style::default().fg(dim)),
             Span::styled(display, thinking_style),
         ]));
     }
@@ -937,8 +940,8 @@ pub fn thinking_streaming_lines(text: &str) -> Vec<Line<'static>> {
 pub fn thinking_collapsed_line(char_count: usize) -> Vec<Line<'static>> {
     vec![Line::from(vec![
         Span::styled(
-            format!("  🧠 Thinking ({} chars)  ", char_count),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            format!("  \u{1f9e0} Thinking ({} chars)  ", char_count),
+            Style::default().fg(Color::Rgb(100, 95, 125)).add_modifier(Modifier::ITALIC),
         ),
     ])]
 }
