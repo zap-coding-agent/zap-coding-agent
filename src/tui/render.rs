@@ -424,7 +424,7 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
     let (state_icon, state_color, state_text): (&str, Color, String) = match &app.state {
         AppState::Idle => ("●", Color::Green, "idle".to_string()),
         AppState::Thinking => (
@@ -587,7 +587,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
     let (hint, hint_color) = match &app.state {
         AppState::Idle => (String::new(), Color::DarkGray),
         AppState::Thinking => (
@@ -644,7 +644,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         match &app.state {
             AppState::Thinking | AppState::ToolRunning { .. } => {
                 let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-                let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
+                let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.word_tick / 15)) % THINKING_WORDS.len();
                 let (label, color) = match &app.state {
                     AppState::ToolRunning { name, label } => {
                         let verb = tool_verb(name);

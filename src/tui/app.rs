@@ -135,6 +135,8 @@ pub struct App {
     // Session state
     pub state: AppState,
     pub spinner_frame: usize,
+    /// Monotonically increasing tick counter — never clamped, used for word rotation.
+    pub word_tick: usize,
 
     // Header info
     pub model: String,
@@ -192,6 +194,7 @@ impl App {
             auto_scroll: true,
             state: AppState::Idle,
             spinner_frame: 0,
+            word_tick: 0,
             model: model.to_string(),
             context_pct: 0,
             turn: 0,
@@ -217,6 +220,7 @@ impl App {
 
     pub fn tick_spinner(&mut self) {
         self.spinner_frame = (self.spinner_frame + 1) % 10;
+        self.word_tick = self.word_tick.wrapping_add(1);
     }
 
     /// Apply an incoming TUI event to App state.
