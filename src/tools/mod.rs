@@ -42,6 +42,8 @@ pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
     /// MCP servers that are configured but not yet spawned.
     pending_mcp: HashMap<String, crate::mcp::McpServerConfig>,
+    /// Names of tools registered from MCP servers — used for permission gating.
+    mcp_tool_names: std::collections::HashSet<String>,
 }
 
 impl ToolRegistry {
@@ -51,7 +53,7 @@ impl ToolRegistry {
         use shell::{ListDirectoryTool, ShellTool};
         use web::{WebFetchTool, WebSearchTool};
 
-        let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new() };
+        let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new(), mcp_tool_names: std::collections::HashSet::new() };
         r.register(Arc::new(ReadFileTool));
         r.register(Arc::new(EditFileTool));
         r.register(Arc::new(WriteFileTool));
@@ -77,14 +79,30 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
-    // ── Lazy MCP loading ──────────────────────────────────────────────────────
+    /// Returns true if `name` was registered from an MCP server.
+    pub fn is_mcp_tool(&self, name: &str) -> bool {
+        self.mcp_tool_names.contains(name)
+    }
 
-    /// Store MCP server configs without spawning any subprocesses.
-    /// Call this at startup instead of `register_mcp_servers`.
+    // ── MCP loading ───────────────────────────────────────────────────────────
+
+    /// Store MCP server configs without spawning any subprocesses yet.
     pub fn load_mcp_lazy(&mut self, cfg: crate::mcp::McpConfig) {
         for (name, server_cfg) in cfg.servers {
             self.pending_mcp.insert(name, server_cfg);
         }
+    }
+
+    /// Eagerly connect all pending MCP servers at startup.
+    /// Returns one entry per server: `(server_name, Ok(tool_names) | Err(reason))`.
+    pub async fn connect_all_mcp(&mut self) -> Vec<(String, Result<Vec<String>>)> {
+        let names: Vec<String> = self.pending_mcp.keys().cloned().collect();
+        let mut results = Vec::new();
+        for name in names {
+            let outcome = self.connect_mcp_inner(&name).await;
+            results.push((name, outcome));
+        }
+        results
     }
 
     /// Names and optional descriptions of servers not yet connected.
@@ -99,9 +117,8 @@ impl ToolRegistry {
         !self.pending_mcp.is_empty()
     }
 
-    /// Spawn a pending MCP server, run the handshake, register its tools, and
-    /// return a summary string for the LLM ("Connected. Tools: read, write, …").
-    pub async fn connect_mcp(&mut self, server_name: &str) -> Result<String> {
+    /// Connect one pending MCP server and register its tools. Returns list of tool names.
+    async fn connect_mcp_inner(&mut self, server_name: &str) -> Result<Vec<String>> {
         let cfg = self.pending_mcp.remove(server_name).ok_or_else(|| {
             let available: Vec<&str> = self.pending_mcp.keys().map(|s| s.as_str()).collect();
             if available.is_empty() {
@@ -115,11 +132,12 @@ impl ToolRegistry {
             }
         })?;
 
-        let (server, tools) = crate::mcp::McpServer::connect(&cfg).await?;
+        let (server, tools) = crate::mcp::McpServer::connect(server_name, &cfg).await?;
         let srv = Arc::new(tokio::sync::Mutex::new(server));
         let mut names: Vec<String> = Vec::new();
         for tool_def in tools {
             names.push(tool_def.name.clone());
+            self.mcp_tool_names.insert(tool_def.name.clone());
             tracing::info!(server = %server_name, tool = %tool_def.name, "registered MCP tool");
             self.register(Arc::new(crate::mcp::McpTool {
                 name: tool_def.name,
@@ -128,6 +146,13 @@ impl ToolRegistry {
                 server: srv.clone(),
             }));
         }
+        Ok(names)
+    }
+
+    /// Spawn a pending MCP server, run the handshake, register its tools, and
+    /// return a summary string for the LLM tool result.
+    pub async fn connect_mcp(&mut self, server_name: &str) -> Result<String> {
+        let names = self.connect_mcp_inner(server_name).await?;
         Ok(format!("Connected to '{}'. Tools: {}", server_name, names.join(", ")))
     }
 

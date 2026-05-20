@@ -204,11 +204,10 @@ impl Session {
         let mut system = context_manager::build_system_prompt(config)?;
         let mut tools = ToolRegistry::new();
 
-        // Lazy MCP: parse .mcp.json but don't spawn any processes yet.
-        // The LLM will call mcp_connect("name") when it needs a server.
+        // MCP: load config, connect all servers eagerly so tools are immediately available.
         let mcp_cfg = crate::mcp::load_config();
-        let mcp_server_count = mcp_cfg.servers.len();
         let mcp_had_config = mcp_cfg.had_config;
+        let mcp_server_count = mcp_cfg.servers.len();
         if mcp_server_count > 0 {
             tools.load_mcp_lazy(mcp_cfg);
         }
@@ -216,24 +215,13 @@ impl Session {
         if config.agent_depth > 0 {
             tools.register(std::sync::Arc::new(SpawnAgentTool::new(config.clone())));
         }
-        // Inject MCP server manifest into system prompt so the LLM knows what
-        // servers are available without loading any of their tools yet.
-        if tools.has_pending_mcp() {
-            let server_lines: String = tools
-                .pending_mcp_servers()
-                .iter()
-                .map(|(name, desc)| format!(
-                    "- {name}: {}",
-                    desc.unwrap_or("MCP server")
-                ))
-                .collect::<Vec<_>>()
-                .join("\n");
-            system.push_str(
-                "\n\n## MCP Servers (lazy-loaded)\n\
-                 Use `mcp_connect` with the server name to load its tools on demand.\n"
-            );
-            system.push_str(&server_lines);
-        }
+
+        // Eagerly connect all MCP servers — tools land in tool_defs before session starts.
+        let mcp_connect_results = if mcp_server_count > 0 {
+            tools.connect_all_mcp().await
+        } else {
+            vec![]
+        };
 
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
@@ -301,18 +289,36 @@ impl Session {
             );
         }
 
-        if mcp_server_count > 0 && !config.is_subagent {
-            let names: Vec<String> = tools
-                .pending_mcp_servers()
-                .iter()
-                .map(|(n, _)| (*n).to_string())
+        if !mcp_connect_results.is_empty() && !config.is_subagent {
+            let total_tools: usize = mcp_connect_results.iter()
+                .filter_map(|(_, r)| r.as_ref().ok())
+                .map(|names| names.len())
+                .sum();
+            let ok_servers: Vec<&str> = mcp_connect_results.iter()
+                .filter(|(_, r)| r.is_ok())
+                .map(|(n, _)| n.as_str())
                 .collect();
-            println!(
-                "  {} {} MCP server(s) ready on demand: {}",
-                "◎".truecolor(255, 140, 60),
-                mcp_server_count.to_string().cyan(),
-                names.join(", ").dimmed(),
-            );
+            let failed_servers: Vec<(&str, &anyhow::Error)> = mcp_connect_results.iter()
+                .filter_map(|(n, r)| r.as_ref().err().map(|e| (n.as_str(), e)))
+                .collect();
+
+            if !ok_servers.is_empty() {
+                println!(
+                    "  {} {} MCP server(s) connected: {}  ({} tools)",
+                    "⬡".truecolor(255, 140, 60),
+                    ok_servers.len().to_string().cyan(),
+                    ok_servers.join(", ").dimmed(),
+                    total_tools.to_string().cyan(),
+                );
+            }
+            for (name, err) in &failed_servers {
+                println!(
+                    "  {} MCP '{}' failed to connect: {}",
+                    "✗".truecolor(220, 80, 80),
+                    name.truecolor(255, 140, 60),
+                    err.to_string().truecolor(220, 80, 80),
+                );
+            }
         } else if mcp_had_config && !config.is_subagent {
             println!(
                 "  {} {}",
@@ -691,7 +697,17 @@ impl Session {
                     .map(|t| t.permission_context(input))
                     .unwrap_or_default();
 
-                match self.permissions.quick_check(name) {
+                let mut perm_decision = self.permissions.quick_check(name);
+                // MCP tools aren't in WRITE_TOOLS so quick_check gives Allow in Ask mode.
+                // Upgrade to NeedsPrompt unless the user already pressed "always" this session.
+                if matches!(perm_decision, crate::permission_manager::QuickDecision::Allow)
+                    && self.tools.is_mcp_tool(name)
+                    && matches!(self.permissions.mode, crate::config::PermissionMode::Ask)
+                    && !self.permissions.is_session_granted(name)
+                {
+                    perm_decision = crate::permission_manager::QuickDecision::NeedsPrompt;
+                }
+                match perm_decision {
                     crate::permission_manager::QuickDecision::Allow => {
                         // Even in Auto mode, destructive shell commands require
                         // an explicit confirmation before executing.
@@ -771,43 +787,6 @@ impl Session {
                         });
                     }
                 }
-            }
-
-            // ── Lazy MCP connect: intercept before parallel execution ────────
-            // mcp_connect is a phantom tool (in tool_defs but not in self.tools).
-            // Handle it directly so it can mutate self.tools and rebuild self.tool_defs.
-            let (mcp_calls, approved): (Vec<_>, Vec<_>) = approved
-                .into_iter()
-                .partition(|c| c.name == "mcp_connect");
-
-            for call in mcp_calls {
-                let server = call.input["server"].as_str().unwrap_or("").to_string();
-                println!(
-                    "  {} {} {}…",
-                    "╭─".truecolor(70, 65, 90),
-                    "⬡".truecolor(255, 140, 60),
-                    format!("mcp_connect  {}", server).truecolor(100, 210, 255).bold(),
-                );
-                let t0 = std::time::Instant::now();
-                let (content, ok) = match self.tools.connect_mcp(&server).await {
-                    Ok(msg) => {
-                        // Rebuild tool_defs so the next LLM call sees the new tools.
-                        self.tool_defs = self.tools.tool_definitions();
-                        (msg, true)
-                    }
-                    Err(e) => (format!("Failed to connect MCP server '{}': {}", server, e), false),
-                };
-                let ms = t0.elapsed().as_millis();
-                println!(
-                    "  {} {}  {}",
-                    "╰─".truecolor(70, 65, 90),
-                    if ok { "✓".truecolor(80, 210, 120) } else { "✗".truecolor(220, 80, 80) },
-                    format!("{}ms", ms).truecolor(90, 85, 110),
-                );
-                tool_results.push(ContentBlock::ToolResult {
-                    tool_use_id: call.id,
-                    content,
-                });
             }
 
             // Snapshot (name, input) for PostToolUse hooks before consuming `approved`.

@@ -34,6 +34,11 @@ impl PermissionManager {
     }
 
     /// Non-blocking check — returns whether to allow, deny, or ask the user.
+    /// Returns true if the user already granted "always" for this tool this session.
+    pub fn is_session_granted(&self, tool_name: &str) -> bool {
+        self.session_grants.get(tool_name).copied() == Some(true)
+    }
+
     pub fn quick_check(&self, tool_name: &str) -> QuickDecision {
         match self.mode {
             PermissionMode::Auto => QuickDecision::Allow,
@@ -101,8 +106,13 @@ impl PermissionManager {
 
         if matches!(dec.as_str(), "a" | "always") {
             for (_, name, _) in pending {
-                for related in tool_grant_class(name) {
-                    self.session_grants.insert(related.to_string(), true);
+                let class = tool_grant_class(name);
+                if class.is_empty() {
+                    self.session_grants.insert(name.to_string(), true);
+                } else {
+                    for related in class {
+                        self.session_grants.insert(related.to_string(), true);
+                    }
                 }
             }
             println!(
@@ -135,22 +145,31 @@ impl PermissionManager {
             let (_, name, ctx) = &pending[0];
             lines.push(format!("│  Tool : {:<51} │", &name[..name.len().min(51)]));
             if !ctx.is_empty() {
-                let s = if ctx.chars().count() > 51 {
-                    format!("{}…", ctx.chars().take(50).collect::<String>())
+                // Strip newlines — shell ctx includes "\n         $ cmd" which breaks the box.
+                let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
+                let s = if ctx_flat.chars().count() > 51 {
+                    format!("{}…", ctx_flat.chars().take(50).collect::<String>())
                 } else {
-                    ctx.clone()
+                    ctx_flat
                 };
                 lines.push(format!("│  What : {:<51} │", s));
             }
         } else {
             lines.push(format!("│  Agent wants to run {} operation(s):{:<25} │", pending.len(), ""));
             for (_, name, ctx) in pending.iter().take(5) {
-                let s = if ctx.chars().count() > 38 {
-                    format!("{}…", ctx.chars().take(37).collect::<String>())
+                // Truncate name to fit the 12-char column (MCP names can be long).
+                let name_col = if name.chars().count() > 12 {
+                    format!("{}…", name.chars().take(11).collect::<String>())
                 } else {
-                    ctx.clone()
+                    name.clone()
                 };
-                lines.push(format!("│    · {:<12}  {:<38} │", name, s));
+                let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
+                let s = if ctx_flat.chars().count() > 38 {
+                    format!("{}…", ctx_flat.chars().take(37).collect::<String>())
+                } else {
+                    ctx_flat
+                };
+                lines.push(format!("│    · {:<12}  {:<38} │", name_col, s));
             }
             if pending.len() > 5 {
                 lines.push(format!("│    … and {} more{:<44} │", pending.len() - 5, ""));
@@ -211,8 +230,13 @@ impl PermissionManager {
 
         if decision == "a" {
             for (_, name, _) in pending {
-                for related in tool_grant_class(name) {
-                    self.session_grants.insert(related.to_string(), true);
+                let class = tool_grant_class(name);
+                if class.is_empty() {
+                    self.session_grants.insert(name.to_string(), true);
+                } else {
+                    for related in class {
+                        self.session_grants.insert(related.to_string(), true);
+                    }
                 }
             }
         }

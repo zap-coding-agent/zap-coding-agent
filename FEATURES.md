@@ -258,7 +258,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
-| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries (no `command`) are skipped with a warning; `autoApprove`/`disabledTools` fields tolerated — fully compatible with Claude Code / Roo Code shared configs; startup warning when config found but no runnable servers |
+| MCP (eager-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; all servers connect at session startup — tools immediately available without an explicit `mcp_connect` call; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries (no `command`) are skipped with a warning; `autoApprove`/`disabledTools` fields tolerated — fully compatible with Claude Code / Roo Code shared configs |
+| MCP permission gate | `src/session/mod.rs`, `src/tools/mod.rs:is_mcp_tool` | in Ask mode, MCP tool calls are always shown for user approval (they aren't in WRITE_TOOLS so quick_check previously auto-approved them); `ToolRegistry::is_mcp_tool()` backed by a `HashSet` populated at connect time |
+| MCP stderr visibility | `src/mcp.rs:McpServer::connect` | server stderr piped to a background task; each line forwarded via `zap_warn!` — auth errors, startup failures, and 401s now appear in the TUI chat and `~/.zap/zap.log` instead of being silently discarded |
+| MCP permission context | `src/mcp.rs:McpTool::permission_context` | permission prompt shows `MCP · tool_name  (key=val  key=val)` — flat key=value pairs (strings truncated at 40 chars, nested objects skipped, max 4 args) |
 | `/mcp` command | `src/session/commands.rs:cmd_mcp` | `list` — shows all servers (global/project, connected/pending); `edit` — opens `~/.zap/mcp.json` in $EDITOR; `edit project` — opens `.mcp.json`; `path` — prints file paths |
 | API error URL in message | `src/llm_client.rs` | 404/40x errors include the exact constructed URL for instant diagnosis |
 | base_url used as-is | `src/llm_client.rs` | when set, `base_url` is posted to directly — no path appended; gateway handles routing |
@@ -267,10 +270,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | MCP command validation | `src/mcp.rs:validate_mcp_command` | blocks non-absolute paths (allowlist: node/python/npx/deno/…), shell metacharacters, `..` traversal |
 | Shell dangerous-command guard | `src/tools/shell.rs:guard_shell` | blocks `rm -rf /~`, fork bomb, `mkfs`, `dd`, `curl\|sh`, `wget\|sh` — applies even in Auto mode |
 | `--budget N` token cap | `src/cli.rs`, `src/config.rs`, `src/session/mod.rs` | overrides model context limit for fill-% tracking; warns at 80%, hard-stops at 100% |
-| Lazy MCP loader | `src/tools/mod.rs:load_mcp_lazy` | stores configs without spawning; `mcp_connect` synthetic tool in LLM tool list until connected |
-| On-demand connect | `src/tools/mod.rs:connect_mcp` | spawn + `initialize` + `tools/list`; rebuilds `tool_defs` so next LLM turn sees real tools |
-| MCP manifest in prompt | `src/session/mod.rs:Session::new` | server names+descriptions injected into system prompt; zero tool-schema tokens until connected |
-| Server description field | `src/mcp.rs:McpServerConfig` | optional `"description"` in `.mcp.json` shown to LLM before connect |
+| MCP startup banner | `src/session/mod.rs:Session::new` | shows `⬡ N MCP server(s) connected: name (M tools)` for successes and `✗ MCP 'name' failed: reason` for failures |
+| Server description field | `src/mcp.rs:McpServerConfig` | optional `"description"` in `.mcp.json` stored and shown in `/mcp list` |
 | `/init` | `src/session.rs:cmd_init` | creates CLAUDE.md + agent fills it in |
 
 ---

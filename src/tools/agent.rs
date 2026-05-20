@@ -68,7 +68,14 @@ impl Tool for SpawnAgentTool {
 
     fn permission_context(&self, input: &serde_json::Value) -> String {
         let goal = input["goal"].as_str().unwrap_or("?");
-        let short = if goal.len() > 72 { &goal[..72] } else { goal };
+        // Truncate by chars, not bytes, to avoid a panic on multibyte UTF-8 boundaries.
+        let short_owned: String;
+        let short = if goal.chars().count() > 72 {
+            short_owned = goal.chars().take(72).collect();
+            short_owned.as_str()
+        } else {
+            goal
+        };
         if let Some(files) = input["files_in_scope"].as_array() {
             let names: Vec<&str> = files.iter()
                 .filter_map(|v| v.as_str())

@@ -83,7 +83,11 @@ fn validate_mcp_command(cfg: &McpServerConfig) -> Result<()> {
     ];
 
     let is_absolute = std::path::Path::new(cmd).is_absolute();
-    let is_known    = ALLOWED.contains(&cmd.as_str());
+    // Normalize for the allowlist: lowercase + strip .exe so that Windows-style
+    // entries like "node.exe" or "NPX.EXE" match the same as "node"/"npx".
+    let cmd_norm = cmd.to_ascii_lowercase();
+    let cmd_norm = cmd_norm.strip_suffix(".exe").unwrap_or(&cmd_norm);
+    let is_known = ALLOWED.contains(&cmd_norm);
 
     if !is_absolute && !is_known {
         anyhow::bail!(
@@ -222,14 +226,15 @@ pub struct McpServer {
 impl McpServer {
     /// Spawn a server subprocess, run the MCP initialisation handshake,
     /// and return the server handle together with its tool list.
-    pub async fn connect(cfg: &McpServerConfig) -> Result<(Self, Vec<McpToolDef>)> {
+    /// `server_name` is used only for logging stderr output.
+    pub async fn connect(server_name: &str, cfg: &McpServerConfig) -> Result<(Self, Vec<McpToolDef>)> {
         validate_mcp_command(cfg)?;
         let mut child = tokio::process::Command::new(&cfg.command)
             .args(&cfg.args)
             .envs(&cfg.env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())   // capture stderr so auth errors are visible
             .spawn()
             .with_context(|| format!("mcp: failed to spawn '{}'", cfg.command))?;
 
@@ -237,8 +242,21 @@ impl McpServer {
             .context("mcp: could not open server stdin")?;
         let stdout = child.stdout.take()
             .context("mcp: could not open server stdout")?;
-        let lines = BufReader::new(stdout).lines();
 
+        // Drain stderr in a background task — surfaces auth errors, startup failures, etc.
+        if let Some(stderr) = child.stderr.take() {
+            let label = server_name.to_string();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !line.trim().is_empty() {
+                        crate::zap_warn!("mcp [{}] {}", label, line);
+                    }
+                }
+            });
+        }
+
+        let lines = BufReader::new(stdout).lines();
         let mut server = Self { stdin, lines, id: 0, _child: child };
 
         // Initialise.
@@ -342,7 +360,27 @@ impl crate::tools::Tool for McpTool {
     fn description(&self) -> &str { &self.description }
     fn input_schema(&self) -> serde_json::Value { self.schema.clone() }
     fn permission_context(&self, input: &serde_json::Value) -> String {
-        format!("MCP {} · {}", self.name, serde_json::to_string(input).unwrap_or_default())
+        // Show flat key=value pairs (skip nested objects/arrays — too noisy).
+        let args: Vec<String> = input
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(k, v)| match v {
+                serde_json::Value::String(s) => {
+                    let display = if s.len() > 40 { format!("{}…", &s[..40]) } else { s.clone() };
+                    Some(format!("{}={}", k, display))
+                }
+                serde_json::Value::Number(n) => Some(format!("{}={}", k, n)),
+                serde_json::Value::Bool(b)   => Some(format!("{}={}", k, b)),
+                _ => None,
+            })
+            .take(4)
+            .collect();
+        if args.is_empty() {
+            format!("MCP · {}", self.name)
+        } else {
+            format!("MCP · {}  ({})", self.name, args.join("  "))
+        }
     }
     async fn execute(&self, input: serde_json::Value) -> anyhow::Result<String> {
         let mut srv = self.server.lock().await;
