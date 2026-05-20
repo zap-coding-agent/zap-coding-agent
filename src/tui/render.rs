@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 use super::app::{App, AppState, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
+use std::collections::HashSet;
 use ratatui::style::Modifier;
 use super::commands::filter_commands;
 
@@ -157,6 +158,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_file_browser(frame, app, size);
     }
 
+    // Draw domain/language picker overlay if open (shown once at session start).
+    if app.domain_picker.is_some() {
+        draw_domain_picker(frame, app, size);
+    }
+
     // Draw session picker overlay if open
     if app.session_picker.is_some() {
         draw_session_picker(frame, app, size);
@@ -184,8 +190,8 @@ const ZAP_ROW: [&str; 5] = [
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Rgb(60, 55, 80)));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -205,7 +211,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         // Vertical separator aligned with body sidebar
         for row in 0..inner.height {
             frame.render_widget(
-                Paragraph::new(Span::styled("║", Style::default().fg(Color::Cyan))),
+                Paragraph::new(Span::styled("│", Style::default().fg(Color::Rgb(60, 55, 80)))),
                 Rect { x: cols[1].x, y: inner.y + row, width: 1, height: 1 },
             );
         }
@@ -218,11 +224,18 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_zap_art(frame: &mut Frame, area: Rect) {
+    // Amber gradient: bright gold top → deep orange bottom
+    let colors = [
+        Color::Rgb(255, 215, 40),
+        Color::Rgb(255, 195, 20),
+        Color::Rgb(255, 170,  0),
+        Color::Rgb(240, 145,  0),
+        Color::Rgb(220, 120,  0),
+    ];
     let rows: Vec<Line<'static>> = ZAP_ROW
         .iter()
-        .map(|row| {
-            Line::from(Span::styled(row.to_string(), Style::default().fg(Color::Magenta).bold()))
-        })
+        .zip(colors.iter())
+        .map(|(row, &c)| Line::from(Span::styled(row.to_string(), Style::default().fg(c).bold())))
         .collect();
     frame.render_widget(Paragraph::new(rows), area);
 }
@@ -252,11 +265,22 @@ fn draw_header_info(frame: &mut Frame, app: &App, area: Rect) {
     let git_color = if app.git_dirty { Color::Yellow } else { Color::Green };
 
     let rows: Vec<Line<'static>> = vec![
-        Line::from(Span::styled(" ⚡ zap", Style::default().fg(Color::Yellow).bold())),
-        Line::from(Span::styled(format!(" v{}", ver), Style::default().fg(Color::DarkGray))),
-        Line::from(Span::styled(format!(" {}", model_short), Style::default().fg(Color::White))),
+        Line::from(vec![
+            Span::styled(" ⚡ ", Style::default().fg(Color::Rgb(255, 210, 40)).bold()),
+            Span::styled("zap", Style::default().fg(Color::Rgb(255, 210, 40)).bold()),
+            Span::styled(format!("  v{}", ver), Style::default().fg(Color::Rgb(80, 75, 100))),
+        ]),
+        Line::from(Span::styled(format!(" {}", model_short), Style::default().fg(Color::Rgb(140, 135, 165)))),
         Line::from(Span::styled(git_status, Style::default().fg(git_color))),
-        Line::from(Span::styled(format!(" turn {}", app.turn), Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(format!(" {} turns", app.turn), Style::default().fg(Color::Rgb(80, 75, 100)))),
+        Line::from(vec![
+            Span::styled(format!(" {}%", app.context_pct), Style::default().fg(
+                if app.context_pct > 80 { Color::Red }
+                else if app.context_pct > 60 { Color::Yellow }
+                else { Color::Rgb(80, 75, 100) }
+            )),
+            Span::styled(" ctx", Style::default().fg(Color::Rgb(80, 75, 100))),
+        ]),
     ];
     frame.render_widget(Paragraph::new(rows), area);
 }
@@ -345,29 +369,26 @@ fn draw_picker_overlay(frame: &mut Frame, app: &App, area: Rect) {
             let desc_max = (inner.width as usize).saturating_sub(cmd_w + 2);
             let desc_s: String = desc.chars().take(desc_max).collect();
 
+            let sel_bg = Color::Rgb(60, 55, 80);
             if is_sel {
                 Line::from(vec![
                     Span::styled(
                         format!(" {:<w$}", cmd, w = cmd_w),
-                        Style::default().fg(Color::Black).bg(Color::Yellow).bold(),
+                        Style::default().fg(Color::Rgb(255, 200, 50)).bg(sel_bg).bold(),
                     ),
                     Span::styled(
                         format!("{}", desc_s),
-                        Style::default().fg(Color::Black).bg(Color::Yellow),
+                        Style::default().fg(Color::Rgb(170, 165, 195)).bg(sel_bg),
                     ),
-                    // Fill rest of line with the highlight
-                    Span::styled(
-                        " ".repeat(inner.width as usize),
-                        Style::default().bg(Color::Yellow),
-                    ),
+                    Span::styled(" ".repeat(inner.width as usize), Style::default().bg(sel_bg)),
                 ])
             } else {
                 Line::from(vec![
                     Span::styled(
                         format!(" {:<w$}", cmd, w = cmd_w),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(Color::Rgb(100, 180, 255)),
                     ),
-                    Span::styled(desc_s.to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(desc_s.to_string(), Style::default().fg(Color::Rgb(80, 75, 100))),
                 ])
             }
         })
@@ -397,7 +418,7 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
     let (state_icon, state_color, state_text): (&str, Color, String) = match &app.state {
         AppState::Idle => ("●", Color::Green, "idle".to_string()),
         AppState::Thinking => (
@@ -413,34 +434,41 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
+    let label_c = Color::Rgb(80, 75, 100);
+    let value_c = Color::Rgb(170, 165, 195);
+    let head_c  = Color::Rgb(100, 95, 125);
+
     let kv = |k: &str, v: String, vc: Color| {
         Line::from(vec![
-            Span::styled(format!(" {:<9}", k), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" {:<9}", k), Style::default().fg(label_c)),
             Span::styled(v, Style::default().fg(vc)),
         ])
     };
 
     let mut rows: Vec<Line<'static>> = Vec::new();
-    rows.push(Line::from(Span::styled(" session", Style::default().fg(Color::DarkGray).bold())));
+    rows.push(Line::from(Span::styled(" session", Style::default().fg(head_c).bold())));
     rows.push(Line::from(""));
-    rows.push(kv("model", model_short, Color::White));
-    rows.push(kv("branch", app.branch.clone(), Color::Green));
-    rows.push(kv("turn", app.turn.to_string(), Color::White));
-    rows.push(kv("cost", cost_str, Color::Yellow));
+    rows.push(kv("model", model_short, value_c));
+    rows.push(kv("branch", app.branch.clone(), Color::Rgb(100, 200, 100)));
+    rows.push(kv("turn", app.turn.to_string(), value_c));
+    rows.push(kv("cost", cost_str, Color::Rgb(200, 180, 80)));
     rows.push(Line::from(""));
-    rows.push(Line::from(Span::styled(" context", Style::default().fg(Color::DarkGray).bold())));
+    rows.push(Line::from(Span::styled(" context", Style::default().fg(head_c).bold())));
+    let bar_color = if app.context_pct > 80 { Color::Rgb(220, 80, 80) }
+        else if app.context_pct > 60 { Color::Rgb(220, 180, 50) }
+        else { Color::Rgb(80, 160, 255) };
     rows.push(Line::from(vec![
-        Span::styled(format!(" {}", ctx_bar), Style::default().fg(Color::Yellow)),
-        Span::styled(format!(" {}%", app.context_pct), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!(" {}", ctx_bar), Style::default().fg(bar_color)),
+        Span::styled(format!(" {}%", app.context_pct), Style::default().fg(label_c)),
     ]));
     rows.push(Line::from(""));
-    rows.push(Line::from(Span::styled(" status", Style::default().fg(Color::DarkGray).bold())));
+    rows.push(Line::from(Span::styled(" status", Style::default().fg(head_c).bold())));
     rows.push(Line::from(vec![
         Span::styled(format!(" {} ", state_icon), Style::default().fg(state_color)),
-        Span::styled(state_text, Style::default().fg(Color::White)),
+        Span::styled(state_text, Style::default().fg(value_c)),
     ]));
 
-    let block = Block::default().borders(Borders::LEFT).border_style(Style::default().fg(Color::DarkGray));
+    let block = Block::default().borders(Borders::LEFT).border_style(Style::default().fg(Color::Rgb(45, 42, 60)));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(rows).wrap(Wrap { trim: false }), inner);
@@ -459,22 +487,22 @@ fn draw_dir_panel(frame: &mut Frame, app: &App, area: Rect) {
     
     // Row 0: current dir (first line)
     rows.push(Line::from(vec![
-        Span::styled("  📂 ", Style::default()),
-        Span::styled(path_lines[0].clone(), Style::default().fg(Color::Cyan).bold()),
+        Span::styled("  ⌂ ", Style::default().fg(Color::Rgb(100, 95, 125))),
+        Span::styled(path_lines[0].clone(), Style::default().fg(Color::Rgb(140, 200, 255)).bold()),
     ]));
-    
+
     // Additional path lines if wrapped
     for line in path_lines.iter().skip(1) {
         rows.push(Line::from(vec![
-            Span::styled("     ", Style::default()),
-            Span::styled(line.clone(), Style::default().fg(Color::Cyan).bold()),
+            Span::styled("    ", Style::default()),
+            Span::styled(line.clone(), Style::default().fg(Color::Rgb(140, 200, 255)).bold()),
         ]));
     }
     
     // Hints row
     rows.push(Line::from(vec![
         Span::styled("     ", Style::default()),
-        Span::styled("Ctrl+O browse  /cd <path>", Style::default().fg(Color::Gray)),
+        Span::styled("Ctrl+P pick dir  /cd <path>", Style::default().fg(Color::Rgb(80, 75, 100))),
     ]));
 
     frame.render_widget(Paragraph::new(rows), area);
@@ -532,17 +560,17 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let cursor_pos = app.cursor;
 
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(prefix.to_string(), Style::default().fg(Color::Yellow).bold()));
+    spans.push(Span::styled(prefix.to_string(), Style::default().fg(Color::Rgb(255, 200, 50)).bold()));
 
     if cursor_pos >= char_count {
         spans.push(Span::raw(app.input.clone()));
-        spans.push(Span::styled(" ".to_string(), Style::default().bg(Color::Yellow).fg(Color::Black)));
+        spans.push(Span::styled(" ".to_string(), Style::default().bg(Color::Rgb(255, 200, 50)).fg(Color::Black)));
     } else {
         let before: String = app.input.chars().take(cursor_pos).collect();
         let at: String     = app.input.chars().nth(cursor_pos).map(|c| c.to_string()).unwrap_or_default();
         let after: String  = app.input.chars().skip(cursor_pos + 1).collect();
         spans.push(Span::raw(before));
-        spans.push(Span::styled(at, Style::default().bg(Color::Yellow).fg(Color::Black)));
+        spans.push(Span::styled(at, Style::default().bg(Color::Rgb(255, 200, 50)).fg(Color::Black)));
         spans.push(Span::raw(after));
     }
 
@@ -553,7 +581,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-    let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+    let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
     let (hint, hint_color) = match &app.state {
         AppState::Idle => (String::new(), Color::DarkGray),
         AppState::Thinking => (
@@ -565,7 +593,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             Color::Cyan,
         ),
     };
-    let keybinds = "  ↑↓ navigate  Tab complete  Enter submit  Esc clear  Ctrl+Q quit";
+    let keybinds = "  ↑↓ scroll  Tab complete  Enter submit  Ctrl+O expand  Ctrl+P dir  Ctrl+Q quit";
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(hint, Style::default().fg(hint_color)),
@@ -582,7 +610,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for msg in &app.messages {
-        lines.extend(message_to_lines(msg, width));
+        lines.extend(message_to_lines(msg, width, &app.expanded_tools));
         lines.push(Line::from(""));
     }
 
@@ -601,7 +629,8 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                     lines.extend(text_to_lines(text, width));
                 }
                 StreamingBlock::Tool(tc) => {
-                    lines.extend(tool_call_lines(tc));
+                    // In-flight tool calls are never expanded.
+                    lines.extend(tool_call_lines(tc, false));
                 }
             }
         }
@@ -609,7 +638,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         match &app.state {
             AppState::Thinking | AppState::ToolRunning { .. } => {
                 let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-                let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+                let word_idx = (app.turn.wrapping_mul(31).wrapping_add(app.spinner_frame / 40)) % THINKING_WORDS.len();
                 let (label, color) = match &app.state {
                     AppState::ToolRunning { name, label } => {
                         let verb = tool_verb(name);
@@ -642,14 +671,14 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-pub fn message_to_lines(msg: &UiMessage, width: u16) -> Vec<Line<'static>> {
+pub fn message_to_lines(msg: &UiMessage, width: u16, expanded: &HashSet<String>) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(role_line(&msg.role));
     for block in &msg.blocks {
         match block {
             UiBlock::Text(text)                        => lines.extend(text_to_lines(text, width)),
             UiBlock::Code { lang, lines: code_lines }  => lines.extend(code_block_lines(lang, code_lines)),
-            UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc)),
+            UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc, expanded.contains(&tc.id))),
             UiBlock::Diff { path, content }            => lines.extend(diff_block_lines(path, content)),
             UiBlock::Thinking { char_count }           => lines.extend(thinking_collapsed_line(*char_count)),
         }
@@ -658,29 +687,46 @@ pub fn message_to_lines(msg: &UiMessage, width: u16) -> Vec<Line<'static>> {
 }
 
 pub fn diff_block_lines(path: &str, content: &str) -> Vec<Line<'static>> {
+    let border = Color::Rgb(55, 50, 75);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("  ┌─ diff ", Style::default().fg(Color::DarkGray)),
-        Span::styled(path.to_string(), Style::default().fg(Color::Yellow)),
+        Span::styled("  ✦ ", Style::default().fg(Color::Rgb(100, 180, 255)).bold()),
+        Span::styled(path.to_string(), Style::default().fg(Color::Rgb(180, 175, 210)).bold()),
     ]));
-    
-    let diff_lines = super::syntax::render_diff(content);
-    for diff_line in diff_lines {
-        let mut spans = vec![Span::styled("  │  ", Style::default().fg(Color::DarkGray))];
-        spans.extend(diff_line.spans);
-        lines.push(Line::from(spans));
+
+    for raw in content.lines() {
+        let (style, marker) = if raw.starts_with("+++") || raw.starts_with("---") {
+            (Style::default().fg(Color::Rgb(100, 100, 100)), "  │ ")
+        } else if raw.starts_with('+') {
+            (Style::default().fg(Color::Rgb(100, 210, 120)), "  │ ")
+        } else if raw.starts_with('-') {
+            (Style::default().fg(Color::Rgb(220,  80,  80)), "  │ ")
+        } else if raw.starts_with("@@") {
+            (Style::default().fg(Color::Rgb(100, 180, 255)), "  │ ")
+        } else {
+            (Style::default().fg(Color::Rgb(110, 105, 135)), "  │ ")
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker.to_string(), Style::default().fg(border)),
+            Span::styled(raw.to_string(), style),
+        ]));
     }
-    
-    lines.push(Line::from(vec![
-        Span::styled("  └", Style::default().fg(Color::DarkGray)),
-    ]));
+
     lines
 }
 
 pub fn role_line(role: &MsgRole) -> Line<'static> {
     match role {
-        MsgRole::User      => Line::from(Span::styled("  ▸ You", Style::default().fg(Color::Cyan).bold())),
-        MsgRole::Assistant => Line::from(Span::styled("  ▸ zap", Style::default().fg(Color::Yellow).bold())),
+        MsgRole::User => Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled("◆ ", Style::default().fg(Color::Rgb(100, 210, 255)).bold()),
+            Span::styled("You", Style::default().fg(Color::Rgb(100, 210, 255)).bold()),
+        ]),
+        MsgRole::Assistant => Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled("◆ ", Style::default().fg(Color::Rgb(255, 200, 50)).bold()),
+            Span::styled("zap", Style::default().fg(Color::Rgb(255, 200, 50)).bold()),
+        ]),
     }
 }
 
@@ -725,7 +771,7 @@ pub fn text_to_lines(text: &str, width: u16) -> Vec<Line<'static>> {
             let byte_len: usize = chunk.len();
             lines.push(Line::from(Span::styled(
                 format!("  {}", chunk),
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Rgb(210, 205, 230))
             )));
             remaining = remaining[byte_len..].trim_start();
         }
@@ -776,44 +822,85 @@ pub fn code_block_lines(lang: &str, code_lines: &[String]) -> Vec<Line<'static>>
     lines
 }
 
-pub fn tool_call_lines(tc: &UiToolCall) -> Vec<Line<'static>> {
+pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
-    let (status_str, status_style) = if let Some(ref done) = tc.result {
-        if done.success {
-            (format!(" ✓ {}ms", done.elapsed_ms), Style::default().fg(Color::Green))
-        } else {
-            (format!(" ✗ {}ms", done.elapsed_ms), Style::default().fg(Color::Red))
-        }
+    let border = Color::Rgb(55, 50, 75);
+
+    // ── Header line ───────────────────────────────────────────────────────────
+    let (icon, icon_color) = if let Some(ref done) = tc.result {
+        if done.success { ("✓", Color::Rgb(100, 210, 120)) }
+        else            { ("✗", Color::Rgb(220,  80,  80)) }
     } else {
-        (String::new(), Style::default().fg(Color::DarkGray))
+        ("⏺", Color::Rgb(100, 180, 255))
     };
 
-    let label_short: String = if tc.label.chars().count() > 40 {
-        let mut s: String = tc.label.chars().take(39).collect();
-        s.push('…');
-        s
+    let label_short: String = if tc.label.chars().count() > 42 {
+        format!("{}…", tc.label.chars().take(41).collect::<String>())
     } else {
         tc.label.clone()
     };
 
+    let elapsed = tc.result.as_ref()
+        .map(|d| format!("  {}ms", d.elapsed_ms))
+        .unwrap_or_default();
+    let elapsed_color = tc.result.as_ref().map(|d|
+        if d.success { Color::Rgb(80, 110, 80) } else { Color::Rgb(150, 60, 60) }
+    ).unwrap_or(Color::DarkGray);
+
     lines.push(Line::from(vec![
-        Span::styled(format!("  ┌─ {} {}  ──", tc.name, label_short), Style::default().fg(Color::DarkGray)),
-        Span::styled(status_str, status_style),
+        Span::styled("  ", Style::default()),
+        Span::styled(icon, Style::default().fg(icon_color).bold()),
+        Span::styled(format!(" {}", tc.name), Style::default().fg(Color::Rgb(140, 135, 165)).bold()),
+        Span::styled(format!("  {}", label_short), Style::default().fg(Color::Rgb(110, 105, 135))),
+        Span::styled(elapsed, Style::default().fg(elapsed_color)),
     ]));
 
+    // ── Preview lines ─────────────────────────────────────────────────────────
     if let Some(ref done) = tc.result {
-        for preview_line in done.preview.lines().take(3) {
+        let all_lines: Vec<&str> = done.preview.lines().collect();
+        let truncate_at = 6usize;
+        let shown = if expanded { all_lines.len() } else { all_lines.len().min(truncate_at) };
+
+        for raw in &all_lines[..shown] {
+            let (line_style, marker) = if raw.starts_with("+++") || raw.starts_with("---") {
+                (Style::default().fg(Color::Rgb(100, 100, 100)), "  │ ")
+            } else if raw.starts_with('+') {
+                (Style::default().fg(Color::Rgb(100, 210, 120)), "  │ ")
+            } else if raw.starts_with('-') {
+                (Style::default().fg(Color::Rgb(220,  80,  80)), "  │ ")
+            } else if raw.starts_with("@@") {
+                (Style::default().fg(Color::Rgb(100, 180, 255)), "  │ ")
+            } else {
+                (Style::default().fg(Color::Rgb(130, 125, 155)), "  │ ")
+            };
             lines.push(Line::from(vec![
-                Span::styled("  │  ".to_string(), Style::default().fg(Color::DarkGray)),
-                Span::styled(preview_line.to_string(), Style::default().fg(Color::Gray)),
+                Span::styled(marker.to_string(), Style::default().fg(border)),
+                Span::styled(raw.to_string(), line_style),
+            ]));
+        }
+
+        // Truncation hint / collapse hint
+        if !expanded && all_lines.len() > truncate_at {
+            let remaining = all_lines.len() - truncate_at;
+            lines.push(Line::from(vec![
+                Span::styled("  │ ".to_string(), Style::default().fg(border)),
+                Span::styled(
+                    format!("  +{} lines  Ctrl+O to expand", remaining),
+                    Style::default().fg(Color::Rgb(80, 75, 100)).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        } else if expanded && all_lines.len() > truncate_at {
+            lines.push(Line::from(vec![
+                Span::styled("  │ ".to_string(), Style::default().fg(border)),
+                Span::styled(
+                    "  Ctrl+O to collapse".to_string(),
+                    Style::default().fg(Color::Rgb(80, 75, 100)).add_modifier(Modifier::ITALIC),
+                ),
             ]));
         }
     }
 
-    lines.push(Line::from(vec![
-        Span::styled("  └".to_string(), Style::default().fg(Color::DarkGray)),
-    ]));
     lines
 }
 
@@ -1087,4 +1174,76 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     frame.render_widget(Paragraph::new(rows), inner);
+}
+
+// ── Domain / language scope picker overlay ─────────────────────────────────────
+
+fn draw_domain_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let picker = match app.domain_picker.as_ref() {
+        Some(p) => p,
+        None    => return,
+    };
+
+    let visible = picker.options.len().min(16);
+    let w = (area.width * 60 / 100).max(44).min(area.width);
+    let h = (visible as u16 + 6).min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let proj = &picker.project_name;
+    let title = format!(" {} — existing project: scope to languages / frameworks? ", proj);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Rgb(255, 200, 50)))
+        .title(Span::styled(
+            title,
+            Style::default().fg(Color::Rgb(255, 200, 50)).add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    let hint_area = Rect { y: inner.y + inner.height.saturating_sub(1), height: 1, ..inner };
+    let content_area = Rect { height: inner.height.saturating_sub(1), ..inner };
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "  Space toggle   Enter confirm   Esc skip (no restriction)",
+            Style::default().fg(Color::Rgb(80, 75, 100)),
+        )),
+        hint_area,
+    );
+
+    if picker.options.is_empty() {
+        return;
+    }
+
+    let sel   = picker.cursor.min(picker.options.len().saturating_sub(1));
+    let start = if sel >= visible { sel - visible + 1 } else { 0 };
+    let end   = (start + visible).min(picker.options.len());
+
+    let rows: Vec<Line<'static>> = picker.options[start..end]
+        .iter()
+        .zip(&picker.checked[start..end])
+        .enumerate()
+        .map(|(i, (name, &checked))| {
+            let idx = start + i;
+            let is_sel = idx == sel;
+            let checkbox = if checked { "[x] " } else { "[ ] " };
+            let text = format!("  {}{}", checkbox, name);
+            if is_sel {
+                Line::from(Span::styled(text, Style::default().fg(Color::Black).bg(Color::Yellow)))
+            } else if checked {
+                Line::from(Span::styled(text, Style::default().fg(Color::Cyan)))
+            } else {
+                Line::from(Span::styled(text, Style::default().fg(Color::White)))
+            }
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(rows), content_area);
 }

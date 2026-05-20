@@ -17,6 +17,10 @@ pub enum InputAction {
     ToggleFileBrowser,
     LoadSession(i64),
     CloseSessionPicker,
+    /// Ctrl+O: toggle expansion of the last tool call with output.
+    ToggleLastToolExpand,
+    /// Domain picker confirmed — carries the selected skill names (may be empty = no restriction).
+    ConfirmDomainScope(Vec<String>),
 }
 
 /// Returns true when the command picker is active (idle + input starts with '/').
@@ -25,6 +29,11 @@ fn picker_active(app: &App) -> bool {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
+    // Domain picker takes priority when open (shown at session start).
+    if app.domain_picker.is_some() {
+        return handle_domain_picker_key(app, key);
+    }
+
     // Session picker takes priority when open.
     if app.session_picker.is_some() {
         return handle_session_picker_key(app, key);
@@ -51,8 +60,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
-    // Ctrl+O: open directory picker (idle only)
+    // Ctrl+O: expand/collapse the last tool call output (idle only)
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Idle) {
+            return InputAction::ToggleLastToolExpand;
+        }
+        return InputAction::None;
+    }
+
+    // Ctrl+P: open directory picker (idle only)
+    if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
             return InputAction::OpenDirPicker;
         }
@@ -225,6 +242,40 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(b, _)| b)
         .unwrap_or(s.len())
+}
+
+/// Handle keys when the domain/language scope picker is open.
+fn handle_domain_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let picker = app.domain_picker.as_mut().unwrap();
+    match key.code {
+        KeyCode::Esc => {
+            // Esc = no restriction (all domains active).
+            app.domain_picker = None;
+            InputAction::ConfirmDomainScope(vec![])
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            picker.cursor = picker.cursor.saturating_sub(1);
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let max = picker.options.len().saturating_sub(1);
+            picker.cursor = (picker.cursor + 1).min(max);
+            InputAction::None
+        }
+        KeyCode::Char(' ') => {
+            let i = picker.cursor;
+            if i < picker.checked.len() {
+                picker.checked[i] = !picker.checked[i];
+            }
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            let selected = picker.selected();
+            app.domain_picker = None;
+            InputAction::ConfirmDomainScope(selected)
+        }
+        _ => InputAction::None,
+    }
 }
 
 /// Handle keys when the session picker overlay is open.

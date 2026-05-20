@@ -60,6 +60,33 @@ pub struct UiMessage {
     pub blocks: Vec<UiBlock>,
 }
 
+// ── Domain / language scope picker ────────────────────────────────────────────
+
+pub struct DomainPickerState {
+    /// All available domain skill names.
+    pub options: Vec<String>,
+    /// Whether each option is currently checked.
+    pub checked: Vec<bool>,
+    /// Currently highlighted row.
+    pub cursor: usize,
+    /// Project directory name shown in the picker title.
+    pub project_name: String,
+}
+
+impl DomainPickerState {
+    pub fn new(options: Vec<String>, project_name: String) -> Self {
+        let len = options.len();
+        Self { options, checked: vec![false; len], cursor: 0, project_name }
+    }
+
+    /// Returns the names of all checked options.
+    pub fn selected(&self) -> Vec<String> {
+        self.options.iter().zip(&self.checked)
+            .filter_map(|(name, &on)| if on { Some(name.clone()) } else { None })
+            .collect()
+    }
+}
+
 // ── Session picker ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -129,6 +156,9 @@ pub struct App {
     /// File browser state (None when closed).
     pub file_browser: Option<super::file_browser::FileBrowser>,
 
+    /// Language/framework domain picker shown once at session start (None after confirmed).
+    pub domain_picker: Option<DomainPickerState>,
+
     /// Session picker overlay (None when closed).
     pub session_picker: Option<SessionPickerState>,
 
@@ -167,6 +197,7 @@ impl App {
             git_ahead: 0,
             git_behind: 0,
             file_browser: None,
+            domain_picker: None,
             session_picker: None,
             quit_confirm: false,
             skill_names: Vec::new(),

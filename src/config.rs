@@ -61,6 +61,9 @@ pub struct Config {
     /// When true, send stream:false and parse a plain JSON response instead of SSE.
     /// Required for corporate proxies that mangle SSE and return empty tool_use blocks.
     pub disable_stream: bool,
+    /// When true, skip the interactive `prompt_domain_scope` CLI prompt.
+    /// Used by TUI mode, which shows its own in-TUI picker instead.
+    pub skip_domain_prompt: bool,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -195,7 +198,7 @@ impl Config {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
-            budget: None, skill_paths, disable_stream,
+            budget: None, skill_paths, disable_stream, skip_domain_prompt: false,
         })
     }
 

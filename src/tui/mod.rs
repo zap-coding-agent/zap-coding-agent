@@ -30,6 +30,10 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     // 1. Create session BEFORE entering the alternate screen so that all startup
     //    println!s (skills loaded, hooks, MCP, code index) go to the normal
     //    terminal buffer and are visible briefly before the TUI takes over.
+    //    Skip the CLI domain-scope prompt — we show a TUI picker instead.
+    let mut tui_config = config.clone();
+    tui_config.skip_domain_prompt = true;
+    let config = &tui_config;
     let mut session = Session::new(config).await?;
     session.hooks.fire_session_start();
 
@@ -78,6 +82,26 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     // 4. Create App state.
     let mut app = App::new(&session.model, &branch);
     app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
+
+    // Show domain picker when no scope was auto-detected and domain skills exist.
+    if session.domain_scope.is_empty() {
+        let domain_options = crate::skill_manager::all_domain_skill_names(&session.skills);
+        if !domain_options.is_empty() {
+            let project_name = std::env::current_dir()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| ".".to_string());
+            let mut picker = app::DomainPickerState::new(domain_options, project_name);
+            // Pre-check anything we can detect from file extensions.
+            let ext_detected = crate::skill_manager::detect_from_extensions(&session.skills);
+            for (i, opt) in picker.options.iter().enumerate() {
+                if ext_detected.contains(opt) {
+                    picker.checked[i] = true;
+                }
+            }
+            app.domain_picker = Some(picker);
+        }
+    }
     let (dirty, ahead, behind) = git_status();
     app.git_dirty = dirty;
     app.git_ahead = ahead;
@@ -450,6 +474,18 @@ async fn tui_loop(
                         }
                         InputAction::CloseSessionPicker => {}
                         InputAction::ClearInput => {}
+                        InputAction::ToggleLastToolExpand => {
+                            if let Some(id) = last_tool_id_with_result(app) {
+                                if app.expanded_tools.contains(&id) {
+                                    app.expanded_tools.remove(&id);
+                                } else {
+                                    app.expanded_tools.insert(id);
+                                }
+                            }
+                        }
+                        InputAction::ConfirmDomainScope(names) => {
+                            session.domain_scope = names.into_iter().collect();
+                        }
                         InputAction::None => {}
                     }
                 }
@@ -627,8 +663,21 @@ if ($dialog.ShowDialog() -eq 'OK') {
     
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        // On Linux and other platforms, we could implement a TUI-based directory browser
-        // or use zenity/kdialog. For now, return None.
         None
     }
+}
+
+/// Walk all completed messages to find the last tool call that has a result.
+/// Returns its ID so the caller can toggle it in `app.expanded_tools`.
+fn last_tool_id_with_result(app: &App) -> Option<String> {
+    for msg in app.messages.iter().rev() {
+        for block in msg.blocks.iter().rev() {
+            if let UiBlock::Tool(tc) = block {
+                if tc.result.is_some() {
+                    return Some(tc.id.clone());
+                }
+            }
+        }
+    }
+    None
 }

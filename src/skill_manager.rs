@@ -414,6 +414,57 @@ pub fn detect_domain_scope(skills: &[Skill]) -> Vec<String> {
     found
 }
 
+/// Lightweight extension-based detection: scan files in cwd (non-recursive) and
+/// return names of Domain skills whose typical extensions appear. Used for the
+/// TUI domain picker to pre-check likely candidates without manifest files.
+pub fn detect_from_extensions(skills: &[Skill]) -> Vec<String> {
+    // Map skill name → file extensions that suggest it.
+    const EXT_MAP: &[(&str, &[&str])] = &[
+        ("rust",       &["rs"]),
+        ("python",     &["py", "pyw", "ipynb"]),
+        ("typescript", &["ts", "tsx"]),
+        ("javascript", &["js", "jsx", "mjs", "cjs"]),
+        ("go",         &["go"]),
+        ("java",       &["java"]),
+        ("kotlin",     &["kt", "kts"]),
+        ("swift",      &["swift"]),
+        ("ruby",       &["rb"]),
+        ("cpp",        &["cpp", "cc", "cxx", "hpp", "hxx"]),
+        ("c",          &["c", "h"]),
+        ("csharp",     &["cs"]),
+        ("php",        &["php"]),
+        ("elixir",     &["ex", "exs"]),
+        ("haskell",    &["hs", "lhs"]),
+        ("scala",      &["scala"]),
+        ("clojure",    &["clj", "cljs"]),
+        ("dart",       &["dart"]),
+        ("lua",        &["lua"]),
+        ("zig",        &["zig"]),
+    ];
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut found_exts: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    if let Ok(rd) = std::fs::read_dir(&cwd) {
+        for entry in rd.flatten().take(200) {
+            if let Some(ext) = entry.path().extension() {
+                found_exts.insert(ext.to_string_lossy().to_lowercase());
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+    for (skill_name, exts) in EXT_MAP {
+        if skills.iter().any(|s| s.name == *skill_name && s.category == SkillCategory::Domain)
+            && exts.iter().any(|e| found_exts.contains(*e))
+            && !result.contains(&skill_name.to_string())
+        {
+            result.push(skill_name.to_string());
+        }
+    }
+    result
+}
+
 /// Backwards-compatible: returns skill refs for the startup banner.
 pub fn detect_stack_skills<'a>(skills: &'a [Skill]) -> Vec<&'a Skill> {
     let names = detect_domain_scope(skills);
@@ -452,6 +503,11 @@ pub fn all_domain_skills(skills: &[Skill]) -> Vec<&Skill> {
         .collect();
     v.sort_by(|a, b| a.name.cmp(&b.name));
     v
+}
+
+/// Returns sorted names of all Domain-category skills (used by TUI picker).
+pub fn all_domain_skill_names(skills: &[Skill]) -> Vec<String> {
+    all_domain_skills(skills).into_iter().map(|s| s.name.clone()).collect()
 }
 
 /// Show an interactive multi-select to let the user choose domain skills for this session.

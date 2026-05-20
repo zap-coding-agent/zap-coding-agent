@@ -240,7 +240,7 @@ impl Session {
         let detected = crate::skill_manager::detect_domain_scope(&skills);
         let domain_scope: std::collections::HashSet<String> = if !detected.is_empty() {
             detected.iter().cloned().collect()
-        } else if !config.is_subagent {
+        } else if !config.is_subagent && !config.skip_domain_prompt {
             // Nothing auto-detected — ask the user once (interactive sessions only).
             crate::skill_manager::prompt_domain_scope(&skills)
                 .map(|v| v.into_iter().collect())
