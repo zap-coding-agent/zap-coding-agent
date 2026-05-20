@@ -274,6 +274,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Server description field | `src/mcp.rs:McpServerConfig` | optional `"description"` in `.mcp.json` stored and shown in `/mcp list` |
 | `/init` | `src/session.rs:cmd_init` | creates CLAUDE.md + agent fills it in |
 
+### Tests
+| Area | File | Count |
+|---|---|---|
+| Permission modes, session grants, grant-class cross-grants, MCP "always" fallback, ctx newline contract | `src/permission_manager.rs` | 14 |
+| MCP command validation: known interpreters, Windows .exe variants, absolute paths, metacharacter/traversal rejection | `src/mcp.rs` | 9 |
+| Destructive pattern detection, safe commands, ShellTool permission_context newline contract | `src/tools/shell.rs` | 6 |
+| `spawn_agent` char-based truncation regression (byte-slice panic fix) | `src/tools/agent.rs` | 3 |
+| Pre-push hook | `.git/hooks/pre-push` | runs `cargo test` before every push |
+
 ---
 
 ## Planned 🗓

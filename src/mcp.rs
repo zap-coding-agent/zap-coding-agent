@@ -387,3 +387,93 @@ impl crate::tools::Tool for McpTool {
         srv.call_tool(&self.name, input).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(cmd: &str) -> McpServerConfig {
+        McpServerConfig {
+            command: cmd.to_string(),
+            args: vec![],
+            env: std::collections::HashMap::new(),
+            description: None,
+        }
+    }
+
+    // ── known interpreters ────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_known_interpreters_accepted() {
+        for name in &["node", "python", "python3", "npx", "uvx", "deno",
+                      "ruby", "java", "dotnet", "bun"] {
+            assert!(validate_mcp_command(&cfg(name)).is_ok(), "should accept {name}");
+        }
+    }
+
+    // ── Windows .exe variants (regression for the Windows fix) ────────────────
+
+    #[test]
+    fn validate_windows_exe_suffix_accepted() {
+        assert!(validate_mcp_command(&cfg("node.exe")).is_ok());
+        assert!(validate_mcp_command(&cfg("python.exe")).is_ok());
+        assert!(validate_mcp_command(&cfg("python3.exe")).is_ok());
+        assert!(validate_mcp_command(&cfg("npx.exe")).is_ok());
+    }
+
+    #[test]
+    fn validate_windows_exe_case_insensitive() {
+        assert!(validate_mcp_command(&cfg("Node.EXE")).is_ok());
+        assert!(validate_mcp_command(&cfg("NPX.EXE")).is_ok());
+        assert!(validate_mcp_command(&cfg("PYTHON.EXE")).is_ok());
+    }
+
+    // ── absolute paths ────────────────────────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_absolute_unix_path_accepted() {
+        assert!(validate_mcp_command(&cfg("/usr/local/bin/my-mcp-server")).is_ok());
+        assert!(validate_mcp_command(&cfg("/opt/tools/mcp-server")).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_absolute_windows_path_accepted() {
+        assert!(validate_mcp_command(&cfg(r"C:\tools\my-mcp.exe")).is_ok());
+        assert!(validate_mcp_command(&cfg(r"C:\Program Files\nodejs\node.exe")).is_ok());
+    }
+
+    // ── rejection cases ───────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_rejects_unknown_relative_command() {
+        assert!(validate_mcp_command(&cfg("my-mcp-server")).is_err());
+        assert!(validate_mcp_command(&cfg("custom-tool")).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_shell_metacharacters() {
+        assert!(validate_mcp_command(&cfg("node; rm -rf /")).is_err(), "semicolon");
+        assert!(validate_mcp_command(&cfg("node | bash")).is_err(),    "pipe");
+        assert!(validate_mcp_command(&cfg("$(node)")).is_err(),        "subshell $()");
+        assert!(validate_mcp_command(&cfg("`node`")).is_err(),         "backtick");
+        assert!(validate_mcp_command(&cfg("node&disown")).is_err(),    "ampersand");
+        assert!(validate_mcp_command(&cfg("node > /tmp/x")).is_err(),  "redirect >");
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal() {
+        assert!(validate_mcp_command(&cfg("../../bin/node")).is_err());
+        assert!(validate_mcp_command(&cfg("../node")).is_err());
+    }
+
+    // ── unknown .exe relative path still rejected ─────────────────────────────
+
+    #[test]
+    fn validate_rejects_unknown_exe_relative() {
+        // "my-server.exe" is not absolute and not in the allowlist even after stripping .exe
+        assert!(validate_mcp_command(&cfg("my-server.exe")).is_err());
+        assert!(validate_mcp_command(&cfg("custom.exe")).is_err());
+    }
+}

@@ -196,3 +196,67 @@ impl Tool for ListDirectoryTool {
         Ok(out.stdout)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── destructive_pattern ───────────────────────────────────────────────────
+
+    #[test]
+    fn detects_rm_rf() {
+        assert!(destructive_pattern("rm -rf build/").is_some());
+        assert!(destructive_pattern("rm -fr /tmp/old").is_some());
+    }
+
+    #[test]
+    fn detects_force_push() {
+        assert!(destructive_pattern("git push --force origin main").is_some());
+        assert!(destructive_pattern("git push -f origin main").is_some());
+    }
+
+    #[test]
+    fn detects_sudo() {
+        assert!(destructive_pattern("sudo apt install curl").is_some());
+    }
+
+    #[test]
+    fn detects_sql_drops() {
+        assert!(destructive_pattern("DROP TABLE users").is_some());
+        assert!(destructive_pattern("drop database prod").is_some());
+        assert!(destructive_pattern("TRUNCATE TABLE logs").is_some());
+    }
+
+    #[test]
+    fn safe_commands_return_none() {
+        assert!(destructive_pattern("cargo build").is_none());
+        assert!(destructive_pattern("ls -la").is_none());
+        assert!(destructive_pattern("git status").is_none());
+        assert!(destructive_pattern("npm run test").is_none());
+        assert!(destructive_pattern("rm file.txt").is_none()); // no -rf flag
+    }
+
+    // ── ShellTool::permission_context newline contract ────────────────────────
+    // The TUI dialog sanitizes \n out of ctx. This test documents that the
+    // source string does contain \n so we don't accidentally remove the sanitization.
+
+    #[test]
+    fn permission_context_with_description_contains_newline() {
+        let tool = ShellTool;
+        let input = serde_json::json!({
+            "command": "npm install",
+            "description": "install dependencies"
+        });
+        let ctx = tool.permission_context(&input);
+        assert!(ctx.contains('\n'), "ctx with description must contain \\n for sanitization to matter");
+    }
+
+    #[test]
+    fn permission_context_without_description_has_no_newline() {
+        let tool = ShellTool;
+        let input = serde_json::json!({ "command": "npm install" });
+        let ctx = tool.permission_context(&input);
+        assert!(!ctx.contains('\n'));
+        assert!(ctx.starts_with("$ "));
+    }
+}

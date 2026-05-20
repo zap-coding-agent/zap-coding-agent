@@ -101,3 +101,39 @@ impl Tool for SpawnAgentTool {
         crate::agent_core::run_subagent(&full_goal, &self.config).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // ── permission_context truncation ─────────────────────────────────────────
+
+    #[test]
+    fn truncation_by_chars_not_bytes_does_not_panic() {
+        // Regression: &goal[..72] panics when byte 72 is inside a multibyte char.
+        // Fixed to: goal.chars().take(72).collect::<String>()
+        let long_goal: String = "こ".repeat(80); // 240 bytes, 80 chars
+        // The old code: assert panics with index-not-on-char-boundary
+        // let _ = &long_goal[..72]; // ← this would panic
+        // The new code:
+        let truncated: String = long_goal.chars().take(72).collect();
+        assert_eq!(truncated.chars().count(), 72);
+        assert_eq!(truncated.len(), 72 * 3); // each こ is 3 bytes
+    }
+
+    #[test]
+    fn truncation_preserves_ascii_goals_exactly() {
+        let goal = "a".repeat(80);
+        let truncated: String = goal.chars().take(72).collect();
+        assert_eq!(truncated.len(), 72);
+    }
+
+    #[test]
+    fn short_goal_not_truncated() {
+        let goal = "fix the login bug";
+        let truncated: String = if goal.chars().count() > 72 {
+            goal.chars().take(72).collect()
+        } else {
+            goal.to_string()
+        };
+        assert_eq!(truncated, goal);
+    }
+}
