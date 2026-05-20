@@ -274,18 +274,18 @@ fn draw_header_info(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled(" ⚡ ", Style::default().fg(Color::Rgb(255, 210, 40)).bold()),
             Span::styled("zap", Style::default().fg(Color::Rgb(255, 210, 40)).bold()),
-            Span::styled(format!("  v{}", ver), Style::default().fg(Color::Rgb(80, 75, 100))),
+            Span::styled(format!("  v{}", ver), Style::default().fg(Color::Rgb(130, 125, 155))),
         ]),
-        Line::from(Span::styled(format!(" {}", model_short), Style::default().fg(Color::Rgb(140, 135, 165)))),
+        Line::from(Span::styled(format!(" {}", model_short), Style::default().fg(Color::Rgb(170, 165, 200)))),
         Line::from(Span::styled(git_status, Style::default().fg(git_color))),
-        Line::from(Span::styled(format!(" {} turns", app.turn), Style::default().fg(Color::Rgb(80, 75, 100)))),
+        Line::from(Span::styled(format!(" {} turns", app.turn), Style::default().fg(Color::Rgb(155, 150, 185)))),
         Line::from(vec![
             Span::styled(format!(" {}%", app.context_pct), Style::default().fg(
                 if app.context_pct > 80 { Color::Red }
                 else if app.context_pct > 60 { Color::Yellow }
-                else { Color::Rgb(80, 75, 100) }
+                else { Color::Rgb(155, 150, 185) }
             )),
-            Span::styled(" ctx", Style::default().fg(Color::Rgb(80, 75, 100))),
+            Span::styled(" ctx", Style::default().fg(Color::Rgb(130, 125, 155))),
         ]),
     ];
     frame.render_widget(Paragraph::new(rows), area);
@@ -440,9 +440,9 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let label_c = Color::Rgb(80, 75, 100);
-    let value_c = Color::Rgb(170, 165, 195);
-    let head_c  = Color::Rgb(100, 95, 125);
+    let label_c = Color::Rgb(130, 125, 155);
+    let value_c = Color::Rgb(205, 200, 230);
+    let head_c  = Color::Rgb(160, 155, 190);
 
     let kv = |k: &str, v: String, vc: Color| {
         Line::from(vec![
@@ -465,7 +465,7 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         else { Color::Rgb(80, 160, 255) };
     rows.push(Line::from(vec![
         Span::styled(format!(" {}", ctx_bar), Style::default().fg(bar_color)),
-        Span::styled(format!(" {}%", app.context_pct), Style::default().fg(label_c)),
+        Span::styled(format!(" {}%", app.context_pct), Style::default().fg(Color::Rgb(155, 150, 185))),
     ]));
     rows.push(Line::from(""));
     rows.push(Line::from(Span::styled(" status", Style::default().fg(head_c).bold())));
@@ -636,7 +636,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 }
                 StreamingBlock::Tool(tc) => {
                     // In-flight tool calls are never expanded.
-                    lines.extend(tool_call_lines(tc, false));
+                    lines.extend(tool_call_lines(tc, false, width));
                 }
             }
         }
@@ -684,23 +684,25 @@ pub fn message_to_lines(msg: &UiMessage, width: u16, expanded: &HashSet<String>)
         match block {
             UiBlock::Text(text)                        => lines.extend(text_to_lines(text, width)),
             UiBlock::Code { lang, lines: code_lines }  => lines.extend(code_block_lines(lang, code_lines)),
-            UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc, expanded.contains(&tc.id))),
-            UiBlock::Diff { path, content }            => lines.extend(diff_block_lines(path, content)),
+            UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc, expanded.contains(&tc.id), width)),
+            UiBlock::Diff { path, content }            => lines.extend(diff_block_lines(path, content, width)),
             UiBlock::Thinking { char_count }           => lines.extend(thinking_collapsed_line(*char_count)),
         }
     }
     lines
 }
 
-pub fn diff_block_lines(path: &str, content: &str) -> Vec<Line<'static>> {
+pub fn diff_block_lines(path: &str, content: &str, width: u16) -> Vec<Line<'static>> {
     let border = Color::Rgb(55, 50, 75);
+    let max_w = (width as usize).saturating_sub(6).max(20);
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("  ✦ ", Style::default().fg(Color::Rgb(100, 180, 255)).bold()),
+        Span::styled("  \u{2726} ", Style::default().fg(Color::Rgb(100, 180, 255)).bold()),
         Span::styled(path.to_string(), Style::default().fg(Color::Rgb(180, 175, 210)).bold()),
     ]));
 
     for raw in content.lines() {
+        let display = expand_tabs_and_truncate(raw, max_w);
         let style = if raw.starts_with("+++") || raw.starts_with("---") {
             Style::default().fg(Color::Rgb(120, 115, 145))
         } else if raw.starts_with('+') {
@@ -714,7 +716,7 @@ pub fn diff_block_lines(path: &str, content: &str) -> Vec<Line<'static>> {
         };
         lines.push(Line::from(vec![
             Span::styled("    ", Style::default().fg(border)),
-            Span::styled(raw.to_string(), style),
+            Span::styled(display, style),
         ]));
     }
 
@@ -830,8 +832,28 @@ pub fn code_block_lines(lang: &str, code_lines: &[String]) -> Vec<Line<'static>>
     lines
 }
 
-pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
+/// Expand tab characters to 4 spaces and truncate to `max_chars`.
+fn expand_tabs_and_truncate(s: &str, max_chars: usize) -> String {
+    let expanded: String = s.chars().flat_map(|c| {
+        if c == '\t' { itertools_like_repeat(' ', 4) } else { itertools_like_repeat(c, 1) }
+    }).collect();
+    if expanded.chars().count() <= max_chars {
+        expanded
+    } else {
+        let mut t: String = expanded.chars().take(max_chars.saturating_sub(1)).collect();
+        t.push('\u{2026}'); // …
+        t
+    }
+}
+
+// Helper: repeat a char N times as an iterator-like chain without external deps.
+fn itertools_like_repeat(c: char, n: usize) -> std::iter::Take<std::iter::Repeat<char>> {
+    std::iter::repeat(c).take(n)
+}
+
+pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    let max_w = (width as usize).saturating_sub(6).max(20);
 
     let border = Color::Rgb(55, 50, 75);
 
@@ -871,6 +893,7 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
         let shown = if expanded { all_lines.len() } else { all_lines.len().min(truncate_at) };
 
         for raw in &all_lines[..shown] {
+            let display = expand_tabs_and_truncate(raw, max_w);
             let line_style = if raw.starts_with("+++") || raw.starts_with("---") {
                 Style::default().fg(Color::Rgb(120, 115, 145))
             } else if raw.starts_with('+') {
@@ -884,7 +907,7 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool) -> Vec<Line<'static>> {
             };
             lines.push(Line::from(vec![
                 Span::styled("    ", Style::default().fg(border)),
-                Span::styled(raw.to_string(), line_style),
+                Span::styled(display, line_style),
             ]));
         }
 
