@@ -12,6 +12,34 @@ pub const SPINNER_FRAMES: &[&str] = &[
     "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
 ];
 
+/// Words that rotate while the LLM is generating — changes roughly every 2s at 16ms tick.
+const THINKING_WORDS: &[&str] = &[
+    "Thinking", "Analyzing", "Planning", "Reasoning",
+    "Reviewing", "Processing", "Evaluating", "Considering",
+    "Reflecting", "Synthesizing", "Exploring", "Drafting",
+];
+
+fn tool_verb(name: &str) -> &'static str {
+    match name {
+        "read_file"        => "Reading",
+        "write_file"       => "Writing",
+        "edit_file"        => "Editing",
+        "batch_edit"       => "Editing",
+        "undo_edit"        => "Undoing",
+        "shell"            => "Running",
+        "search_code"      => "Searching",
+        "find_definition"  => "Looking up",
+        "code_map"         => "Mapping",
+        "list_directory"   => "Browsing",
+        "web_fetch"        => "Fetching",
+        "web_search"       => "Searching web",
+        "spawn_agent"      => "Spawning agent",
+        "read_memory"      => "Recalling",
+        "write_memory"     => "Remembering",
+        _                  => "Running",
+    }
+}
+
 /// Width of the right sidebar (includes the left border character).
 pub const SIDEBAR_W: u16 = 22;
 
@@ -301,10 +329,21 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         app.model.clone()
     };
 
-    let state_icon = match &app.state {
-        AppState::Idle           => ("●", Color::Green),
-        AppState::Thinking       => (SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()], Color::Yellow),
-        AppState::ToolRunning(_) => (SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()], Color::Cyan),
+    let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+    let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+    let (state_icon, state_color, state_text): (&str, Color, String) = match &app.state {
+        AppState::Idle => ("●", Color::Green, "idle".to_string()),
+        AppState::Thinking => (
+            spin, Color::Yellow,
+            format!("{}…", THINKING_WORDS[word_idx]),
+        ),
+        AppState::ToolRunning { name, label } => {
+            let verb = tool_verb(name);
+            let short: String = if label.chars().count() > 12 {
+                format!("{}…", label.chars().take(11).collect::<String>())
+            } else { label.clone() };
+            (spin, Color::Cyan, format!("{}  {}", verb, short))
+        }
     };
 
     let kv = |k: &str, v: String, vc: Color| {
@@ -330,15 +369,8 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     rows.push(Line::from(""));
     rows.push(Line::from(Span::styled(" status", Style::default().fg(Color::DarkGray).bold())));
     rows.push(Line::from(vec![
-        Span::styled(format!(" {} ", state_icon.0), Style::default().fg(state_icon.1)),
-        Span::styled(
-            match &app.state {
-                AppState::Idle           => "idle".to_string(),
-                AppState::Thinking       => "thinking".to_string(),
-                AppState::ToolRunning(n) => n.chars().take(10).collect(),
-            },
-            Style::default().fg(Color::White),
-        ),
+        Span::styled(format!(" {} ", state_icon), Style::default().fg(state_color)),
+        Span::styled(state_text, Style::default().fg(Color::White)),
     ]));
 
     let block = Block::default().borders(Borders::LEFT).border_style(Style::default().fg(Color::DarkGray));
@@ -453,16 +485,24 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 // ── Status bar ────────────────────────────────────────────────────────────────
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
-    let state_hint = match &app.state {
-        AppState::Thinking          => "  ⠸ thinking…  │",
-        AppState::ToolRunning(_)    => "  ⠸ running…   │",
-        AppState::Idle              => "",
+    let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+    let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+    let (hint, hint_color) = match &app.state {
+        AppState::Idle => (String::new(), Color::DarkGray),
+        AppState::Thinking => (
+            format!("  {} {}…  │", spin, THINKING_WORDS[word_idx]),
+            Color::Yellow,
+        ),
+        AppState::ToolRunning { name, .. } => (
+            format!("  {} {}…  │", spin, tool_verb(name)),
+            Color::Cyan,
+        ),
     };
     let keybinds = "  ↑↓ navigate  Tab complete  Enter submit  Esc clear  Ctrl+Q quit";
-    let text = format!("{}{}", state_hint, keybinds);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(text, Style::default().fg(Color::DarkGray)),
+            Span::styled(hint, Style::default().fg(hint_color)),
+            Span::styled(keybinds, Style::default().fg(Color::DarkGray)),
         ])),
         area,
     );
@@ -480,7 +520,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     }
 
     let has_streaming = !app.streaming_blocks.is_empty()
-        || matches!(app.state, AppState::Thinking | AppState::ToolRunning(_));
+        || matches!(app.state, AppState::Thinking | AppState::ToolRunning { .. });
 
     if has_streaming {
         lines.push(role_line(&MsgRole::Assistant));
@@ -500,14 +540,24 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         }
 
         match &app.state {
-            AppState::Thinking | AppState::ToolRunning(_) => {
-                let frame_str = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-                let label = match &app.state {
-                    AppState::ToolRunning(name) => format!("  {} Running {}…", frame_str, name),
-                    _ => format!("  {} Thinking…", frame_str),
+            AppState::Thinking | AppState::ToolRunning { .. } => {
+                let spin = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+                let word_idx = (app.spinner_frame / 80) % THINKING_WORDS.len();
+                let (label, color) = match &app.state {
+                    AppState::ToolRunning { name, label } => {
+                        let verb = tool_verb(name);
+                        let short: String = if label.chars().count() > 38 {
+                            format!("{}…", label.chars().take(37).collect::<String>())
+                        } else { label.clone() };
+                        (format!("  {} {}  {}", spin, verb, short), Color::Cyan)
+                    }
+                    _ => (
+                        format!("  {} {}…", spin, THINKING_WORDS[word_idx]),
+                        Color::Yellow,
+                    ),
                 };
                 lines.push(Line::from(vec![
-                    Span::styled(label, Style::default().fg(Color::Yellow)),
+                    Span::styled(label, Style::default().fg(color)),
                 ]));
             }
             AppState::Idle => {}

@@ -38,7 +38,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Ctrl+C: cancel during a turn
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         match &app.state {
-            AppState::Thinking | AppState::ToolRunning(_) => return InputAction::Cancel,
+            AppState::Thinking | AppState::ToolRunning { .. } => return InputAction::Cancel,
             AppState::Idle => return InputAction::None,
         }
     }

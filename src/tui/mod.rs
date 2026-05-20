@@ -33,6 +33,33 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let mut session = Session::new(config).await?;
     session.hooks.fire_session_start();
 
+    // 2. Mode picker — runs on normal terminal before alternate screen.
+    let mode = crate::task_planner::pick_session_mode();
+    let mut task_intro: Option<String> = None;
+    if mode == crate::task_planner::SessionMode::Task {
+        match crate::task_planner::run_task_planning(
+            session.client.as_ref(),
+            &session.model,
+            &session.skills,
+        )
+        .await
+        {
+            Ok(Some(plan)) => {
+                task_intro = Some(format!(
+                    "I'm starting a task session. Goal: {}\n\n\
+                     The tasks.md has been created at .zap/tasks/{}/tasks.md\n\
+                     Please read it and confirm you understand the plan before we start.",
+                    plan.goal, plan.folder_name
+                ));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                use colored::Colorize;
+                println!("  {} Planning failed: {} — continuing in Vibe mode.", "⚠".yellow(), e);
+            }
+        }
+    }
+
     // Fetch branch while still in the normal terminal.
     let branch = git_branch();
 
@@ -56,13 +83,23 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     app.git_behind = behind;
 
     // Show welcome message in conversation area
+    let mode_hint = if task_intro.is_some() { " · task mode" } else { " · vibe mode" };
     app.messages.push(UiMessage {
         role: MsgRole::Assistant,
         blocks: vec![UiBlock::Text(format!(
-            "Ready. {} tools loaded. Type your message or / for commands.",
-            session.tool_count
+            "Ready. {} tools loaded{}. Type your message or / for commands.",
+            session.tool_count, mode_hint
         ))],
     });
+
+    // If task mode, prime the first turn so zap reads the tasks.md immediately.
+    if let Some(intro) = task_intro {
+        app.messages.push(UiMessage {
+            role: MsgRole::User,
+            blocks: vec![UiBlock::Text("Starting task session…".to_string())],
+        });
+        app.pending_input = Some(intro);
+    }
 
     // 5. Main event loop
     let result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;

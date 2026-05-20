@@ -7,7 +7,7 @@ use super::channel::TuiEvent;
 pub enum AppState {
     Idle,
     Thinking,
-    ToolRunning(String),
+    ToolRunning { name: String, label: String },
 }
 
 #[derive(Debug, Clone)]
@@ -195,7 +195,7 @@ impl App {
                 }
             }
             TuiEvent::ToolStart { id, name, label } => {
-                self.state = AppState::ToolRunning(name.clone());
+                self.state = AppState::ToolRunning { name: name.clone(), label: label.clone() };
                 self.streaming_blocks.push(StreamingBlock::Tool(UiToolCall {
                     id,
                     name,
