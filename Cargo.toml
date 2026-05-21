@@ -45,3 +45,5 @@ syntect = "5.2"
 pulldown-cmark = "0.9"
 libc = "0.2"
 git2 = "0.21.0"
+axum = { version = "0.7", features = ["ws"] }
+futures-util = "0.3"

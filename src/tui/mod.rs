@@ -136,6 +136,19 @@ async fn tui_loop(
             app.apply_event(ev);
         }
 
+        // Inject any message arriving from remote control web UI.
+        if app.pending_input.is_none() {
+            if let Some(remote_msg) = crate::remote_channel::try_recv() {
+                // Show it in the chat as a user bubble so it's visible.
+                app.messages.push(crate::tui::app::UiMessage {
+                    role:   crate::tui::app::MsgRole::User,
+                    blocks: vec![crate::tui::app::UiBlock::Text(remote_msg.clone())],
+                });
+                app.pending_input = Some(remote_msg);
+                app.auto_scroll = true;
+            }
+        }
+
         // Draw
         terminal.draw(|frame| render::draw(frame, app))?;
 

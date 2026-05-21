@@ -1042,6 +1042,9 @@ impl Session {
             let _ = self.store.save_messages(self.session_id, &json);
         }
 
+        // Signal remote control clients that the turn is complete.
+        crate::remote_channel::send_done();
+
         Ok(())
     }
 
@@ -1099,6 +1102,23 @@ impl Session {
             }
             "/hooks"       => crate::hooks::print_hooks_list(&self.hooks),
             "/mcp"         => self.cmd_mcp(arg),
+            "/remote"      => {
+                let port: u16 = arg.parse().unwrap_or(0);
+                crate::remote_channel::activate();
+                match crate::remote::start_server(port).await {
+                    Ok(actual_port) => {
+                        println!("  {} remote server on http://127.0.0.1:{}", "⚡".bright_yellow(), actual_port);
+                        match crate::remote::launch_tunnel(actual_port).await {
+                            Ok(url) => {
+                                println!("  {} {}", "🌐".truecolor(100, 200, 255), url.cyan().bold());
+                                println!("     Open on any device — type messages, get responses in real time.");
+                            }
+                            Err(e) => println!("  {} tunnel failed: {} — use local URL on same network", "⚠".yellow(), e),
+                        }
+                    }
+                    Err(e) => println!("  {} {}", "✗".red(), e),
+                }
+            }
             "/tasks"       => self.cmd_tasks().await,
             "/think"       => self.cmd_think(arg),
             "/index"       => self.cmd_index(arg),

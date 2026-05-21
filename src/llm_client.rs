@@ -337,6 +337,8 @@ impl AnthropicClient {
                     if dtype == "text_delta" {
                         let chunk = delta["text"].as_str().unwrap_or("");
                         if !chunk.is_empty() {
+                            // Always forward to remote control (no-op if inactive).
+                            crate::remote_channel::send_chunk(chunk);
                             if !suppress_stream {
                                 if let Some(cb) = before_output.take() { cb(); }
                                 highlighter.push(chunk);
@@ -940,6 +942,7 @@ impl LlmProvider for OpenAiClient {
 
                             if let Some(text) = delta["content"].as_str() {
                                 if !text.is_empty() {
+                                    crate::remote_channel::send_chunk(text);
                                     if !self.suppress_stream {
                                         if let Some(cb) = before_output.take() { cb(); }
                                         highlighter.push(text);

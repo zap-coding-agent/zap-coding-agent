@@ -91,6 +91,18 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 
+### Remote control
+| Feature | File | Notes |
+|---|---|---|
+| `/remote [port]` command | `src/remote.rs`, `src/remote_channel.rs` | Starts a local HTTP server + public tunnel; prints a URL you can open on any device (phone, tablet) to drive the current session |
+| Web chat UI | `src/remote.rs:UI_HTML` | Dark-theme mobile-friendly chat page embedded in the binary; WebSocket for real-time streaming; auto-reconnect on disconnect |
+| Streaming to browser | `src/llm_client.rs`, `src/remote_channel.rs` | `send_chunk()` tapped into both Anthropic SSE and OpenAI streaming paths — no-op when remote is inactive |
+| Turn-done signal | `src/session/mod.rs`, `src/remote_channel.rs` | `send_done()` called after every `handle_user_turn` so the browser re-enables input exactly when the agent finishes |
+| TUI integration | `src/tui/mod.rs` | `try_recv()` at top of each TUI loop iteration — remote messages injected as user turns with a chat bubble; zero overhead when inactive |
+| CLI integration | `src/session/mod.rs` | `/remote` in CLI slash dispatcher; local server URL printed; tunnel URL printed when ready |
+| Tunnel — ngrok | `src/remote.rs:launch_tunnel` | If ngrok is installed, starts it and queries `localhost:4040/api/tunnels` for the HTTPS URL |
+| Tunnel — localhost.run | `src/remote.rs:localhost_run_tunnel` | SSH fallback (`ssh -R 80:localhost:PORT nokey@localhost.run`) — needs no binary, just SSH |
+
 ### Skill system
 | Feature | File | Notes |
 |---|---|---|

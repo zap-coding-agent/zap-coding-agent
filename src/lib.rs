@@ -22,6 +22,8 @@ pub mod task_planner;
 pub mod tools;
 pub mod ui;
 pub mod workflow;
+pub mod remote_channel;
+pub mod remote;
 
 use anyhow::Result;
 
