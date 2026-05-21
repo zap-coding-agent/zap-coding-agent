@@ -227,6 +227,10 @@ impl Session {
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
 
+        // First run: write bundled skills to ~/.zap/skills/ so users can view/edit them.
+        // Skips any file that already exists — user edits are never overwritten.
+        let _bootstrapped = crate::skill_manager::bootstrap_bundled_skills();
+
         let skills    = crate::skill_manager::load_all_skills(&config.skill_paths);
         let always_on = crate::skill_manager::always_on_skills(&skills);
 
@@ -480,7 +484,7 @@ impl Session {
         }
 
         // Skip skill injection entirely for casual/greeting messages — saves 3-10k tokens.
-        let mut matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual_message(input) {
+        let matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual_message(input) {
             Vec::new()
         } else {
             let mut ms = crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
@@ -496,7 +500,9 @@ impl Session {
         };
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 
-        let effective_system = if matched_skills.is_empty() {
+        let effective_system = if is_casual_message(input) {
+            context_manager::build_casual_system_prompt(&self.config)
+        } else if matched_skills.is_empty() {
             self.system.clone()
         } else {
             let skill_summary = crate::skill_manager::skills_summary(&matched_skills);
@@ -1113,4 +1119,86 @@ fn is_casual_message(text: &str) -> bool {
         || t.starts_with(&format!("{} ", g))
         || t.starts_with(&format!("{},", g))
         || t.starts_with(&format!("{}!", g)))
+}
+
+#[cfg(test)]
+mod casual_tests {
+    use super::is_casual_message;
+
+    // ── Should match (casual) ─────────────────────────────────────────────────
+
+    #[test]
+    fn bare_greetings() {
+        for msg in &["hi", "Hello", "HEY", "howdy", "yo", "sup"] {
+            assert!(is_casual_message(msg), "{msg:?} should be casual");
+        }
+    }
+
+    #[test]
+    fn greeting_with_trailing_text() {
+        assert!(is_casual_message("hi there"));
+        assert!(is_casual_message("hello, world"));
+        assert!(is_casual_message("hey!"));
+        assert!(is_casual_message("good morning everyone"));
+    }
+
+    #[test]
+    fn acknowledgements() {
+        for msg in &["ok", "okay", "sure", "great", "thanks", "thank you", "ty",
+                     "thx", "cool", "awesome", "sounds good", "perfect",
+                     "got it", "makes sense"] {
+            assert!(is_casual_message(msg), "{msg:?} should be casual");
+        }
+    }
+
+    #[test]
+    fn capability_question() {
+        assert!(is_casual_message("what can you do"));
+        assert!(is_casual_message("what do you do"));
+    }
+
+    #[test]
+    fn mixed_case_and_whitespace() {
+        assert!(is_casual_message("  Hi  "));
+        assert!(is_casual_message("THANKS"));
+        assert!(is_casual_message("Hey there!"));
+    }
+
+    // ── Should NOT match (technical) ─────────────────────────────────────────
+
+    #[test]
+    fn technical_keywords_block_casual() {
+        let cases = [
+            "hi, can you fix this bug",
+            "hey, show me the code",
+            "hello, how do I build this",
+            "ok, what is the error",
+            "sure, create a test",
+            "great, can you add a function",
+        ];
+        for msg in &cases {
+            assert!(!is_casual_message(msg), "{msg:?} should NOT be casual");
+        }
+    }
+
+    #[test]
+    fn long_message_never_casual() {
+        let long = "hi ".repeat(30); // > 80 chars
+        assert!(!is_casual_message(&long));
+    }
+
+    #[test]
+    fn technical_standalone() {
+        for msg in &["fix the login bug", "refactor this module",
+                     "write a test", "explain this function", "find the error"] {
+            assert!(!is_casual_message(msg), "{msg:?} should NOT be casual");
+        }
+    }
+
+    #[test]
+    fn not_a_known_greeting_prefix() {
+        assert!(!is_casual_message("random stuff"));
+        assert!(!is_casual_message("welcome back"));
+        assert!(!is_casual_message("morning"));
+    }
 }

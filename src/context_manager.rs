@@ -5,6 +5,16 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
     build_system_prompt_with_skills(config, "")
 }
 
+/// Minimal system prompt for casual/greeting turns — omits code-nav, tool-policy,
+/// sub-agent, security, git-status, and CLAUDE.md sections. Saves ~6-8k tokens.
+pub fn build_casual_system_prompt(config: &Config) -> String {
+    format!(
+        "You are a helpful AI coding assistant (model: {}).\n\
+         Be concise and conversational. Do not add filler phrases.",
+        config.model
+    )
+}
+
 /// Build the system prompt, optionally injecting pre-matched skill content.
 pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Result<String> {
 

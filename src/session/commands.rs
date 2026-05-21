@@ -60,10 +60,12 @@ impl Session {
                 ("/memory get <key>",        "read a memory entry"),
                 ("/memory set <k> <v>",      "write a memory entry"),
                 ("/memory del <key>",        "delete a memory entry"),
-                ("/skill list",              "list available skills"),
-                ("/skill scope",             "show/change domain skill scope for this session"),
-                ("/skill show <name>",       "preview a skill"),
-                ("/skill create <name>",     "create a skill file"),
+                ("/skill list",               "list available skills"),
+                ("/skill scope",              "show/change domain skill scope for this session"),
+                ("/skill show <name>",        "preview a skill"),
+                ("/skill export <name>",      "copy a built-in skill to ~/.zap/skills/ for editing"),
+                ("/skill export --all",       "export all built-in skills to ~/.zap/skills/"),
+                ("/skill create <name>",      "create a new skill file"),
                 ("/audit [N]",               "show last N audit log lines"),
                 ("/hooks",                   "list configured hooks"),
                 ("/mcp [list|edit|path]",    "view/edit MCP server configs"),
@@ -664,29 +666,12 @@ fn open_in_editor(path: &std::path::Path) {
 
 impl Session {
     pub fn cmd_paste(&mut self) {
+        #[cfg(windows)]
+        let tmp = r"C:\Windows\Temp\zap_clipboard_paste.png";
+        #[cfg(not(windows))]
         let tmp = "/tmp/zap_clipboard_paste.png";
-        let ok = std::process::Command::new("pngpaste")
-            .arg(tmp).status().map(|s| s.success()).unwrap_or(false);
-        let ok = ok || {
-            let script = format!(
-                r#"try
-  set d to (the clipboard as «class PNGf»)
-  set f to open for access POSIX file "{}" with write permission
-  set eof f to 0
-  write d to f
-  close access f
-  return true
-on error
-  return false
-end try"#,
-                tmp
-            );
-            std::process::Command::new("osascript")
-                .args(["-e", &script])
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
-                .unwrap_or(false)
-        };
+
+        let ok = paste_clipboard_image(tmp);
 
         if ok && std::path::Path::new(tmp).exists() {
             self.cmd_attach(tmp);
@@ -724,6 +709,86 @@ end try"#,
             }
             Err(e) => println!("  {} Could not read '{}': {}", "✗".red(), path, e),
         }
+    }
+}
+
+/// Try every available method to write the clipboard image to `dest`.
+/// Returns true if the file was written successfully.
+fn paste_clipboard_image(dest: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // Fast path: pngpaste CLI (brew install pngpaste)
+        if std::process::Command::new("pngpaste")
+            .arg(dest)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        // Fallback: AppleScript
+        let script = format!(
+            r#"try
+  set d to (the clipboard as «class PNGf»)
+  set f to open for access POSIX file "{dest}" with write permission
+  set eof f to 0
+  write d to f
+  close access f
+  return true
+on error
+  return false
+end try"#
+        );
+        return std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "true")
+            .unwrap_or(false);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // PowerShell: System.Windows.Forms has Clipboard::GetImage()
+        let script = format!(
+            r#"Add-Type -Assembly System.Windows.Forms; \
+$img = [System.Windows.Forms.Clipboard]::GetImage(); \
+if ($img -eq $null) {{ exit 1 }}; \
+$img.Save('{dest}'); exit 0"#
+        );
+        return std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Linux: try xclip then wl-paste (Wayland)
+        let xclip_ok = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", "image/png", "-o"])
+            .output()
+            .map(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    std::fs::write(dest, &o.stdout).is_ok()
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if xclip_ok { return true; }
+
+        std::process::Command::new("wl-paste")
+            .args(["--type", "image/png"])
+            .output()
+            .map(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    std::fs::write(dest, &o.stdout).is_ok()
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -1161,6 +1226,68 @@ impl Session {
                     None => println!("  {} Skill '{}' not found.", "✗".red(), name),
                 }
             }
+            "export" => {
+                let overwrite = name.contains("--overwrite");
+                let target    = name.replace("--overwrite", "").trim().to_string();
+
+                if target == "--all" || target.is_empty() && name.contains("--all") {
+                    // Export every bundled skill.
+                    let skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
+                    let bundled: Vec<_> = skills.iter()
+                        .filter(|s| s.source == crate::skill_manager::SkillSource::Bundled)
+                        .collect();
+                    if bundled.is_empty() {
+                        println!("  {} No built-in skills found.", "·".dimmed());
+                        return;
+                    }
+                    let mut ok = 0usize;
+                    let mut skipped = 0usize;
+                    for skill in &bundled {
+                        match crate::skill_manager::export_skill(skill, overwrite) {
+                            Ok(path) => {
+                                println!("  {} {}", "✓".green(), path.display().to_string().dimmed());
+                                ok += 1;
+                            }
+                            Err(e) if e.to_string().contains("already exists") => {
+                                println!("  {} {} (skip — already exported)", "·".dimmed(), skill.name.dimmed());
+                                skipped += 1;
+                            }
+                            Err(e) => println!("  {} {}: {}", "✗".red(), skill.name, e),
+                        }
+                    }
+                    println!("  {} exported {} skill(s){} to {}",
+                        "✓".green(), ok,
+                        if skipped > 0 { format!(", {} skipped", skipped) } else { String::new() },
+                        "~/.zap/skills/".cyan()
+                    );
+                    println!("  {} Edit the files, then restart zap to pick up changes.", "·".dimmed());
+                    self.skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
+                } else if target.is_empty() {
+                    println!("  Usage: /skill export <name> [--overwrite]  or  /skill export --all");
+                } else {
+                    // Export a single named skill.
+                    match self.skills.iter().find(|s| s.name == target).cloned() {
+                        None => println!("  {} Skill '{}' not found. Run /skill list.", "✗".red(), target),
+                        Some(skill) => {
+                            match crate::skill_manager::export_skill(&skill, overwrite) {
+                                Ok(path) => {
+                                    println!("  {} Exported to {}", "✓".green(), path.display().to_string().cyan());
+                                    println!("  {} Edit that file, then restart zap — your version will override the built-in.", "·".dimmed());
+                                    self.skills = crate::skill_manager::load_all_skills(&self.config.skill_paths);
+                                }
+                                Err(e) if e.to_string().contains("already exists") => {
+                                    println!("  {} {} — run with {} to replace it.",
+                                        "·".dimmed(),
+                                        e,
+                                        format!("/skill export {} --overwrite", target).cyan()
+                                    );
+                                }
+                                Err(e) => println!("  {} {}", "✗".red(), e),
+                            }
+                        }
+                    }
+                }
+            }
             "create" => {
                 if name.is_empty() { println!("  Usage: /skill create <name>"); return; }
                 match crate::skill_manager::create_skill(name, true) {
@@ -1244,7 +1371,7 @@ impl Session {
                     println!("  {} '{}' was not pinned", "·".dimmed(), name);
                 }
             }
-            _ => println!("  {} /skill list | use <name> | unuse <name> | scope [add|remove|reset] | show <name> | create <name> | capture <name> [--global]", "✗".red()),
+            _ => println!("  {} /skill list | show <name> | export <name|--all> | use <name> | unuse <name> | scope [add|remove|reset] | create <name> | capture <name> [--global]", "✗".red()),
         }
     }
 }

@@ -93,9 +93,13 @@ We ship small, reversible changes. Every PR needs a test. No console.log in prod
 | `~/.zap/skills/` | personal — all projects | middle |
 | binary | built-in defaults | lowest |
 
+On first launch zap writes all built-in skills to `~/.zap/skills/` automatically — open any file there to read or edit it. Same-name files you create override the built-in version on the next run.
+
 ```
 /skill list              # see all skills with source and always-on/triggered label
 /skill show <name>       # preview content + description + license
+/skill export <name>     # re-export a built-in to ~/.zap/skills/ (if you deleted it)
+/skill export --all      # re-export every built-in skill
 /skill create <name>     # scaffold a new skill in .zap/skills/
 /skill capture <name>    # extract instructions from this session into a reusable skill
 ```
@@ -561,15 +565,27 @@ Ship small. Write tests first. No magic numbers. Document the why, not the what.
 **Where to place skills:**
 
 ```
-~/.zap/skills/          personal, applies to all projects
+~/.zap/skills/          personal, applies to all projects  ← written here on first launch
 .zap/skills/            project-local, check into git for team sharing
 ```
 
-**Commands:**
+On first launch zap writes all built-in skills to `~/.zap/skills/`. Open any file there, edit it, and your version takes effect on the next run. Files are never overwritten — only new ones are added when you update zap.
+
+If you delete a file or want to reset a skill to its default, re-export it:
+
+```
+/skill export rust              # restore rust.md from the built-in
+/skill export --all             # restore every built-in skill
+/skill export rust --overwrite  # force-overwrite even if the file exists
+```
+
+**All commands:**
 
 ```
 /skill list                      list all skills (grouped: always-on / triggered)
 /skill show <name>               preview content, description, license
+/skill export <name>             re-export a built-in to ~/.zap/skills/
+/skill export --all              re-export every built-in skill
 /skill create <name>             scaffold a new skill in .zap/skills/
 /skill create <name> --global    scaffold in ~/.zap/skills/
 /skill capture <name>            extract rules from this session into a skill file

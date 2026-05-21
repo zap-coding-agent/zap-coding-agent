@@ -192,9 +192,81 @@ impl Tool for ListDirectoryTool {
     }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"].as_str().unwrap_or(".");
-        let out = crate::shell_runner::run_args("ls", &["-la", path]).await?;
-        Ok(out.stdout)
+        list_directory_native(path)
     }
+}
+
+/// Cross-platform directory listing using std::fs — no `ls` subprocess needed.
+/// Produces output similar to `ls -la`: type, size, modified time, name.
+fn list_directory_native(path: &str) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let dir = std::path::Path::new(path);
+    if !dir.exists() {
+        anyhow::bail!("list_directory: '{}' does not exist", path);
+    }
+    if !dir.is_dir() {
+        anyhow::bail!("list_directory: '{}' is not a directory", path);
+    }
+
+    let mut entries: Vec<std::fs::DirEntry> =
+        std::fs::read_dir(dir)
+            .map_err(|e| anyhow::anyhow!("list_directory: cannot read '{}': {}", path, e))?
+            .flatten()
+            .collect();
+    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    if entries.is_empty() {
+        return Ok(format!("(directory '{}' is empty)", path));
+    }
+
+    let mut out = String::new();
+    writeln!(out, "total {}", entries.len()).ok();
+
+    for entry in &entries {
+        let meta: std::fs::Metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => {
+                writeln!(out, "?  {:>10}  ????-??-?? ??:??  {}", "?", entry.file_name().to_string_lossy()).ok();
+                continue;
+            }
+        };
+
+        let kind = if meta.is_dir() { "d" } else if meta.is_symlink() { "l" } else { "-" };
+        let size = meta.len();
+
+        let modified: String = meta
+            .modified()
+            .ok()
+            .and_then(|t: std::time::SystemTime| {
+                t.duration_since(std::time::UNIX_EPOCH).ok().map(|d: std::time::Duration| {
+                    let s = d.as_secs();
+                    let days = s / 86400;
+                    let years = 1970u64 + days / 365;
+                    let doy   = days % 365;
+                    let month = (doy / 30 + 1).min(12);
+                    let day   = (doy % 30 + 1).min(31);
+                    let hour  = (s % 86400) / 3600;
+                    let min   = (s % 3600)  / 60;
+                    format!("{:04}-{:02}-{:02} {:02}:{:02}", years, month, day, hour, min)
+                })
+            })
+            .unwrap_or_else(|| "????-??-?? ??:??".to_string());
+
+        let name      = entry.file_name();
+        let name_str  = name.to_string_lossy();
+        let display   = if meta.is_dir() {
+            format!("{}/", name_str)
+        } else if meta.is_symlink() {
+            format!("{}@", name_str)
+        } else {
+            name_str.to_string()
+        };
+
+        writeln!(out, "{}  {:>10}  {}  {}", kind, size, modified, display).ok();
+    }
+
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -258,5 +330,52 @@ mod tests {
         let ctx = tool.permission_context(&input);
         assert!(!ctx.contains('\n'));
         assert!(ctx.starts_with("$ "));
+    }
+
+    // ── list_directory_native ─────────────────────────────────────────────────
+
+    #[test]
+    fn lists_real_directory() {
+        // Use the src/ directory — guaranteed to exist and have files.
+        let out = list_directory_native("src").expect("src/ should be listable");
+        assert!(out.contains("total "), "output should start with total line");
+        assert!(out.contains("session"), "src/ should contain session entry");
+    }
+
+    #[test]
+    fn marks_directories_with_slash() {
+        let out = list_directory_native("src").unwrap();
+        // The `session` directory entry must end with `/`
+        assert!(
+            out.lines().any(|l| l.trim_end().ends_with("session/")),
+            "directory entries should have trailing /"
+        );
+    }
+
+    #[test]
+    fn error_on_missing_path() {
+        let err = list_directory_native("/this/does/not/exist/anywhere");
+        assert!(err.is_err(), "missing path should return Err");
+        assert!(err.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn error_on_file_path() {
+        let err = list_directory_native("Cargo.toml");
+        assert!(err.is_err(), "passing a file path should return Err");
+        assert!(err.unwrap_err().to_string().contains("not a directory"));
+    }
+
+    #[test]
+    fn empty_dir_returns_explicit_message() {
+        let tmp = std::env::temp_dir().join("zap_test_empty_dir");
+        let _ = std::fs::create_dir_all(&tmp);
+        // Remove any leftover files from a previous run
+        for f in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+            let _ = std::fs::remove_file(f.path());
+        }
+        let out = list_directory_native(tmp.to_str().unwrap()).unwrap();
+        assert!(out.contains("empty"), "empty dir should say so explicitly");
+        let _ = std::fs::remove_dir(&tmp);
     }
 }

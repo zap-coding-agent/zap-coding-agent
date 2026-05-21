@@ -94,6 +94,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### Skill system
 | Feature | File | Notes |
 |---|---|---|
+| Skill bootstrap | `src/skill_manager.rs:bootstrap_bundled_skills` | on first launch writes all built-in skills to `~/.zap/skills/`; never overwrites existing files |
 | Skill loader | `src/skill_manager.rs:load_all_skills` | bundled → global → extra paths → project, same-name override |
 | Extra skill paths | `src/config.rs`, `src/skill_manager.rs` | `skill_paths = [".kiro/skills"]` in `~/.agent.toml`; shown as `◉ external` in `/skill list`; `~` expansion supported |
 | Always-on skills | `src/skill_manager.rs:always_on_skills` | no `trigger:` field = always injected |
@@ -107,8 +108,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/skill unuse <name>` | `src/session/commands.rs`, `src/tui/commands.rs` | unpin a skill; inline in TUI |
 | `/skill show <name>` | `src/session.rs:cmd_skill`, `src/tui/commands.rs` | description, license, content preview; inline in TUI |
 | `/skill scope` | `src/session/commands.rs`, `src/tui/commands.rs` | show/change domain scope; inline in TUI |
-| `/skill create` | `src/session.rs:cmd_skill` | scaffolds frontmatter template |
-| `/skill capture` | `src/session.rs:cmd_skill` | LLM extracts session rules → skill file |
+| `/skill export <name>` | `src/session/commands.rs:cmd_skill` | write built-in skill to `~/.zap/skills/` for editing; `--overwrite` flag |
+| `/skill export --all` | `src/session/commands.rs:cmd_skill` | export every built-in skill at once |
+| `skill_to_markdown()` | `src/skill_manager.rs` | serialize Skill struct → `.md` frontmatter + body |
+| `/skill create` | `src/session/commands.rs:cmd_skill` | scaffolds frontmatter template |
+| `/skill capture` | `src/session/commands.rs:cmd_skill` | LLM extracts session rules → skill file |
 | Pinned skills | `src/session/mod.rs:pinned_skills` | `HashSet` of skills pinned via `/skill use`; merged into per-turn matched skills before prompt build |
 | Project skills | `src/skill_manager.rs:skill_dirs` | `.zap/skills/` in CWD scanned at session start and on `/skill list`; highest priority, overrides same-name global/built-in |
 | Frontmatter: name, description, license, trigger, tokens | `src/skill_manager.rs:parse_frontmatter` | SKILL.md standard + zap extensions |
@@ -167,7 +171,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `git_pull` | fetch + merge; `rebase` flag; triggered by "pull / sync / get latest"; output printed inline |
 | `git_diff` | unstaged, staged (--cached), or between refs; output printed inline |
 | `search_code` | ripgrep (grep fallback), file-type filter |
-| `list_directory` | ls -la |
+| `list_directory` | pure Rust `read_dir` — works on Windows without Git Bash; trailing `/` on dirs |
 | `glob_read` | list/preview files matching a pattern |
 | `code_map` | AST structural outline (tree-sitter) |
 | `find_definition` | AST index → ripgrep fallback |
@@ -233,6 +237,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | System prompt builder | `src/context_manager.rs` | identity, env, code nav, tool policy, security rules |
+| Casual system prompt | `src/context_manager.rs:build_casual_system_prompt` | ~50-token minimal prompt for greeting/casual turns; skips code-nav, tool-policy, security, CLAUDE.md, git status |
 | CLAUDE.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
 | Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
 | Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
@@ -270,7 +275,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Tab completion | `src/ui.rs:ZapHelper` | slash commands |
 | Slash command picker | `src/ui.rs:show_command_picker` | `/` on empty line opens inquire picker |
 | Image attach | `src/session.rs:cmd_attach` | staged until next message |
-| Clipboard paste | `src/session.rs:cmd_paste` | pngpaste or AppleScript |
+| Clipboard paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
@@ -296,6 +301,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Permission modes, session grants, grant-class cross-grants, MCP "always" fallback, ctx newline contract | `src/permission_manager.rs` | 14 |
 | MCP command validation: known interpreters, Windows .exe variants, absolute paths, metacharacter/traversal rejection | `src/mcp.rs` | 9 |
 | Destructive pattern detection, safe commands, ShellTool permission_context newline contract | `src/tools/shell.rs` | 6 |
+| `list_directory_native`: real dir, trailing slash, missing path, file path, empty dir | `src/tools/shell.rs` | 5 |
+| `is_casual_message`: bare greetings, trailing text, acks, capability Q, mixed case, technical blocking, long msg, non-greeting prefix | `src/session/mod.rs` | 9 |
 | `spawn_agent` char-based truncation regression (byte-slice panic fix) | `src/tools/agent.rs` | 3 |
 | `filter_commands` skill completions | `src/tui/commands.rs` | 8 |
 | Pre-push hook | `.git/hooks/pre-push` | runs `cargo test` before every push |

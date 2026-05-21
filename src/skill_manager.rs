@@ -535,6 +535,82 @@ pub fn prompt_domain_scope(skills: &[Skill]) -> Option<Vec<String>> {
     }
 }
 
+// ── First-run bootstrap ───────────────────────────────────────────────────────
+
+/// Write bundled skills to `~/.zap/skills/` on first run (or when new built-ins
+/// are added in a later release). Already-edited user files are never overwritten.
+///
+/// Returns the number of files written (0 = already up to date).
+pub fn bootstrap_bundled_skills() -> usize {
+    let dir = match dirs::home_dir() {
+        Some(h) => h.join(".zap").join("skills"),
+        None    => return 0,
+    };
+    if std::fs::create_dir_all(&dir).is_err() { return 0; }
+
+    let mut written = 0usize;
+    for skill in bundled_skills() {
+        let dest = dir.join(format!("{}.md", skill.name));
+        if dest.exists() { continue; }           // user may have edited it — never clobber
+        if std::fs::write(&dest, skill_to_markdown(&skill)).is_ok() {
+            written += 1;
+        }
+    }
+    written
+}
+
+/// Serialize a `Skill` back to its `.md` frontmatter + body form.
+pub fn skill_to_markdown(skill: &Skill) -> String {
+    let triggers = skill.triggers
+        .iter()
+        .map(|t| format!("\"{}\"", t))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let category = match skill.category {
+        SkillCategory::Core     => "core",
+        SkillCategory::Practice => "practice",
+        SkillCategory::Domain   => "domain",
+    };
+    let mut fm = format!(
+        "---\nname: {}\ncategory: {}\n",
+        skill.name, category
+    );
+    if !skill.description.is_empty() {
+        fm.push_str(&format!("description: \"{}\"\n", skill.description));
+    }
+    if !triggers.is_empty() {
+        fm.push_str(&format!("trigger: [{}]\n", triggers));
+    }
+    if skill.token_estimate > 0 {
+        fm.push_str(&format!("tokens: {}\n", skill.token_estimate));
+    }
+    if let Some(ref lic) = skill.license {
+        fm.push_str(&format!("license: \"{}\"\n", lic));
+    }
+    fm.push_str("---\n\n");
+    fm.push_str(skill.content.trim());
+    fm.push('\n');
+    fm
+}
+
+/// Export a skill to `~/.zap/skills/<name>.md` so the user can view and edit it.
+/// Returns the path written. Fails if the file already exists and `overwrite` is false.
+pub fn export_skill(skill: &Skill, overwrite: bool) -> Result<PathBuf> {
+    let dir = dirs::home_dir()
+        .map(|h| h.join(".zap").join("skills"))
+        .ok_or_else(|| anyhow::anyhow!("cannot locate home directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.md", skill.name));
+    if path.exists() && !overwrite {
+        anyhow::bail!(
+            "'{}' already exists — pass --overwrite to replace it",
+            path.display()
+        );
+    }
+    std::fs::write(&path, skill_to_markdown(skill))?;
+    Ok(path)
+}
+
 /// Save a skill captured from conversation.
 pub fn save_captured_skill(name: &str, content: &str, global: bool) -> Result<PathBuf> {
     let dir = if global {
