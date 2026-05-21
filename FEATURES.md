@@ -63,7 +63,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | TUI color + rendering fixes (v0.7.3) | `src/tui/render.rs` | Replace `│` (U+2502) markers with plain spaces in tool_call_lines and diff_block_lines — U+2502 rendered as 'd' on many terminals causing '181d' artifacts. Brighten all muted colors: preview text Rgb(205,200,225), context diff lines Rgb(175,170,200), tool names/labels, elapsed times, code block line numbers. Replace all `Color::DarkGray` with explicit Rgb values for consistent cross-terminal contrast. |
 | TUI preview width clamp + scatter fix (v0.7.4) | `src/tui/render.rs` | Pass `width` through `tool_call_lines` and `diff_block_lines`; truncate every preview/diff line to `width-6` chars with `…` suffix — prevents long lines overflowing into sidebar and soft-wrapping as scattered characters. Tab expansion (`\t` → 4 spaces) stops tab-indented code rendering as giant gaps. Sidebar and header-info label/value colors brightened (Rgb(130,125,155) labels, Rgb(205,200,230) values). |
 | Fix green/red diff lines leaking into TUI (v0.7.9) | `src/tools/file.rs` | `print_diff()` called `println!` with ANSI colored `+`/`-` lines directly to stdout inside `edit_file` and `batch_edit`, bypassing TUI mode — the output wrote into the alternate screen buffer mid-render. Gated both `print_diff()` calls with `if !is_tui_mode()` to match the existing session-level `print_tool_output` gate. |
-| Token transparency + casual-message skip (v0.8.2) | `src/tui/channel.rs`, `src/tui/app.rs`, `src/tui/render.rs`, `src/session/mod.rs` | Sidebar now shows actual API token counts: `in/out` (blue/green) = cumulative session input & output tokens from API response (includes system prompt, history, tool defs); `cached` shown when cache hits > 0. Greeting/casual messages (hi, hello, thanks, ok, etc.) skip skill injection entirely — saves 3-10k tokens per casual turn. `is_casual_message()` checks message length, absence of technical keywords, and presence of greeting patterns. |
+| Token transparency + casual-message skip (v0.8.2) | `src/tui/channel.rs`, `src/tui/app.rs`, `src/tui/render.rs`, `src/session/mod.rs` | Sidebar now shows actual API token counts: `in/out` (blue/green) = cumulative session input & output tokens from API response (includes system prompt, history, tool defs); `cached` shown when cache hits > 0. Greeting/casual messages (hi, hello, thanks, ok, etc.) skip skill injection AND tool definitions entirely — saves 3-12k tokens per casual turn. `is_casual_message()` checks message length, absence of technical keywords, and presence of greeting patterns. |
 | Ctrl+O cycling + deeper preview + deepseek context (v0.8.1) | `src/tui/mod.rs`, `src/tui/render.rs`, `src/tui/input.rs`, `src/session/mod.rs` | Ctrl+O now cycles through tools newest-first (each press expands the next unexpanded tool; when all are expanded, one more press collapses all). Works in all states (not just Idle). Streaming tool calls also respect `expanded_tools`. Preview depth increased from 3 to 10 lines. `deepseek` models get 64k context limit instead of the 32k local default. |
 | `/goal` autonomous loop + TUI polish (v0.8.3) | `src/tui/mod.rs`, `src/tui/app.rs`, `src/tui/render.rs` | `/goal <condition>` runs turns automatically until LLM ends response with `✓ DONE` or max-turns limit (default 20, `--max N`). `/goal stop` cancels mid-flight. Goal section in sidebar (condition, turn X/max, elapsed). Goal badge in status bar. Goal indicator in dir panel replaces hints when active. Ctrl+C cancels goal. Dir panel condensed 6→3 rows. Debug logging stripped. |
 | TUI summary rendering + elapsed time (v0.8.0) | `src/tui/render.rs`, `src/tui/app.rs`, `src/tui/syntax.rs` | Span-aware markdown word wrap: long prose paragraphs now reflow across lines while preserving bold/italic/inline-code styling. Inline code rendered with cyan-on-dark-blue background box. Elapsed seconds shown next to thinking spinner ("Analyzing… 4s") in status bar, sidebar, and messages area. Word-rotation interval slowed from 240ms to ~3s (`word_tick / 188`). `turn_tick` counter resets to 0 on each new turn start. |
@@ -279,7 +279,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/help` | `src/session.rs:cmd_help` | grouped command reference |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
-| MCP (eager-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; all servers connect at session startup — tools immediately available without an explicit `mcp_connect` call; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries (no `command`) are skipped with a warning; `autoApprove`/`disabledTools` fields tolerated — fully compatible with Claude Code / Roo Code shared configs |
+| MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers stay in `pending_mcp` at startup — zero process overhead; a synthetic `mcp_connect` tool is injected into every turn's tool list with per-server `description` + `toolsHint` lines so the LLM knows when to connect without paying for actual tool defs; on `mcp_connect(server)` call the process spawns, handshake runs, real tools are registered, and `tool_defs` is rebuilt for the next turn; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries skipped with warning; `autoApprove`/`disabledTools`/`toolsHint` fields supported |
 | MCP permission gate | `src/session/mod.rs`, `src/tools/mod.rs:is_mcp_tool` | in Ask mode, MCP tool calls are always shown for user approval (they aren't in WRITE_TOOLS so quick_check previously auto-approved them); `ToolRegistry::is_mcp_tool()` backed by a `HashSet` populated at connect time |
 | MCP stderr visibility | `src/mcp.rs:McpServer::connect` | server stderr piped to a background task; each line forwarded via `zap_warn!` — auth errors, startup failures, and 401s now appear in the TUI chat and `~/.zap/zap.log` instead of being silently discarded |
 | MCP permission context | `src/mcp.rs:McpTool::permission_context` | permission prompt shows `MCP · tool_name  (key=val  key=val)` — flat key=value pairs (strings truncated at 40 chars, nested objects skipped, max 4 args) |
@@ -365,6 +365,7 @@ Features from Claude Code worth bringing into zap. IDE integration, voice, enter
 
 ## Baseline token budget (honest numbers)
 
+### Normal turn (system prompt + tools + karpathy skill)
 | Component | Tokens |
 |---|---|
 | Identity + environment section | ~120 |
@@ -375,5 +376,14 @@ Features from Claude Code worth bringing into zap. IDE integration, voice, enter
 | CLAUDE.md (if present) | varies |
 | Agent memory (if any entries) | varies |
 | `karpathy-guidelines` (always-on) | ~600 |
-| **Total baseline (no CLAUDE.md, no memory)** | **~1,660 tokens** |
+| Tool definitions (~20 tools) | ~1,800 |
+| **Total baseline (no CLAUDE.md, no memory)** | **~3,460 tokens** |
 | Per triggered skill (avg) | +400–800 |
+
+### Casual turn (greeting / ack — `is_casual_message()` = true)
+| Component | Tokens |
+|---|---|
+| Minimal system prompt (2 lines) | ~20 |
+| Tool definitions | 0 (skipped) |
+| Skills | 0 (skipped) |
+| **Total baseline** | **~20–30 tokens** |

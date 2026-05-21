@@ -171,19 +171,33 @@ impl ToolRegistry {
         defs.sort_by_key(|d| d["name"].as_str().unwrap_or("").to_string());
 
         // Append a synthetic mcp_connect tool when there are unconnected servers.
-        // It disappears from the list once all servers have been connected.
+        // Each pending server gets a line with its description + tools_hint so the
+        // LLM knows when to connect it without paying for actual tool definitions.
+        // Disappears once all servers have been connected.
         if !self.pending_mcp.is_empty() {
-            let server_list = {
-                let mut names: Vec<&str> = self.pending_mcp.keys().map(|s| s.as_str()).collect();
-                names.sort_unstable();
-                names.join(", ")
-            };
+            let mut entries: Vec<&str> = self.pending_mcp.keys().map(|s| s.as_str()).collect();
+            entries.sort_unstable();
+
+            let server_lines: String = entries.iter().map(|name| {
+                let cfg = &self.pending_mcp[*name];
+                let mut line = format!("  - {}", name);
+                if let Some(desc) = &cfg.description {
+                    line.push_str(&format!(": {}", desc));
+                }
+                if let Some(hint) = &cfg.tools_hint {
+                    line.push_str(&format!(" [tools: {}]", hint));
+                }
+                line
+            }).collect::<Vec<_>>().join("\n");
+
+            let server_list = entries.join(", ");
+
             defs.push(serde_json::json!({
                 "name": "mcp_connect",
                 "description": format!(
-                    "Connect to an MCP server and load its tools into the session. \
+                    "Connect to an MCP server and register its tools into this session. \
                      Call this before using any tool from that server. \
-                     Available servers: {server_list}."
+                     Available servers:\n{server_lines}"
                 ),
                 "input_schema": {
                     "type": "object",
@@ -199,5 +213,128 @@ impl ToolRegistry {
         }
 
         defs
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod mcp_lazy_tests {
+    use super::*;
+    use crate::mcp::{McpConfig, McpServerConfig};
+    use std::collections::HashMap;
+
+    fn make_cfg(description: Option<&str>, tools_hint: Option<&str>) -> McpServerConfig {
+        McpServerConfig {
+            command: "npx".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            description: description.map(|s| s.to_string()),
+            tools_hint: tools_hint.map(|s| s.to_string()),
+        }
+    }
+
+    fn registry_with_pending(servers: Vec<(&str, McpServerConfig)>) -> ToolRegistry {
+        let mut cfg = McpConfig::default();
+        for (name, server_cfg) in servers {
+            cfg.servers.insert(name.to_string(), server_cfg);
+        }
+        let mut r = ToolRegistry::new();
+        r.load_mcp_lazy(cfg);
+        r
+    }
+
+    #[test]
+    fn no_mcp_connect_when_no_pending_servers() {
+        let r = ToolRegistry::new();
+        let defs = r.tool_definitions();
+        assert!(!defs.iter().any(|d| d["name"] == "mcp_connect"),
+            "mcp_connect should not appear when there are no pending servers");
+    }
+
+    #[test]
+    fn mcp_connect_stub_present_with_pending_servers() {
+        let r = registry_with_pending(vec![
+            ("fetch", make_cfg(None, None)),
+        ]);
+        let defs = r.tool_definitions();
+        let stub = defs.iter().find(|d| d["name"] == "mcp_connect")
+            .expect("mcp_connect stub should be present when servers are pending");
+        assert_eq!(stub["input_schema"]["required"][0], "server");
+    }
+
+    #[test]
+    fn stub_description_includes_server_name() {
+        let r = registry_with_pending(vec![
+            ("filesystem", make_cfg(None, None)),
+        ]);
+        let defs = r.tool_definitions();
+        let stub = defs.iter().find(|d| d["name"] == "mcp_connect").unwrap();
+        let desc = stub["description"].as_str().unwrap();
+        assert!(desc.contains("filesystem"), "description should list server name");
+    }
+
+    #[test]
+    fn stub_description_includes_description_field() {
+        let r = registry_with_pending(vec![
+            ("fetch", make_cfg(Some("Fetch URLs as markdown"), None)),
+        ]);
+        let defs = r.tool_definitions();
+        let stub = defs.iter().find(|d| d["name"] == "mcp_connect").unwrap();
+        let desc = stub["description"].as_str().unwrap();
+        assert!(desc.contains("Fetch URLs as markdown"),
+            "description field should appear in stub");
+    }
+
+    #[test]
+    fn stub_description_includes_tools_hint() {
+        let r = registry_with_pending(vec![
+            ("fs", make_cfg(None, Some("read_file, write_file"))),
+        ]);
+        let defs = r.tool_definitions();
+        let stub = defs.iter().find(|d| d["name"] == "mcp_connect").unwrap();
+        let desc = stub["description"].as_str().unwrap();
+        assert!(desc.contains("read_file, write_file"),
+            "toolsHint should appear in stub description");
+    }
+
+    #[test]
+    fn stub_lists_multiple_servers_sorted() {
+        let r = registry_with_pending(vec![
+            ("memory", make_cfg(None, None)),
+            ("fetch",  make_cfg(None, None)),
+            ("github", make_cfg(None, None)),
+        ]);
+        let defs = r.tool_definitions();
+        let stub = defs.iter().find(|d| d["name"] == "mcp_connect").unwrap();
+        let desc = stub["description"].as_str().unwrap();
+        // All three names present.
+        assert!(desc.contains("fetch") && desc.contains("github") && desc.contains("memory"));
+        // Sorted: fetch before github before memory.
+        assert!(desc.find("fetch") < desc.find("github"));
+        assert!(desc.find("github") < desc.find("memory"));
+    }
+
+    #[test]
+    fn load_mcp_lazy_stores_all_servers() {
+        let r = registry_with_pending(vec![
+            ("a", make_cfg(None, None)),
+            ("b", make_cfg(None, None)),
+        ]);
+        assert!(r.has_pending_mcp());
+        let pending = r.pending_mcp_servers();
+        assert_eq!(pending.len(), 2);
+        let names: Vec<&str> = pending.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"a") && names.contains(&"b"));
+    }
+
+    #[test]
+    fn pending_mcp_servers_returns_description() {
+        let r = registry_with_pending(vec![
+            ("srv", make_cfg(Some("my description"), None)),
+        ]);
+        let pending = r.pending_mcp_servers();
+        let (_, desc) = pending[0];
+        assert_eq!(desc, Some("my description"));
     }
 }

@@ -36,7 +36,13 @@ struct RawServerEntry {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+    /// Human-readable summary shown in mcp_connect stub and /mcp list.
     pub description: Option<String>,
+    /// Optional comma-separated hint of key tool names — shown in the mcp_connect
+    /// stub so the LLM knows what this server offers before connecting.
+    /// Example: "read_file, write_file, list_directory"
+    #[serde(rename = "toolsHint")]
+    pub tools_hint: Option<String>,
     /// SSE/HTTP transport — url instead of command (not yet supported by zap).
     pub url: Option<String>,
     /// Claude Code / Roo Code — when true, skip this server entirely.
@@ -69,6 +75,8 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     pub env: std::collections::HashMap<String, String>,
     pub description: Option<String>,
+    /// Key tool names shown in the mcp_connect stub — lets LLM plan without connecting.
+    pub tools_hint: Option<String>,
 }
 
 /// Validate an MCP server config before spawning its process.
@@ -139,6 +147,7 @@ pub(crate) fn load_file(path: &std::path::Path) -> McpConfig {
                     args: entry.args,
                     env: entry.env,
                     description: entry.description,
+                    tools_hint: entry.tools_hint,
                 });
             }
             None => {
@@ -398,6 +407,7 @@ mod tests {
             args: vec![],
             env: std::collections::HashMap::new(),
             description: None,
+            tools_hint: None,
         }
     }
 

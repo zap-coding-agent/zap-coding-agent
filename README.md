@@ -146,47 +146,109 @@ cp target/release/zap ~/.local/bin/zap
 
 ---
 
-### 4. Lazy MCP Loading — Zero Token Cost Until You Need It
+### 4. MCP Support — Lazy-Loaded, Cross-Agent Compatible
 
-Most agents with MCP support connect to **every configured server at startup** and dump all their tool schemas into the LLM's context on every turn. Ten MCP servers with five tools each? That's potentially 10,000+ wasted tokens per request — even if you never touch those tools.
+MCP (Model Context Protocol) is an open standard. **Any MCP server you configure in zap also works in Claude Code, Cursor, Kiro, and other agents** — the config format is shared. zap adds two optional fields (`description`, `toolsHint`) that other agents silently ignore, so your config file is fully portable.
 
-zap solves this with **lazy loading**:
+#### Config file locations
+
+| File | Scope |
+|---|---|
+| `~/.zap/mcp.json` | Global — applies to every session |
+| `.mcp.json` (project root) | Project-local — checked into git, takes precedence |
+
+#### How lazy loading works
+
+Most agents connect to every configured server at startup and dump all tool schemas into the LLM's context on every turn. Ten servers × five tools each = 10 000+ wasted tokens per request, whether you use them or not.
+
+zap keeps every server in a **pending** state at startup. Instead of their tool schemas, the LLM gets one lightweight stub:
+
+```
+mcp_connect(server)
+  - filesystem: Read/write files in /tmp and the project  [tools: read_file, write_file, list_directory…]
+  - fetch: Fetch web pages as markdown                    [tools: fetch]
+  - memory: Persistent knowledge graph                    [tools: create_entities, search_nodes…]
+```
+
+When the LLM decides it needs a server, it calls `mcp_connect("filesystem")`. zap spawns the process, runs the handshake, fetches the real `tools/list`, and registers those tools — all within the same agentic turn. The very next LLM call sees the full tool schema and can invoke the tools directly. Once a server is connected, `mcp_connect` no longer appears for it.
 
 | Stage | Other agents | zap |
 |---|---|---|
-| Startup | Spawns all server processes | Reads `.mcp.json`, stores configs only |
-| System prompt | (silent) | Server names + descriptions injected |
-| LLM tool list | All tool schemas, always | Just `mcp_connect(server)` until needed |
-| First use | Already connected | Spawns process, handshakes, loads tools |
-| Next LLM call | — | Real schemas in context, ready to call |
+| Startup | Spawns all server processes | Reads config only — zero processes |
+| LLM tool list per turn | All tool schemas, always | One `mcp_connect` stub until needed |
+| First use of a server | Already connected | Spawns process on demand, ~200 ms |
+| After first use | — | Real schemas in context, `mcp_connect` gone |
 
-**How it works in practice:**
-
-The LLM is told what MCP servers exist (by name and description) in the system prompt — enough to decide which to use. When it needs one, it calls `mcp_connect("filesystem")`. zap spawns the process, runs the MCP handshake, fetches `tools/list`, registers the tools, and updates the LLM's tool list in the same agentic turn. The very next call in that turn sees the full tool list and can invoke them directly.
-
-Once connected, `mcp_connect` disappears from the tool list for that server — no overhead for already-loaded servers.
-
-**`.mcp.json` with optional descriptions** (backwards-compatible):
+#### Sample `~/.zap/mcp.json`
 
 ```json
 {
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
-      "description": "Read and write local files"
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp", "/home/user/project"],
+      "description": "Read and write files inside /tmp and the project directory",
+      "toolsHint": "read_file, write_file, edit_file, list_directory, search_files"
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "Fetch any URL and return it as clean markdown",
+      "toolsHint": "fetch"
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "Persistent knowledge graph — entities and relations survive across sessions",
+      "toolsHint": "create_entities, create_relations, search_nodes, read_graph"
     },
     "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "ghp_..." },
-      "description": "GitHub repos, issues, and pull requests"
+      "env": { "GITHUB_TOKEN": "ghp_your_token_here" },
+      "description": "GitHub repos, issues, pull requests, and code search",
+      "toolsHint": "create_issue, create_pull_request, search_code, list_commits"
     }
   }
 }
 ```
 
-The `description` field is shown to the LLM before the server is connected — so it can decide which server is relevant without loading any of them.
+#### Fields
+
+| Field | Required | Portable | Description |
+|---|---|---|---|
+| `command` | yes | yes | Executable to spawn (`npx`, `uvx`, `node`, absolute path) |
+| `args` | yes | yes | Arguments passed to the command |
+| `env` | no | yes | Extra environment variables (API keys, tokens) |
+| `description` | no | yes* | What this server does — shown in `mcp_connect` stub so the LLM knows when to connect it |
+| `toolsHint` | no | zap-only | Comma-separated key tool names — lets the LLM plan without connecting |
+| `disabled` | no | yes | Set `true` to skip this server entirely |
+| `autoApprove` | no | yes | Tool names to auto-approve (Claude Code convention, parsed but not yet enforced) |
+
+\* `description` is a zap extension. Other agents that don't know the field simply ignore it.
+
+#### MCP commands
+
+```
+/mcp list              list all servers — connected, pending, or failed
+/mcp edit              open ~/.zap/mcp.json in $EDITOR
+/mcp edit project      open .mcp.json (project-level config)
+/mcp path              print both config file paths
+```
+
+#### Installing public MCP servers
+
+The two most useful zero-config servers:
+
+```bash
+# filesystem — read/write local files (requires Node)
+# add to mcp.json: "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/your/allowed/path"]
+
+# fetch — fetch any URL as markdown (requires Python + uv)
+# add to mcp.json: "command": "uvx", "args": ["mcp-server-fetch"]
+```
+
+Both install automatically on first connect via `npx -y` / `uvx` — no manual `npm install` needed.
 
 ---
 
@@ -234,7 +296,7 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
 | **Branching** | `/branch` forks a conversation like a git branch; `/switch` to move between them |
 | **Sub-agents** | `spawn_agent` runs parallel sub-agents, each with its own tool loop |
-| **MCP (lazy-loaded)** | `.mcp.json` servers connected on demand — zero token cost until first use; `mcp_connect` tool auto-expands tool list mid-turn |
+| **MCP (lazy-loaded)** | Standard `.mcp.json` format — works in Claude Code, Cursor, Kiro; zap adds `description` + `toolsHint` fields (ignored by other agents); servers connect on demand via `mcp_connect` stub; zero processes and zero token cost until first use |
 | **Workflows** | Declarative YAML multi-step pipelines in `.zap/workflows/` — versioned with your repo |
 | **Images** | `/attach <path>` or `/paste` clipboard — multimodal on supported models |
 | **Audit log** | Every tool call written to `agent_audit.jsonl` |

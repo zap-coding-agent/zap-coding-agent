@@ -205,7 +205,7 @@ impl Session {
         let mut system = context_manager::build_system_prompt(config)?;
         let mut tools = ToolRegistry::new();
 
-        // MCP: load config, connect all servers eagerly so tools are immediately available.
+        // MCP: load config into pending_mcp — servers connect on first use via mcp_connect tool.
         let mcp_cfg = crate::mcp::load_config();
         let mcp_had_config = mcp_cfg.had_config;
         let mcp_server_count = mcp_cfg.servers.len();
@@ -216,13 +216,6 @@ impl Session {
         if config.agent_depth > 0 {
             tools.register(std::sync::Arc::new(SpawnAgentTool::new(config.clone())));
         }
-
-        // Eagerly connect all MCP servers — tools land in tool_defs before session starts.
-        let mcp_connect_results = if mcp_server_count > 0 {
-            tools.connect_all_mcp().await
-        } else {
-            vec![]
-        };
 
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
@@ -294,36 +287,18 @@ impl Session {
             );
         }
 
-        if !mcp_connect_results.is_empty() && !config.is_subagent && !config.tui_mode {
-            let total_tools: usize = mcp_connect_results.iter()
-                .filter_map(|(_, r)| r.as_ref().ok())
-                .map(|names| names.len())
-                .sum();
-            let ok_servers: Vec<&str> = mcp_connect_results.iter()
-                .filter(|(_, r)| r.is_ok())
-                .map(|(n, _)| n.as_str())
+        if mcp_server_count > 0 && !config.is_subagent && !config.tui_mode {
+            let mut server_names: Vec<&str> = tools.pending_mcp_servers()
+                .iter()
+                .map(|(n, _)| *n)
                 .collect();
-            let failed_servers: Vec<(&str, &anyhow::Error)> = mcp_connect_results.iter()
-                .filter_map(|(n, r)| r.as_ref().err().map(|e| (n.as_str(), e)))
-                .collect();
-
-            if !ok_servers.is_empty() {
-                println!(
-                    "  {} {} MCP server(s) connected: {}  ({} tools)",
-                    "⬡".truecolor(255, 140, 60),
-                    ok_servers.len().to_string().cyan(),
-                    ok_servers.join(", ").dimmed(),
-                    total_tools.to_string().cyan(),
-                );
-            }
-            for (name, err) in &failed_servers {
-                println!(
-                    "  {} MCP '{}' failed to connect: {}",
-                    "✗".truecolor(220, 80, 80),
-                    name.truecolor(255, 140, 60),
-                    err.to_string().truecolor(220, 80, 80),
-                );
-            }
+            server_names.sort_unstable();
+            println!(
+                "  {} {} MCP server(s) available (lazy): {}",
+                "⬡".truecolor(255, 140, 60),
+                server_names.len().to_string().cyan(),
+                server_names.join(", ").dimmed(),
+            );
         } else if mcp_had_config && !config.is_subagent && !config.tui_mode {
             println!(
                 "  {} {}",
@@ -576,8 +551,15 @@ impl Session {
             let turn_tools = select_tools_for_turn(
                 &self.tool_defs, input, &self.config, &self.messages,
             );
+            // Casual turns (greetings, acks) will never call a tool — skip the
+            // entire tool definitions array to avoid paying ~2k tokens for nothing.
+            let effective_tools: &[serde_json::Value] = if is_casual_message(input) {
+                &[]
+            } else {
+                &turn_tools
+            };
             let result = self.client
-                .send(&effective_system, &self.messages, &turn_tools, Some(before_output), self.thinking_budget)
+                .send(&effective_system, &self.messages, effective_tools, Some(before_output), self.thinking_budget)
                 .await;
             spinner.finish_and_clear();
             let response = result?;
@@ -692,6 +674,7 @@ impl Session {
 
             // Phase 1: permissions — quick-check each call, then ONE grouped prompt
             // for anything that needs user input (instead of per-call prompts).
+            #[derive(Clone)]
             struct ApprovedCall {
                 id:    String,
                 name:  String,
@@ -802,6 +785,73 @@ impl Session {
                         });
                     }
                 }
+            }
+
+            // Phase 1b: handle mcp_connect calls (mutates tool registry — must run before parallel phase).
+            let mut connect_calls: Vec<ApprovedCall> = Vec::new();
+            approved.retain(|c| {
+                if c.name == "mcp_connect" { connect_calls.push(c.clone()); false } else { true }
+            });
+            for call in connect_calls {
+                let server_name = call.input["server"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+
+                // Emit ToolStart so TUI shows the connecting state.
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolStart {
+                    id:    call.id.clone(),
+                    name:  "mcp_connect".to_string(),
+                    label: server_name.clone(),
+                });
+                if !crate::tui::channel::is_tui_mode() {
+                    println!(
+                        "  {} {}  {}",
+                        "╭─".truecolor(70, 65, 90),
+                        "⬡ mcp_connect".truecolor(100, 210, 255).bold(),
+                        server_name.truecolor(130, 120, 155),
+                    );
+                }
+
+                let t0 = std::time::Instant::now();
+                let result_text = if server_name.is_empty() {
+                    "Error: server_name is required.".to_string()
+                } else {
+                    match self.tools.connect_mcp(&server_name).await {
+                        Ok(msg) => {
+                            self.tool_defs = self.tools.tool_definitions();
+                            msg
+                        }
+                        Err(e) => format!("Failed to connect to '{}': {}", server_name, e),
+                    }
+                };
+                let ms = t0.elapsed().as_millis();
+                let success = !result_text.starts_with("Failed") && !result_text.starts_with("Error");
+
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
+                    id:         call.id.clone(),
+                    elapsed_ms: ms as u64,
+                    success,
+                    preview:    result_text.clone(),
+                });
+                if !crate::tui::channel::is_tui_mode() {
+                    if success {
+                        println!("  {} {}  {}",
+                            "╰─".truecolor(70, 65, 90),
+                            "✓".truecolor(80, 210, 120),
+                            format!("{}ms", ms).truecolor(90, 85, 110));
+                    } else {
+                        println!("  {} {} {}",
+                            "╰─".truecolor(70, 65, 90),
+                            "✗".truecolor(220, 80, 80),
+                            result_text.truecolor(220, 80, 80));
+                    }
+                }
+
+                tool_results.push(ContentBlock::ToolResult {
+                    tool_use_id: call.id,
+                    content:     result_text,
+                });
             }
 
             // Snapshot (name, input) for PostToolUse hooks before consuming `approved`.
