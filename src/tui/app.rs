@@ -145,6 +145,9 @@ pub struct App {
     pub context_pct: u8,
     pub turn: usize,
     pub total_cost_usd: f64,
+    pub tokens_input: u32,
+    pub tokens_output: u32,
+    pub tokens_cache_read: u32,
 
     pub error: Option<String>,
 
@@ -202,6 +205,9 @@ impl App {
             context_pct: 0,
             turn: 0,
             total_cost_usd: 0.0,
+            tokens_input: 0,
+            tokens_output: 0,
+            tokens_cache_read: 0,
             error: None,
             picker_sel: 0,
             cwd: std::env::current_dir()
@@ -275,8 +281,11 @@ impl App {
                 }
                 self.state = AppState::Thinking;
             }
-            TuiEvent::CostUpdate { total_usd } => {
+            TuiEvent::CostUpdate { total_usd, input, output, cache_read } => {
                 self.total_cost_usd = total_usd;
+                self.tokens_input = input;
+                self.tokens_output = output;
+                self.tokens_cache_read = cache_read;
             }
             TuiEvent::ContextUpdate { pct, turn } => {
                 self.context_pct = pct;

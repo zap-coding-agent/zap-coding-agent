@@ -29,7 +29,7 @@ pub enum TuiEvent {
     ThinkingChunk(String),
     ToolStart { id: String, name: String, label: String },
     ToolDone  { id: String, elapsed_ms: u64, success: bool, preview: String },
-    CostUpdate { total_usd: f64 },
+    CostUpdate { total_usd: f64, input: u32, output: u32, cache_read: u32 },
     ContextUpdate { pct: u8, turn: usize },
 }
 

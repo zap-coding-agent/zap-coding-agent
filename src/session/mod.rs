@@ -479,16 +479,21 @@ impl Session {
             );
         }
 
-        let mut matched_skills: Vec<&crate::skill_manager::Skill> =
-            crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
-        // Inject explicitly pinned skills every turn regardless of trigger matching.
-        for skill in &self.skills {
-            if self.pinned_skills.contains(&skill.name)
-                && !matched_skills.iter().any(|s| s.name == skill.name)
-            {
-                matched_skills.push(skill);
+        // Skip skill injection entirely for casual/greeting messages — saves 3-10k tokens.
+        let mut matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual_message(input) {
+            Vec::new()
+        } else {
+            let mut ms = crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
+            // Inject explicitly pinned skills every turn regardless of trigger matching.
+            for skill in &self.skills {
+                if self.pinned_skills.contains(&skill.name)
+                    && !ms.iter().any(|s| s.name == skill.name)
+                {
+                    ms.push(skill);
+                }
             }
-        }
+            ms
+        };
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 
         let effective_system = if matched_skills.is_empty() {
@@ -641,6 +646,9 @@ impl Session {
                                / 1_000_000.0;
                 crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::CostUpdate {
                     total_usd,
+                    input:      self.session_usage.input_tokens,
+                    output:     self.session_usage.output_tokens,
+                    cache_read: self.session_usage.cache_read_tokens,
                 });
                 crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ContextUpdate {
                     pct: post_pct,
@@ -1077,4 +1085,32 @@ impl Session {
         }
         false
     }
+}
+
+/// Returns true when the message is a casual greeting or short social phrase
+/// where injecting skills/tool context would waste tokens with no benefit.
+fn is_casual_message(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    // Long messages are never casual.
+    if t.len() > 80 { return false; }
+    // Any technical keywords → not casual.
+    let technical = ["fix", "bug", "code", "file", "function", "error", "test",
+                     "create", "add", "change", "update", "delete", "remove",
+                     "build", "run", "compile", "refactor", "write", "read",
+                     "show me", "explain", "how do", "what is", "why is",
+                     "implement", "debug", "check", "review", "edit", "find",
+                     "search", "list", "open", "close", "move", "rename"];
+    if technical.iter().any(|kw| t.contains(kw)) { return false; }
+    // Positive match: starts with or equals a greeting pattern.
+    let greetings = ["hi", "hello", "hey", "howdy", "greetings", "sup", "yo",
+                     "how are you", "what's up", "whats up", "good morning",
+                     "good evening", "good afternoon", "good night",
+                     "thanks", "thank you", "ty", "thx",
+                     "ok", "okay", "sure", "great", "nice", "cool", "awesome",
+                     "sounds good", "perfect", "got it", "makes sense",
+                     "what can you do", "what do you do"];
+    greetings.iter().any(|g| t == *g
+        || t.starts_with(&format!("{} ", g))
+        || t.starts_with(&format!("{},", g))
+        || t.starts_with(&format!("{}!", g)))
 }

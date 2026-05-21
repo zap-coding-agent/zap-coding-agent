@@ -459,6 +459,21 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     rows.push(kv("branch", app.branch.clone(), Color::Rgb(100, 200, 100)));
     rows.push(kv("turn", app.turn.to_string(), value_c));
     rows.push(kv("cost", cost_str, Color::Rgb(200, 180, 80)));
+    // Token breakdown — only shown once we have real data
+    if app.tokens_input > 0 || app.tokens_output > 0 {
+        let fmt_k = |n: u32| -> String {
+            if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() }
+        };
+        rows.push(Line::from(vec![
+            Span::styled(format!(" {:<9}", "in/out"), Style::default().fg(label_c)),
+            Span::styled(fmt_k(app.tokens_input),  Style::default().fg(Color::Rgb(140, 200, 255))),
+            Span::styled(" / ".to_string(), Style::default().fg(Color::Rgb(80, 75, 100))),
+            Span::styled(fmt_k(app.tokens_output), Style::default().fg(Color::Rgb(160, 220, 160))),
+        ]));
+        if app.tokens_cache_read > 0 {
+            rows.push(kv("cached", fmt_k(app.tokens_cache_read), Color::Rgb(160, 140, 220)));
+        }
+    }
     rows.push(Line::from(""));
     rows.push(Line::from(Span::styled(" context", Style::default().fg(head_c).bold())));
     let bar_color = if app.context_pct > 80 { Color::Rgb(220, 80, 80) }
