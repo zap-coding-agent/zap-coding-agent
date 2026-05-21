@@ -130,7 +130,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         let left = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(2),
-            Constraint::Length(6),
+            Constraint::Length(3),
         ])
         .split(body[0]);
 
@@ -490,6 +490,22 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(state_text, Style::default().fg(value_c)),
     ]));
 
+    // Goal section — only shown when a /goal is active
+    if let Some(ref gs) = app.goal_state {
+        let goal_c = Color::Rgb(120, 220, 180);
+        let short_cond: String = if gs.condition.chars().count() > 15 {
+            format!("{}…", gs.condition.chars().take(14).collect::<String>())
+        } else {
+            gs.condition.clone()
+        };
+        let elapsed = gs.started_at.elapsed().as_secs();
+        rows.push(Line::from(""));
+        rows.push(Line::from(Span::styled(" goal", Style::default().fg(goal_c).bold())));
+        rows.push(kv("cond", short_cond, Color::Rgb(190, 240, 210)));
+        rows.push(kv("turn", format!("{}/{}", gs.turns_done, gs.max_turns), Color::Rgb(220, 210, 100)));
+        rows.push(kv("time", format!("{}s", elapsed), Color::Rgb(170, 165, 195)));
+    }
+
     let block = Block::default().borders(Borders::LEFT).border_style(Style::default().fg(Color::Rgb(45, 42, 60)));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -500,70 +516,50 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_dir_panel(frame: &mut Frame, app: &App, area: Rect) {
     if area.height == 0 { return; }
+    let max_w = (area.width as usize).saturating_sub(6).max(20);
 
-    let mut rows: Vec<Line<'static>> = Vec::new();
-
-    // Show full absolute path, wrapping if needed
-    let max_width = (area.width as usize).saturating_sub(6);
-    let path_lines = wrap_path(&app.cwd, max_width);
-    
-    // Row 0: current dir (first line)
-    rows.push(Line::from(vec![
-        Span::styled("  ⌂ ", Style::default().fg(Color::Rgb(100, 95, 125))),
-        Span::styled(path_lines[0].clone(), Style::default().fg(Color::Rgb(140, 200, 255)).bold()),
-    ]));
-
-    // Additional path lines if wrapped
-    for line in path_lines.iter().skip(1) {
-        rows.push(Line::from(vec![
-            Span::styled("    ", Style::default()),
-            Span::styled(line.clone(), Style::default().fg(Color::Rgb(140, 200, 255)).bold()),
-        ]));
-    }
-    
-    // Hints row
-    rows.push(Line::from(vec![
-        Span::styled("     ", Style::default()),
-        Span::styled("Ctrl+P pick dir  /cd <path>", Style::default().fg(Color::Rgb(80, 75, 100))),
-    ]));
-
-    frame.render_widget(Paragraph::new(rows), area);
-}
-
-/// Wrap a path into multiple lines if it exceeds max_width.
-/// Tries to break at directory separators for readability.
-fn wrap_path(path: &str, max_width: usize) -> Vec<String> {
-    if path.chars().count() <= max_width {
-        return vec![path.to_string()];
-    }
-    
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    
-    for part in path.split('/') {
-        let addition = if current.is_empty() {
-            part.to_string()
+    // Front-truncate path if too long (show tail so the filename/project is always visible)
+    let path_display: String = {
+        let chars: Vec<char> = app.cwd.chars().collect();
+        if chars.len() <= max_w {
+            app.cwd.clone()
         } else {
-            format!("/{}", part)
-        };
-        
-        if current.chars().count() + addition.chars().count() > max_width && !current.is_empty() {
-            lines.push(current);
-            current = part.to_string();
-        } else {
-            current.push_str(&addition);
+            let keep = max_w.saturating_sub(1);
+            format!("…{}", chars[chars.len() - keep..].iter().collect::<String>())
         }
-    }
-    
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    
-    if lines.is_empty() {
-        vec![path.to_string()]
+    };
+
+    // Second row: goal badge when active, otherwise nav hints
+    let hint_row: Line<'static> = if let Some(ref gs) = app.goal_state {
+        let cond: String = if gs.condition.chars().count() > 22 {
+            format!("{}…", gs.condition.chars().take(21).collect::<String>())
+        } else {
+            gs.condition.clone()
+        };
+        Line::from(vec![
+            Span::styled("     ⊛ ".to_string(), Style::default().fg(Color::Rgb(120, 220, 180)).bold()),
+            Span::styled(
+                format!("{}/{}: {}", gs.turns_done, gs.max_turns, cond),
+                Style::default().fg(Color::Rgb(150, 230, 200)),
+            ),
+            Span::styled("  /goal stop".to_string(), Style::default().fg(Color::Rgb(80, 75, 100))),
+        ])
     } else {
-        lines
-    }
+        Line::from(Span::styled(
+            "     Ctrl+F files  Ctrl+P dir  /cd <path>".to_string(),
+            Style::default().fg(Color::Rgb(60, 58, 80)),
+        ))
+    };
+
+    let rows: Vec<Line<'static>> = vec![
+        Line::from(vec![
+            Span::styled("  ⌂ ".to_string(), Style::default().fg(Color::Rgb(100, 95, 125))),
+            Span::styled(path_display, Style::default().fg(Color::Rgb(140, 200, 255))),
+        ]),
+        hint_row,
+        Line::from(""),
+    ];
+    frame.render_widget(Paragraph::new(rows), area);
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
@@ -616,14 +612,22 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             Color::Cyan,
         ),
     };
-    let keybinds = "  ↑↓ scroll  Tab complete  Enter submit  Ctrl+O expand  Ctrl+P dir  Ctrl+Q quit";
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(hint, Style::default().fg(hint_color)),
-            Span::styled(keybinds, Style::default().fg(Color::DarkGray)),
-        ])),
-        area,
-    );
+
+    let goal_badge: String = if let Some(ref gs) = app.goal_state {
+        format!("  ⊛ goal {}/{}  │", gs.turns_done, gs.max_turns)
+    } else {
+        String::new()
+    };
+
+    let keybinds = "  ↑↓ scroll  Tab  Ctrl+O expand  Ctrl+F files  Ctrl+P dir  Ctrl+Q quit";
+    let mut spans = vec![
+        Span::styled(hint, Style::default().fg(hint_color)),
+    ];
+    if !goal_badge.is_empty() {
+        spans.push(Span::styled(goal_badge, Style::default().fg(Color::Rgb(120, 220, 180)).bold()));
+    }
+    spans.push(Span::styled(keybinds, Style::default().fg(Color::DarkGray)));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // ── Message rendering helpers ─────────────────────────────────────────────────

@@ -65,6 +65,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Fix green/red diff lines leaking into TUI (v0.7.9) | `src/tools/file.rs` | `print_diff()` called `println!` with ANSI colored `+`/`-` lines directly to stdout inside `edit_file` and `batch_edit`, bypassing TUI mode — the output wrote into the alternate screen buffer mid-render. Gated both `print_diff()` calls with `if !is_tui_mode()` to match the existing session-level `print_tool_output` gate. |
 | Token transparency + casual-message skip (v0.8.2) | `src/tui/channel.rs`, `src/tui/app.rs`, `src/tui/render.rs`, `src/session/mod.rs` | Sidebar now shows actual API token counts: `in/out` (blue/green) = cumulative session input & output tokens from API response (includes system prompt, history, tool defs); `cached` shown when cache hits > 0. Greeting/casual messages (hi, hello, thanks, ok, etc.) skip skill injection entirely — saves 3-10k tokens per casual turn. `is_casual_message()` checks message length, absence of technical keywords, and presence of greeting patterns. |
 | Ctrl+O cycling + deeper preview + deepseek context (v0.8.1) | `src/tui/mod.rs`, `src/tui/render.rs`, `src/tui/input.rs`, `src/session/mod.rs` | Ctrl+O now cycles through tools newest-first (each press expands the next unexpanded tool; when all are expanded, one more press collapses all). Works in all states (not just Idle). Streaming tool calls also respect `expanded_tools`. Preview depth increased from 3 to 10 lines. `deepseek` models get 64k context limit instead of the 32k local default. |
+| `/goal` autonomous loop + TUI polish (v0.8.3) | `src/tui/mod.rs`, `src/tui/app.rs`, `src/tui/render.rs` | `/goal <condition>` runs turns automatically until LLM ends response with `✓ DONE` or max-turns limit (default 20, `--max N`). `/goal stop` cancels mid-flight. Goal section in sidebar (condition, turn X/max, elapsed). Goal badge in status bar. Goal indicator in dir panel replaces hints when active. Ctrl+C cancels goal. Dir panel condensed 6→3 rows. Debug logging stripped. |
 | TUI summary rendering + elapsed time (v0.8.0) | `src/tui/render.rs`, `src/tui/app.rs`, `src/tui/syntax.rs` | Span-aware markdown word wrap: long prose paragraphs now reflow across lines while preserving bold/italic/inline-code styling. Inline code rendered with cyan-on-dark-blue background box. Elapsed seconds shown next to thinking spinner ("Analyzing… 4s") in status bar, sidebar, and messages area. Word-rotation interval slowed from 240ms to ~3s (`word_tick / 188`). `turn_tick` counter resets to 0 on each new turn start. |
 | Tool preview collapsed by default (v0.7.8) | `src/tui/render.rs:tool_call_lines` | File content no longer shown inline by default — collapsed view shows only `N lines  Ctrl+O to expand` hint. Expanded (Ctrl+O) shows full diff-coloured content. Eliminates the root cause of tab/overflow scatter: no inline content = no overflow possible. |
 | Fix UTF-8 panic on tool output truncation (v0.7.7) | `src/session/mod.rs:862`, `src/tools/web.rs:49` | Panic: "byte index 20000 is not a char boundary" — `—` (em-dash, 3 bytes) straddled the 20000-byte cut point. Both truncation sites now walk back to the nearest valid char boundary with `is_char_boundary` before slicing. |
@@ -324,6 +325,23 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Token budget flag | `--budget N` warns at 80%, stops at 100% | 0.5 day |
 | Prompt caching breakpoints | `cache_control: ephemeral` on Anthropic for ~90% cost reduction on repeated turns | 0.5 day |
 | Per-session permission memory | re-prompt only once per tool class per session | 0.5 day |
+
+### Bet B — CC-inspired capabilities (priority order)
+
+Features from Claude Code worth bringing into zap. IDE integration, voice, enterprise MDM, and OpenTelemetry explicitly excluded — wrong scope for a single-binary local tool.
+
+| Priority | Feature | What it does | Effort |
+|---|---|---|---|
+| P1 | Effort levels (`/effort low\|medium\|high`) | Upgrade binary `/think on/off` to a 3-step thinking budget — low (~1k tokens), medium (8k, today's default), high (32k+); low effort saves real money on simple tasks | 0.5 day |
+| P1 | Prompt caching breakpoints *(already in foundations)* | `cache_control: ephemeral` on Anthropic system prompt + skill injections; ~90% cost reduction on repeated long sessions — promote to P1, implement before other Bet B items | 0.5 day |
+| P1 | MCP `tools/list` pagination | Handle servers that page tool listings with a cursor; today only the first page loads — breaks any large MCP server | 0.5 day |
+| ~~P2~~ ✅ | `/goal` autonomous loop | **Shipped v0.8.3.** `/goal <cond>` runs until `✓ DONE` or max turns. Goal section in sidebar/status/dir panel. `/goal stop` cancels. | done |
+| P2 | HTTP/SSE MCP servers + OAuth | Support remote MCP servers over HTTP/SSE transport (currently skipped with warning); OAuth bearer token with refresh; opens the full remote MCP ecosystem | 2–3 days |
+| P2 | MCP incremental reconnect | On transient MCP failure, retry with exponential backoff instead of marking server permanently failed for the session | 1 day |
+| P3 | Background / daemon sessions | `zap --bg "refactor auth"` spawns a detached session written to DB; `zap agents` shows live status; `zap attach <id>` to resume — biggest capability gap vs CC today | 1 week |
+| P3 | AWS Bedrock provider | Native Bedrock API with SigV4 auth + Claude model ARNs; required for teams locked to AWS | 2 days |
+| P3 | Google Vertex provider | Native Vertex AI endpoint with service-account auth; required for teams locked to GCP | 2 days |
+| P3 | Custom TUI themes (`/theme`) | Named palettes (dark/light/high-contrast/custom); saved to `~/.agent.toml`; fixes the one visible polish gap vs CC | 1 day |
 
 ---
 

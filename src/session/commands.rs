@@ -42,6 +42,7 @@ impl Session {
                 ("/provider",                "switch provider interactively"),
                 ("/permissions ask|auto|deny","change permission mode"),
                 ("/think [on|off|N]",        "enable extended thinking (Anthropic only)"),
+                ("/goal <condition>",         "run autonomously until condition met (max 20 turns)"),
             ]),
             ("code", &[
                 ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),

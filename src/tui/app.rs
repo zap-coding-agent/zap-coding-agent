@@ -60,6 +60,15 @@ pub struct UiMessage {
     pub blocks: Vec<UiBlock>,
 }
 
+// ── Goal mode ─────────────────────────────────────────────────────────────────
+
+pub struct GoalState {
+    pub condition: String,
+    pub max_turns: usize,
+    pub turns_done: usize,
+    pub started_at: std::time::Instant,
+}
+
 // ── Session mode picker ────────────────────────────────────────────────────────
 
 pub struct ModePickerState {
@@ -184,6 +193,9 @@ pub struct App {
 
     /// Skill names available in this session, used for dynamic picker completions.
     pub skill_names: Vec<String>,
+
+    /// Active autonomous goal (set by `/goal <condition>`).
+    pub goal_state: Option<GoalState>,
 }
 
 impl App {
@@ -224,6 +236,7 @@ impl App {
             session_picker: None,
             quit_confirm: false,
             skill_names: Vec::new(),
+            goal_state: None,
         }
     }
 

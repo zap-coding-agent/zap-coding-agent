@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
+use app::{App, AppState, GoalState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -164,6 +164,14 @@ async fn tui_loop(
                     continue;
                 }
 
+                // /goal — autonomous loop handler
+                if cmd == "/goal" || cmd.starts_with("/goal ") {
+                    let arg = cmd.strip_prefix("/goal").unwrap_or("").trim().to_string();
+                    handle_goal_command(app, &arg);
+                    terminal.draw(|frame| render::draw(frame, app))?;
+                    continue;
+                }
+
                 // 1. Try native inline handler (output rendered in chat area).
                 if let Some(text) = commands::handle_inline(session, &input, config) {
                     if !text.is_empty() {
@@ -255,6 +263,7 @@ async fn tui_loop(
                                             && k.modifiers.contains(KeyModifiers::CONTROL)
                                         {
                                             done = true;
+                                            app.goal_state = None; // cancel goal on Ctrl+C
                                         }
                                     }
                                 }
@@ -276,6 +285,40 @@ async fn tui_loop(
                 // Update context % from session (safe now that turn_fut is dropped)
                 app.context_pct = session.context_fill_pct();
                 app.turn = session.turn_count;
+
+                // Goal mode: check completion, auto-continue or declare done
+                if app.goal_state.is_some() {
+                    let done = goal_response_is_done(app);
+                    let (condition, turns_done, max_turns) = {
+                        let gs = app.goal_state.as_mut().unwrap();
+                        gs.turns_done += 1;
+                        (gs.condition.clone(), gs.turns_done, gs.max_turns)
+                    };
+                    if done || turns_done >= max_turns {
+                        app.goal_state = None;
+                        let msg = if done {
+                            format!("✓ Goal complete in {} turn{}.", turns_done, if turns_done == 1 { "" } else { "s" })
+                        } else {
+                            format!("⏹ Goal stopped: {} turn limit reached.", max_turns)
+                        };
+                        app.messages.push(UiMessage {
+                            role: MsgRole::Assistant,
+                            blocks: vec![UiBlock::Text(msg)],
+                        });
+                        app.auto_scroll = true;
+                    } else {
+                        let next = format!(
+                            "[Goal {}/{}] Continue toward: {}. When fully done, end your response with: ✓ DONE",
+                            turns_done + 1, max_turns, condition
+                        );
+                        app.messages.push(UiMessage {
+                            role: MsgRole::User,
+                            blocks: vec![UiBlock::Text(next.clone())],
+                        });
+                        app.pending_input = Some(next);
+                        app.auto_scroll = true;
+                    }
+                }
             }
             continue;
         }
@@ -320,47 +363,14 @@ async fn tui_loop(
                         InputAction::OpenDirPicker => {
                             suspend_tui(terminal)?;
                             let chosen = open_dir_picker();
-                            
-                            // Log what we got from the picker
-                            if let Some(ref dir) = chosen {
-                                use std::io::Write;
-                                let log_path = dirs::home_dir()
-                                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                                    .join(".zap")
-                                    .join("zap.log");
-                                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                                    let _ = writeln!(f, "[{}] DEBUG Picker returned: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), dir);
-                                    let _ = writeln!(f, "[{}] DEBUG Path exists: {}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), std::path::Path::new(dir).exists());
-                                    let _ = writeln!(f, "[{}] DEBUG Current dir before change: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), std::env::current_dir());
-                                }
-                            }
-                            
                             resume_tui(terminal)?;
-                            
+
                             if let Some(dir) = chosen {
-                                // Try to change directory
                                 match std::env::set_current_dir(&dir) {
                                     Ok(()) => {
-                                        // Successfully changed, get the new path
                                         let new_cwd = std::env::current_dir()
                                             .map(|p| p.display().to_string())
                                             .unwrap_or_else(|_| dir.clone());
-                                        
-                                        // Log the result
-                                        use std::io::Write;
-                                        let log_path = dirs::home_dir()
-                                            .unwrap_or_else(|| std::path::PathBuf::from("."))
-                                            .join(".zap")
-                                            .join("zap.log");
-                                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                                            let _ = writeln!(f, "[{}] DEBUG Successfully changed to: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), new_cwd);
-                                            let _ = writeln!(f, "[{}] DEBUG Verifying with getcwd: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), std::env::current_dir());
-                                            // Also test with a shell command
-                                            if let Ok(output) = std::process::Command::new("pwd").output() {
-                                                let _ = writeln!(f, "[{}] DEBUG pwd returns: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), String::from_utf8_lossy(&output.stdout).trim());
-                                            }
-                                        }
-                                        
                                         if new_cwd != app.cwd {
                                             let old = app.cwd.clone();
                                             app.cwd = new_cwd.clone();
@@ -368,14 +378,11 @@ async fn tui_loop(
                                             app.recent_dirs.dedup();
                                             app.recent_dirs.truncate(4);
                                         }
-                                        
                                         app.branch = git_branch();
                                         let (dirty, ahead, behind) = git_status();
                                         app.git_dirty = dirty;
                                         app.git_ahead = ahead;
                                         app.git_behind = behind;
-                                        
-                                        // Show success message
                                         app.messages.push(UiMessage {
                                             role: MsgRole::Assistant,
                                             blocks: vec![UiBlock::Text(format!(
@@ -386,17 +393,6 @@ async fn tui_loop(
                                         app.auto_scroll = true;
                                     }
                                     Err(e) => {
-                                        // Log the error
-                                        use std::io::Write;
-                                        let log_path = dirs::home_dir()
-                                            .unwrap_or_else(|| std::path::PathBuf::from("."))
-                                            .join(".zap")
-                                            .join("zap.log");
-                                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                                            let _ = writeln!(f, "[{}] ERROR Failed to change to {:?}: {}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), dir, e);
-                                        }
-                                        
-                                        // Show error message
                                         app.messages.push(UiMessage {
                                             role: MsgRole::Assistant,
                                             blocks: vec![UiBlock::Text(format!(
@@ -589,35 +585,9 @@ fn open_dir_picker() -> Option<String> {
         
         if output.status.success() {
             let path = String::from_utf8(output.stdout).ok()?;
-            let path = path.trim().trim_end_matches('/'); // Remove trailing slash and whitespace
-            
-            // Log the raw output for debugging
-            use std::io::Write;
-            let log_path = dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".zap")
-                .join("zap.log");
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                let _ = writeln!(f, "[{}] DEBUG osascript raw output: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), path);
-                let _ = writeln!(f, "[{}] DEBUG osascript stderr: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), String::from_utf8_lossy(&output.stderr));
-                let _ = writeln!(f, "[{}] DEBUG current_dir used: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), current_dir);
-            }
-            
-            if !path.is_empty() {
-                // Verify the path exists before returning
-                if std::path::Path::new(path).exists() {
-                    return Some(path.to_string());
-                }
-            }
-        } else {
-            // Log error
-            use std::io::Write;
-            let log_path = dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".zap")
-                .join("zap.log");
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                let _ = writeln!(f, "[{}] ERROR osascript failed: {:?}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"), String::from_utf8_lossy(&output.stderr));
+            let path = path.trim().trim_end_matches('/');
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                return Some(path.to_string());
             }
         }
         None
@@ -694,6 +664,80 @@ async fn run_task_planning_tui(session: &crate::session::Session) -> Option<Stri
             None
         }
     }
+}
+
+/// Handle `/goal [condition | stop | status]` in the TUI.
+fn handle_goal_command(app: &mut App, arg: &str) {
+    let arg = arg.trim();
+    if arg.is_empty() || arg == "status" {
+        let text = if let Some(ref gs) = app.goal_state {
+            format!(
+                "**Goal active** — {}/{} turns  {}s elapsed\n\nCondition: {}\n\n`/goal stop` to cancel",
+                gs.turns_done, gs.max_turns,
+                gs.started_at.elapsed().as_secs(),
+                gs.condition,
+            )
+        } else {
+            "No active goal.\n\nUsage: `/goal <condition>` — zap keeps working turn-by-turn until the goal is met or `--max N` turns (default 20) are exhausted.\n\nExample: `/goal add unit tests for the auth module`".to_string()
+        };
+        app.messages.push(UiMessage { role: MsgRole::Assistant, blocks: vec![UiBlock::Text(text)] });
+        app.auto_scroll = true;
+        return;
+    }
+    if arg == "stop" || arg == "cancel" {
+        app.goal_state = None;
+        app.messages.push(UiMessage {
+            role: MsgRole::Assistant,
+            blocks: vec![UiBlock::Text("Goal stopped.".to_string())],
+        });
+        app.auto_scroll = true;
+        return;
+    }
+    // Parse optional --max N
+    let (condition, max_turns) = if let Some(idx) = arg.find("--max") {
+        let cond = arg[..idx].trim().to_string();
+        let rest = arg[idx + 5..].trim();
+        let n: usize = rest.split_whitespace().next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20);
+        (cond, n)
+    } else {
+        (arg.to_string(), 20)
+    };
+
+    app.goal_state = Some(GoalState {
+        condition: condition.clone(),
+        max_turns,
+        turns_done: 0,
+        started_at: std::time::Instant::now(),
+    });
+    // Send the first goal turn — shown in chat and dispatched to the LLM
+    let first = format!(
+        "[Goal 1/{max}] {cond}\n\nWhen the goal is fully complete, end your response with exactly: ✓ DONE",
+        max = max_turns, cond = condition
+    );
+    app.messages.push(UiMessage { role: MsgRole::User, blocks: vec![UiBlock::Text(first.clone())] });
+    app.pending_input = Some(first);
+    app.auto_scroll = true;
+}
+
+/// Check the last assistant message for the ✓ DONE completion marker.
+fn goal_response_is_done(app: &App) -> bool {
+    for msg in app.messages.iter().rev() {
+        if matches!(msg.role, MsgRole::Assistant) {
+            for block in &msg.blocks {
+                if let UiBlock::Text(text) = block {
+                    if text.contains("✓ DONE") || text.contains("✓DONE")
+                        || text.to_lowercase().contains("✓ done")
+                    {
+                        return true;
+                    }
+                }
+            }
+            break; // only inspect the last assistant message
+        }
+    }
+    false
 }
 
 /// Walk all completed messages (newest first) to find the next tool to expand.
