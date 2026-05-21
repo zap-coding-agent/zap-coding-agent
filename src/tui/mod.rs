@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, UiBlock, UiMessage};
+use app::{App, AppState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -472,12 +472,9 @@ async fn tui_loop(
                             // Vibe: nothing extra needed, just proceed
                         }
                         InputAction::ToggleLastToolExpand => {
-                            if let Some(id) = last_tool_id_with_result(app) {
-                                if app.expanded_tools.contains(&id) {
-                                    app.expanded_tools.remove(&id);
-                                } else {
-                                    app.expanded_tools.insert(id);
-                                }
+                            match next_tool_id_to_expand(app) {
+                                Some(id) => { app.expanded_tools.insert(id); }
+                                None     => { app.expanded_tools.clear(); }
                             }
                         }
                         InputAction::ConfirmDomainScope(names) => {
@@ -699,17 +696,39 @@ async fn run_task_planning_tui(session: &crate::session::Session) -> Option<Stri
     }
 }
 
-/// Walk all completed messages to find the last tool call that has a result.
-/// Returns its ID so the caller can toggle it in `app.expanded_tools`.
-fn last_tool_id_with_result(app: &App) -> Option<String> {
+/// Walk all completed messages (newest first) to find the next tool to expand.
+/// Cycles: finds the most-recent tool that is NOT yet expanded.
+/// If all tools are expanded, collapses all of them (full reset).
+fn next_tool_id_to_expand(app: &App) -> Option<String> {
+    // Collect all tool IDs with results, newest first.
+    let mut all_ids: Vec<String> = Vec::new();
     for msg in app.messages.iter().rev() {
         for block in msg.blocks.iter().rev() {
             if let UiBlock::Tool(tc) = block {
                 if tc.result.is_some() {
-                    return Some(tc.id.clone());
+                    all_ids.push(tc.id.clone());
                 }
             }
         }
     }
+    // Also include completed tools from the current streaming turn.
+    for sb in app.streaming_blocks.iter().rev() {
+        if let StreamingBlock::Tool(tc) = sb {
+            if tc.result.is_some() {
+                all_ids.push(tc.id.clone());
+            }
+        }
+    }
+
+    if all_ids.is_empty() {
+        return None;
+    }
+
+    // Find the first (most-recent) tool that isn't already expanded.
+    if let Some(id) = all_ids.iter().find(|id| !app.expanded_tools.contains(*id)) {
+        return Some(id.clone());
+    }
+
+    // All expanded — collapse everything (return None signals the caller to clear).
     None
 }

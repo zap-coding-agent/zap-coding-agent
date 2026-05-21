@@ -50,6 +50,7 @@ pub fn model_context_limit(model: &str) -> usize {
     else if m.contains("gpt-4o") || m.contains("gpt-4-turbo")
          || m.contains("o3") || m.contains("o4")               { 128_000 }
     else if m.contains("gpt-3.5")                              { 16_385 }
+    else if m.contains("deepseek")                             { 64_000 }
     else                                                        { 32_768 } // local default
 }
 
@@ -837,7 +838,7 @@ impl Session {
                                 Ok(output) => {
                                     let _ = audit::record(&format!("tool_success name={}", call.name));
                                     let ms = t0.elapsed().as_millis();
-                                    let preview = output.lines().take(3).collect::<Vec<_>>().join("\n");
+                                    let preview = output.lines().take(10).collect::<Vec<_>>().join("\n");
                                     // Notify TUI of tool done
                                     crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
                                         id: call.id.clone(),

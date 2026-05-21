@@ -637,7 +637,7 @@ pub fn render_all_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                     lines.extend(text_to_lines(text, width));
                 }
                 StreamingBlock::Tool(tc) => {
-                    lines.extend(tool_call_lines(tc, false, width));
+                    lines.extend(tool_call_lines(tc, app.expanded_tools.contains(tc.id.as_str()), width));
                 }
             }
         }
@@ -1001,7 +1001,7 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<
                 lines.push(Line::from(vec![
                     Span::styled("    ", Style::default().fg(border)),
                     Span::styled(
-                        "  Ctrl+O to collapse".to_string(),
+                        "  ↑ Ctrl+O for next tool  (all expanded → collapses all)".to_string(),
                         Style::default().fg(hint_color).add_modifier(Modifier::ITALIC),
                     ),
                 ]));

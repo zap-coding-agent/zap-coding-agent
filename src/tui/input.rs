@@ -67,12 +67,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
-    // Ctrl+O: expand/collapse the last tool call output (idle only)
+    // Ctrl+O: cycle through tool output expansions (works in all states)
     if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(app.state, AppState::Idle) {
-            return InputAction::ToggleLastToolExpand;
-        }
-        return InputAction::None;
+        return InputAction::ToggleLastToolExpand;
     }
 
     // Ctrl+P: open directory picker (idle only)
