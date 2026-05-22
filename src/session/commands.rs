@@ -219,21 +219,26 @@ impl Session {
         println!("  {} Switched to {}", "✓".green(), name.cyan().bold());
     }
 
-    pub async fn cmd_compact(&mut self) {
+    /// Summarise conversation history in-place. Returns true on success.
+    /// Tracks failures in `self.compact_failures`; resets to 0 on success.
+    pub async fn cmd_compact(&mut self) -> bool {
         if self.messages.is_empty() {
             println!("  {} Nothing to compact.", "✗".red());
-            return;
+            return false;
         }
         let mut spinner = Self::make_spinner();
         let mut temp = self.messages.clone();
         temp.push(Message::user_text(
-            "Please provide a concise summary of this conversation so far, \
-             including the key decisions, changes made, and current state. \
-             This will replace the conversation history.",
+            "Please provide a concise summary of this conversation so far. \
+             Include: the original task or goal, key decisions made, files created or \
+             modified, errors encountered and how they were resolved, and the current \
+             state. Preserve any explicit user instructions or preferences. \
+             This summary will replace the full conversation history.",
         ));
 
         let result = self.client.send(
-            "You are a helpful assistant. Summarize the conversation concisely.",
+            "You are a helpful assistant. Summarize the conversation concisely, \
+             preserving all task-critical context and user instructions.",
             &temp, &[], None, 0,
         ).await;
         spinner.finish_and_clear();
@@ -262,9 +267,21 @@ impl Session {
                 let _ = audit::record(&format!(
                     "compact: {} messages → 2 (summary) model={}", turn_count, self.config.model
                 ));
+                self.compact_failures = 0;
                 println!("  {} Compacted {} messages into a summary.", "✓".green(), turn_count);
+                true
             }
-            Err(e) => println!("  {} Compact failed: {}", "✗".red(), e),
+            Err(e) => {
+                self.compact_failures += 1;
+                println!("  {} Compact failed: {}", "✗".red(), e);
+                if self.compact_failures >= 3 {
+                    println!(
+                        "  {} Compact failed 3 times — use {} to reset or {} to start fresh.",
+                        "⚠".bright_yellow(), "/clear".cyan(), "/exit".cyan()
+                    );
+                }
+                false
+            }
         }
     }
 }

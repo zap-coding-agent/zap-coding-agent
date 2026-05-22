@@ -41,15 +41,20 @@ fn build_curl_block(
     let body_path = crate::log::save_request_body(slug, &compact);
 
     match body_path {
-        Some(p) => format!(
-            "\n# curl (body: {path} — contains real key, treat as sensitive):\n\
-             curl -s '{url}' \\\n\
-             \x20 -H 'Content-Type: application/json' \\\n\
-             \x20 -H '{auth_header}: {auth_value}' \\\n\
-             \x20 -d @'{path}'",
-            path = p.display(), url = url,
-            auth_header = auth_header, auth_value = auth_value,
-        ),
+        Some(p) => {
+            // Use forward slashes so the path works in bash on all platforms
+            // (Windows PathBuf::display() emits backslashes which Git Bash rejects).
+            let path_str = p.to_string_lossy().replace('\\', "/");
+            format!(
+                "\n# curl (body: {path} — contains real key, treat as sensitive):\n\
+                 curl -s '{url}' \\\n\
+                 \x20 -H 'Content-Type: application/json' \\\n\
+                 \x20 -H '{auth_header}: {auth_value}' \\\n\
+                 \x20 -d @'{path}'",
+                path = path_str, url = url,
+                auth_header = auth_header, auth_value = auth_value,
+            )
+        }
         None => format!(
             "\n# curl (could not save body file):\n\
              curl -s '{url}' -H '{auth_header}: {auth_value}' -H 'Content-Type: application/json' \\\n\

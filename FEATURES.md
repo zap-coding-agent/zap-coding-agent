@@ -49,9 +49,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Session branching | `src/session/commands.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |
 | Context bar in turn footer | `src/session/mod.rs:ctx_bar` | `[████████░░] 42%` after every LLM response |
 | Model-aware context limits | `src/session/mod.rs:model_context_limit` | Claude 200k, GPT-4o 128k, local 32k |
-| Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | 70% warn, 80% interactive choice, 95% auto-compact |
+| Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | Silent auto-compact at 90%; reactive overflow (compact+retry on API "too long" errors and empty 0-token responses); circuit breaker after 3 failures; `DISABLE_COMPACT` and `ZAP_MAX_CONTEXT_TOKENS` env vars |
+| CLAUDE.md caching | `src/session/mod.rs:handle_user_turn` | Skill-triggered turns append to cached `self.system` instead of re-reading CLAUDE.md from disk; also stabilises Anthropic prompt-cache prefix |
 | Tool result truncation | `src/session/mod.rs:handle_user_turn` | tool outputs capped at 20 000 chars before being sent to LLM; prevents context overflow on large file/dir reads |
-| Empty response detection | `src/session/mod.rs:handle_user_turn` | two-case detection: zero input_tokens → context window exceeded (warns with ctx size + /compact advice); non-zero input_tokens → proxy/gateway dropped body (warns with stop_reason + log path) |
+| Empty response detection | `src/session/mod.rs:handle_user_turn` | two-case detection: zero input_tokens → reactive compact+retry, then warn with ctx size; non-zero input_tokens → proxy/gateway dropped body (warns with stop_reason + log path) |
 | Multi-turn history fix | `src/session/mod.rs:handle_user_turn` | assistant response is now always pushed to `self.messages` before the tool-calls check; previously text-only turns were not saved, breaking context on subsequent turns |
 | Proxy tool_use parse warning | `src/session/mod.rs:handle_user_turn` | when `stop_reason=tool_use` but no tool blocks were parsed, warns about unified/normalized proxy schema instead of silently breaking |
 | Secret scanner TUI fix | `src/session/mod.rs:handle_user_turn` | secret-scanner prompt now calls `suspend_for_prompt`/`resume_from_prompt` so the stdin read works correctly in TUI mode (previously the TUI owned stdin and the prompt hung) |

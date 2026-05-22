@@ -194,6 +194,8 @@ pub struct Session {
     pub hooks:         crate::hooks::HookRunner,
     /// Extended thinking token budget. 0 = disabled. Anthropic only.
     pub thinking_budget: u32,
+    /// Number of consecutive compact failures; gates auto-compact circuit breaker.
+    pub compact_failures: u8,
 }
 
 impl Session {
@@ -353,6 +355,7 @@ impl Session {
             store,
             hooks,
             thinking_budget: 0,
+            compact_failures: 0,
         })
     }
 
@@ -372,11 +375,13 @@ impl Session {
     }
 
     /// Context fill as 0–100 percentage.
-    /// Uses --budget if set, otherwise falls back to the model's default context window.
+    /// Priority: ZAP_MAX_CONTEXT_TOKENS env var → --budget flag → model default.
     pub fn context_fill_pct(&self) -> u8 {
         let tokens = self.estimated_context_tokens();
-        let limit  = self.config.budget
-            .map(|b| b as usize)
+        let limit = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .or_else(|| self.config.budget.map(|b| b as usize))
             .unwrap_or_else(|| model_context_limit(&self.model));
         ((tokens * 100) / limit).min(100) as u8
     }
@@ -408,11 +413,15 @@ impl Session {
         }
 
         // ── Context pressure handling ─────────────────────────────────────────
+        // DISABLE_COMPACT=1 turns off all automatic compaction (use for debugging).
+        let disable_compact = std::env::var("DISABLE_COMPACT").is_ok();
         let ctx_pct = self.context_fill_pct();
-        let ctx_limit_k = self.config.budget
-            .map(|b| b as usize)
+        let ctx_limit_k = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .or_else(|| self.config.budget.map(|b| b as usize))
             .unwrap_or_else(|| model_context_limit(&self.model)) / 1000;
-        let ctx_used_k  = (self.estimated_context_tokens() / 1000).max(1);
+        let ctx_used_k = (self.estimated_context_tokens() / 1000).max(1);
 
         // --budget hard stop: refuse new turns when at 100%.
         if self.config.budget.is_some() && ctx_pct >= 100 {
@@ -422,40 +431,14 @@ impl Session {
             );
             return Ok(());
         }
-        if ctx_pct >= 95 {
+        // Silent auto-compact at 90%+ — no blocking dialog. Circuit breaker stops after
+        // 3 failures so autonomous tasks don't loop forever on an uncompactable session.
+        if !disable_compact && ctx_pct >= 90 && self.compact_failures < 3 {
             println!(
-                "  {} Context {}% full (~{}k/{}k) — compacting automatically…",
-                "⚡".red().bold(), ctx_pct, ctx_used_k, ctx_limit_k
+                "  {} Context {}% (~{}k/{}k) — compacting…",
+                "⟳".truecolor(200, 150, 60), ctx_pct, ctx_used_k, ctx_limit_k,
             );
             self.cmd_compact().await;
-        } else if ctx_pct >= 80 {
-            println!(
-                "  {} Context {}% full (~{}k/{}k tokens).",
-                "⚠".bright_yellow(), ctx_pct, ctx_used_k, ctx_limit_k
-            );
-            let choice = inquire::Select::new(
-                "Context is getting full — what would you like to do?",
-                vec!["Continue anyway", "Compact (summarize history)", "Start new session (exit after this turn)"],
-            )
-            .with_render_config(crate::ui::inquire_render_config())
-            .prompt_skippable()
-            .unwrap_or(None);
-            match choice {
-                Some("Compact (summarize history)") => { self.cmd_compact().await; }
-                Some("Start new session (exit after this turn)") => {
-                    println!(
-                        "  {} Answering your question, then type {} to start fresh.",
-                        "ℹ".cyan(), "/exit".cyan()
-                    );
-                }
-                _ => {}
-            }
-        } else if ctx_pct >= 70 {
-            println!(
-                "  {} Context {}% full (~{}k/{}k) — use {} to free space.",
-                "⚠".bright_yellow().dimmed(), ctx_pct, ctx_used_k, ctx_limit_k,
-                "/compact".cyan()
-            );
         }
 
         // Skip skill injection entirely for casual/greeting messages — saves 3-10k tokens.
@@ -487,8 +470,9 @@ impl Session {
                 skill_summary.dimmed()
             );
             let skill_block = crate::skill_manager::build_skill_prompt(&matched_skills);
-            context_manager::build_system_prompt_with_skills(&self.config, &skill_block)
-                .unwrap_or_else(|_| self.system.clone())
+            // Append skill block to the already-built base system prompt instead of
+            // rebuilding from scratch — avoids re-reading CLAUDE.md on every skill turn.
+            format!("{}\n\n{}", self.system, skill_block)
         };
 
         let msg_tokens_estimate = input.len() / 4;
@@ -562,7 +546,24 @@ impl Session {
                 .send(&effective_system, &self.messages, effective_tools, Some(before_output), self.thinking_budget)
                 .await;
             spinner.finish_and_clear();
-            let response = result?;
+
+            // Reactive overflow compaction: if the API rejects the request because the
+            // prompt is too long, compact history and retry transparently.
+            let response = match result {
+                Ok(r) => r,
+                Err(e) => {
+                    let msg = e.to_string().to_lowercase();
+                    let is_overflow = msg.contains("too long")
+                        || msg.contains("context_length_exceeded")
+                        || msg.contains("maximum context length")
+                        || (msg.contains("prompt") && msg.contains("long"));
+                    if is_overflow && !disable_compact && self.compact_failures < 3 {
+                        crate::zap_warn!("Prompt too long — compacting and retrying…");
+                        if self.cmd_compact().await { continue; }
+                    }
+                    return Err(e);
+                }
+            };
 
             // Empty response: two known causes.
             // (a) Zero input_tokens → context window exceeded (server sends 200 OK but empty SSE).
@@ -570,6 +571,12 @@ impl Session {
             if response.content.is_empty() {
                 let input_tokens = response.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
                 if input_tokens == 0 {
+                    // Reactive overflow: compact and retry once before giving up.
+                    if !disable_compact && self.compact_failures < 3 {
+                        let ctx_k = self.estimated_context_tokens() / 1000;
+                        crate::zap_warn!("Context ~{}k tokens exceeded limit — compacting and retrying…", ctx_k);
+                        if self.cmd_compact().await { continue; }
+                    }
                     let ctx_k = self.estimated_context_tokens() / 1000;
                     crate::zap_warn!(
                         "Model returned an empty response (context ~{}k tokens). \
@@ -1067,7 +1074,7 @@ impl Session {
             "/provider"    => self.cmd_provider(config),
             "/memory"      => self.cmd_memory(arg),
             "/audit"       => self.cmd_audit(arg),
-            "/compact"     => self.cmd_compact().await,
+            "/compact"     => { self.cmd_compact().await; }
             "/attach"      => self.cmd_attach(arg),
             "/paste"       => self.cmd_paste(),
             "/skill"       => self.cmd_skill(arg).await,
