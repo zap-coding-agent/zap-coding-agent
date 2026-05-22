@@ -441,8 +441,13 @@ impl Session {
             self.cmd_compact().await;
         }
 
+        // Determine once whether this is a no-context casual turn.
+        // A message that looks casual but is answering a question or confirming
+        // an action (e.g. "ok push it", "yes", "go ahead") is NOT casual.
+        let is_casual = is_casual_message(input) && !needs_prior_context(input, &self.messages);
+
         // Skip skill injection entirely for casual/greeting messages — saves 3-10k tokens.
-        let matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual_message(input) {
+        let matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual {
             Vec::new()
         } else {
             let mut ms = crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
@@ -458,7 +463,7 @@ impl Session {
         };
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 
-        let effective_system = if is_casual_message(input) {
+        let effective_system = if is_casual {
             context_manager::build_casual_system_prompt(&self.config)
         } else if matched_skills.is_empty() {
             self.system.clone()
@@ -537,13 +542,22 @@ impl Session {
             );
             // Casual turns (greetings, acks) will never call a tool — skip the
             // entire tool definitions array to avoid paying ~2k tokens for nothing.
-            let effective_tools: &[serde_json::Value] = if is_casual_message(input) {
+            let effective_tools: &[serde_json::Value] = if is_casual {
                 &[]
             } else {
                 &turn_tools
             };
+            // Casual turns also need no history — a greeting has no use for a
+            // 20-turn code exploration. Send only the current user message.
+            // Non-casual turns get a pruned, windowed slice of history.
+            let effective_msgs_owned: Vec<Message> = if is_casual {
+                self.messages.last().cloned().into_iter().collect()
+            } else {
+                windowed_history(&self.messages)
+            };
+            let effective_messages: &[Message] = &effective_msgs_owned;
             let result = self.client
-                .send(&effective_system, &self.messages, effective_tools, Some(before_output), self.thinking_budget)
+                .send(&effective_system, effective_messages, effective_tools, Some(before_output), self.thinking_budget)
                 .await;
             spinner.finish_and_clear();
 
@@ -1172,17 +1186,25 @@ impl Session {
 
 /// Returns true when the message is a casual greeting or short social phrase
 /// where injecting skills/tool context would waste tokens with no benefit.
+/// Call site must also check `needs_prior_context` before treating as no-history.
 fn is_casual_message(text: &str) -> bool {
     let t = text.trim().to_lowercase();
     // Long messages are never casual.
     if t.len() > 80 { return false; }
     // Any technical keywords → not casual.
-    let technical = ["fix", "bug", "code", "file", "function", "error", "test",
-                     "create", "add", "change", "update", "delete", "remove",
-                     "build", "run", "compile", "refactor", "write", "read",
-                     "show me", "explain", "how do", "what is", "why is",
-                     "implement", "debug", "check", "review", "edit", "find",
-                     "search", "list", "open", "close", "move", "rename"];
+    let technical = [
+        // code actions
+        "fix", "bug", "code", "file", "function", "error", "test",
+        "create", "add", "change", "update", "delete", "remove",
+        "build", "run", "compile", "refactor", "write", "read",
+        "show me", "explain", "how do", "what is", "why is",
+        "implement", "debug", "check", "review", "edit", "find",
+        "search", "list", "open", "close", "move", "rename",
+        // git / ops — previously missing
+        "push", "pull", "commit", "merge", "deploy", "release",
+        "install", "revert", "reset", "branch", "checkout", "clone",
+        "diff", "log", "stash", "tag", "patch",
+    ];
     if technical.iter().any(|kw| t.contains(kw)) { return false; }
     // Positive match: starts with or equals a greeting pattern.
     let greetings = ["hi", "hello", "hey", "howdy", "greetings", "sup", "yo",
@@ -1196,6 +1218,123 @@ fn is_casual_message(text: &str) -> bool {
         || t.starts_with(&format!("{} ", g))
         || t.starts_with(&format!("{},", g))
         || t.starts_with(&format!("{}!", g)))
+}
+
+/// Returns true when the user's message is confirming or continuing a pending
+/// action — e.g. "yes", "go ahead", "do it". Even if the text looks casual,
+/// these replies need conversation history to be meaningful.
+fn is_action_confirmation(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    let confirmations = [
+        "yes", "yeah", "yep", "yup", "y",
+        "no", "nope", "nah", "n",
+        "do it", "go ahead", "go for it", "proceed",
+        "let's go", "lets go", "let's do it", "lets do it",
+        "continue", "keep going", "carry on",
+    ];
+    confirmations.iter().any(|c| t == *c
+        || t.starts_with(&format!("{} ", c))
+        || t.starts_with(&format!("{},", c))
+        || t.starts_with(&format!("{}!", c)))
+}
+
+/// Returns true when the last assistant message asked the user a question,
+/// meaning the user's next reply is an answer and needs full history context.
+fn last_message_was_question(messages: &[Message]) -> bool {
+    messages.iter().rev()
+        .find(|m| m.role == "assistant")
+        .map(|m| {
+            // Check text blocks in the last assistant message for a question mark.
+            m.content.iter().any(|b| {
+                if let ContentBlock::Text { text } = b {
+                    let trimmed = text.trim_end_matches(|c: char| c.is_whitespace() || c == '*');
+                    trimmed.ends_with('?')
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Returns true when the message, despite appearing casual, needs prior
+/// conversation history to be answered correctly.
+fn needs_prior_context(text: &str, messages: &[Message]) -> bool {
+    is_action_confirmation(text) || last_message_was_question(messages)
+}
+
+/// Build the message slice to send for a non-casual turn:
+///
+/// 1. **Sliding window** — only the last `ZAP_HISTORY_WINDOW` real user turns
+///    (default 8) are included, bounding token cost regardless of session length.
+///
+/// 2. **Tool-result pruning** — ToolResult blocks outside the last 2 complete
+///    exchanges are replaced with a one-line stub. The model already incorporated
+///    that content into its previous reply; keeping it verbatim is pure noise.
+fn windowed_history(messages: &[Message]) -> Vec<Message> {
+    let window: usize = std::env::var("ZAP_HISTORY_WINDOW")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
+
+    // Identify indices of "real" user turns (Text-first, not tool-result turns).
+    let real_turn_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            m.role == "user"
+                && m.content
+                    .first()
+                    .map_or(false, |b| matches!(b, ContentBlock::Text { .. }))
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    // Window start: Nth-last real user turn, or the beginning.
+    let start = if real_turn_indices.len() > window {
+        real_turn_indices[real_turn_indices.len() - window]
+    } else {
+        0
+    };
+
+    // Prune tool results that are outside the last 2 complete exchanges — they
+    // have already been processed and only inflate the prompt.
+    let prune_before = if real_turn_indices.len() > 2 {
+        real_turn_indices[real_turn_indices.len() - 2]
+    } else {
+        0 // nothing to prune yet
+    };
+
+    const PRUNE_THRESHOLD: usize = 300; // chars; small results keep full fidelity
+
+    messages[start..]
+        .iter()
+        .enumerate()
+        .map(|(rel_i, msg)| {
+            let abs_i = start + rel_i;
+            if abs_i < prune_before {
+                // Replace oversized ToolResult content with a compact stub.
+                let pruned: Vec<ContentBlock> = msg
+                    .content
+                    .iter()
+                    .map(|block| match block {
+                        ContentBlock::ToolResult { tool_use_id, content }
+                            if content.len() > PRUNE_THRESHOLD =>
+                        {
+                            ContentBlock::ToolResult {
+                                tool_use_id: tool_use_id.clone(),
+                                content: format!("[pruned — {} chars]", content.len()),
+                            }
+                        }
+                        other => other.clone(),
+                    })
+                    .collect();
+                Message { role: msg.role.clone(), content: pruned }
+            } else {
+                msg.clone()
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1277,5 +1416,62 @@ mod casual_tests {
         assert!(!is_casual_message("random stuff"));
         assert!(!is_casual_message("welcome back"));
         assert!(!is_casual_message("morning"));
+    }
+
+    // ── Git/ops keywords now block casual ─────────────────────────────────────
+
+    #[test]
+    fn git_ops_block_casual() {
+        let cases = [
+            "ok push it",
+            "sure, pull",
+            "great, commit now",
+            "ok deploy",
+            "nice, merge it",
+            "cool, revert that",
+            "sure reset",
+        ];
+        for msg in &cases {
+            assert!(!is_casual_message(msg), "{msg:?} should NOT be casual");
+        }
+    }
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::{is_action_confirmation, last_message_was_question};
+    use crate::llm_client::{ContentBlock, Message};
+
+    #[test]
+    fn action_confirmations_detected() {
+        for msg in &["yes", "no", "y", "n", "do it", "go ahead", "proceed",
+                     "continue", "let's go", "go for it"] {
+            assert!(is_action_confirmation(msg), "{msg:?} should be action confirmation");
+        }
+    }
+
+    #[test]
+    fn social_words_not_confirmations() {
+        for msg in &["thanks", "hi", "hello", "great", "cool", "amazing"] {
+            assert!(!is_action_confirmation(msg), "{msg:?} should NOT be action confirmation");
+        }
+    }
+
+    #[test]
+    fn detects_question_in_last_assistant_message() {
+        let messages = vec![
+            Message { role: "user".to_string(), content: vec![ContentBlock::Text { text: "help".to_string() }] },
+            Message { role: "assistant".to_string(), content: vec![ContentBlock::Text { text: "Should I push to main?".to_string() }] },
+        ];
+        assert!(last_message_was_question(&messages));
+    }
+
+    #[test]
+    fn no_false_positive_when_no_question() {
+        let messages = vec![
+            Message { role: "user".to_string(), content: vec![ContentBlock::Text { text: "help".to_string() }] },
+            Message { role: "assistant".to_string(), content: vec![ContentBlock::Text { text: "Done, pushed to main.".to_string() }] },
+        ];
+        assert!(!last_message_was_question(&messages));
     }
 }
