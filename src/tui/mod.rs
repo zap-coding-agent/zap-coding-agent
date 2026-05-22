@@ -489,6 +489,35 @@ async fn tui_loop(
                         InputAction::ConfirmDomainScope(names) => {
                             session.domain_scope = names.into_iter().collect();
                         }
+                        InputAction::PasteImage => {
+                            let tmp = "/tmp/zap_clipboard_paste.png";
+                            let ok = crate::session::commands::paste_clipboard_image(tmp);
+                            if ok && std::path::Path::new(tmp).exists() {
+                                session.cmd_attach(tmp);
+                                let kb = std::fs::metadata(tmp)
+                                    .map(|m| m.len() / 1024)
+                                    .unwrap_or(0);
+                                app.messages.push(UiMessage {
+                                    role: MsgRole::User,
+                                    blocks: vec![UiBlock::Text("📷 (pasted image)".to_string())],
+                                });
+                                app.messages.push(UiMessage {
+                                    role: MsgRole::Assistant,
+                                    blocks: vec![UiBlock::Text(format!(
+                                        "✓ Image pasted from clipboard ({} KB). It will be sent with your next message.", kb
+                                    ))],
+                                });
+                                app.auto_scroll = true;
+                            } else {
+                                app.messages.push(UiMessage {
+                                    role: MsgRole::Assistant,
+                                    blocks: vec![UiBlock::Text(
+                                        "✗ No image in clipboard. Copy a screenshot first, then press Ctrl+V again.".to_string(),
+                                    )],
+                                });
+                                app.auto_scroll = true;
+                            }
+                        }
                         InputAction::None => {}
                     }
                 }

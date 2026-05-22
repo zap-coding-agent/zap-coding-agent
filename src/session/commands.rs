@@ -731,7 +731,7 @@ impl Session {
 
 /// Try every available method to write the clipboard image to `dest`.
 /// Returns true if the file was written successfully.
-fn paste_clipboard_image(dest: &str) -> bool {
+pub fn paste_clipboard_image(dest: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         // Fast path: pngpaste CLI (brew install pngpaste)

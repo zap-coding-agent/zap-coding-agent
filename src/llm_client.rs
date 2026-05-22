@@ -653,17 +653,23 @@ struct OpenAiClient {
     url: String,
     suppress_stream: bool,
     disable_stream: bool,
+    /// Some OpenAI-compatible providers (e.g. DeepSeek) don't support image content.
+    /// When true, image blocks are dropped with a warning rather than sent as
+    /// `image_url` (which would cause a 400 error).
+    image_support: bool,
 }
 
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let url = base_url
             .unwrap_or_else(|| format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE));
-        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream }
+        // Detect providers known to lack vision support.
+        let image_support = !url.contains("deepseek.com");
+        Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream, image_support }
     }
 
     /// Convert our internal messages to the OpenAI wire format.
-    fn encode_messages(system: &str, messages: &[Message]) -> Vec<serde_json::Value> {
+    fn encode_messages(&self, system: &str, messages: &[Message]) -> Vec<serde_json::Value> {
         let mut out = vec![serde_json::json!({ "role": "system", "content": system })];
 
         for msg in messages {
@@ -681,14 +687,22 @@ impl OpenAiClient {
                             match b {
                                 ContentBlock::Text { text } =>
                                     Some(serde_json::json!({ "type": "text", "text": text })),
-                                ContentBlock::Image { media_type, data } =>
-                                    Some(serde_json::json!({
-                                        "type": "image_url",
-                                        "image_url": { "url": format!("data:{};base64,{}", media_type, data) }
-                                    })),
+                                ContentBlock::Image { media_type, data } => {
+                                    if self.image_support {
+                                        Some(serde_json::json!({ "type": "image_url", "image_url": { "url": format!("data:{};base64,{}", media_type, data) } }))
+                                    } else {
+                                        None
+                                    }
+                                }
                                 _ => None,
                             }
                         }).collect();
+
+                        // Warn only when image blocks were dropped.
+                        if !self.image_support && parts.len() < msg.content.len() {
+                            let dropped = msg.content.len() - parts.len();
+                            crate::zap_warn!("Dropping {dropped} image block(s): the model at '{}' does not support vision.", self.url);
+                        }
 
                         let content = if parts.len() == 1 {
                             if let serde_json::Value::String(_) = &parts[0] {
@@ -783,7 +797,7 @@ impl LlmProvider for OpenAiClient {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
         highlighter.suppress_print = crate::tui::channel::is_tui_mode();
-        let oai_messages = Self::encode_messages(system, messages);
+        let oai_messages = self.encode_messages(system, messages);
         let oai_tools = Self::encode_tools(tools);
 
         let mut body = if self.disable_stream {

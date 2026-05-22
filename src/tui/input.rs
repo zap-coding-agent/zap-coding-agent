@@ -19,6 +19,8 @@ pub enum InputAction {
     CloseSessionPicker,
     /// Ctrl+O: toggle expansion of the last tool call with output.
     ToggleLastToolExpand,
+    /// Ctrl+V: paste image from clipboard.
+    PasteImage,
     /// Vibe/Task mode selected: true = Task, false = Vibe.
     SelectMode(bool),
     /// Domain picker confirmed — carries the selected skill names (may be empty = no restriction).
@@ -220,6 +222,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::End => {
             app.cursor = app.input.chars().count();
             InputAction::None
+        }
+
+        // Ctrl+V: paste image from clipboard (idle only)
+        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if matches!(app.state, AppState::Idle) {
+                InputAction::PasteImage
+            } else {
+                InputAction::None
+            }
         }
 
         KeyCode::PageUp => InputAction::ScrollUp(10),

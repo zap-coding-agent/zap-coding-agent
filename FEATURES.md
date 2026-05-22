@@ -366,6 +366,8 @@ Features from Claude Code worth bringing into zap. IDE integration, voice, enter
 
 ---
 
+| Image paste fix for DeepSeek (v0.10.1) | `src/llm_client.rs` | When using `base_url = "https://api.deepseek.com"`, `/paste` or `/attach <image>` no longer sends `image_url` content blocks (which DeepSeek rejects with 400). `OpenAiClient` added `image_support: bool` — auto-detected `false` for DeepSeek, `true` for others. Image blocks are silently dropped with a log warning instead of crashing the request.
+|
 ## Cut / deferred ✗
 
 | Feature | Why cut |
