@@ -4,6 +4,7 @@ pub mod commands;
 use anyhow::Result;
 use colored::Colorize;
 use futures::future::join_all;
+use inquire::Confirm;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 
@@ -196,6 +197,8 @@ pub struct Session {
     pub thinking_budget: u32,
     /// Number of consecutive compact failures; gates auto-compact circuit breaker.
     pub compact_failures: u8,
+    /// Paths written/edited this session — used to populate context.md at exit.
+    pub files_changed: Vec<String>,
 }
 
 impl Session {
@@ -236,9 +239,21 @@ impl Session {
             system.push_str(&block);
         }
 
-        // Build domain scope: auto-detect from manifests, then optionally ask.
+        // ── C2: Load project.json — use persisted languages, skip domain prompt ─
+        let project_meta = crate::project::load_project_meta();
+
+        // Build domain scope: project.json takes priority, then manifest detection, then prompt.
         let detected = crate::skill_manager::detect_domain_scope(&skills);
-        let domain_scope: std::collections::HashSet<String> = if !detected.is_empty() {
+        let domain_scope: std::collections::HashSet<String> = if let Some(ref meta) = project_meta {
+            if !meta.language.is_empty() {
+                // Languages already known — no prompt needed.
+                meta.language.iter().cloned().collect()
+            } else if !detected.is_empty() {
+                detected.iter().cloned().collect()
+            } else {
+                std::collections::HashSet::new()
+            }
+        } else if !detected.is_empty() {
             detected.iter().cloned().collect()
         } else if !config.is_subagent && !config.skip_domain_prompt {
             // Nothing auto-detected — ask the user once (interactive sessions only).
@@ -248,6 +263,28 @@ impl Session {
         } else {
             std::collections::HashSet::new()
         };
+
+        // ── C3: Index nudge (shown once when project isn't indexed yet) ────────
+        if !config.is_subagent && !config.tui_mode {
+            match &project_meta {
+                Some(meta) if !meta.indexed => {
+                    println!(
+                        "  {} Project not indexed. {} for fast symbol lookup, or {} to re-run full setup.",
+                        "◌".dimmed(),
+                        "/index".cyan(),
+                        "/init".cyan(),
+                    );
+                }
+                None => {
+                    println!(
+                        "  {} Run {} to set up this project — language detection, indexing, and project context.",
+                        "◌".dimmed(),
+                        "/init".cyan(),
+                    );
+                }
+                _ => {}
+            }
+        }
 
         if !skills.is_empty() && !config.is_subagent && !config.tui_mode {
             let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
@@ -319,6 +356,46 @@ impl Session {
             }
         }
 
+        // ── C1: Session context banner + system prompt injection ──────────────
+        if !config.is_subagent {
+            if let Some(summary) = crate::project::context_summary() {
+                let files = crate::project::context_files();
+                if !config.tui_mode {
+                    // CLI: show banner and ask whether to resume.
+                    println!(
+                        "  {} Last session: {}",
+                        "◌".dimmed(),
+                        summary.truecolor(180, 175, 210),
+                    );
+                    if !files.is_empty() {
+                        let list = if files.len() <= 3 {
+                            files.join(", ")
+                        } else {
+                            format!("{} and {} more", files[..3].join(", "), files.len() - 3)
+                        };
+                        println!("  {} Files: {}", "·".dimmed(), list.dimmed());
+                    }
+                    // Ask — default yes (Enter accepts).
+                    let resume = Confirm::new("Resume from last session?")
+                        .with_default(true)
+                        .prompt()
+                        .unwrap_or(false);
+                    if resume {
+                        if let Some(ctx) = crate::project::load_session_context() {
+                            system.push_str("\n\n## Last Session Handoff\n");
+                            system.push_str(&ctx);
+                        }
+                    }
+                } else {
+                    // TUI: silently inject context into system prompt.
+                    if let Some(ctx) = crate::project::load_session_context() {
+                        system.push_str("\n\n## Last Session Handoff\n");
+                        system.push_str(&ctx);
+                    }
+                }
+            }
+        }
+
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         // Open the index DB but do NOT scan on startup — scanning can be slow on
         // large directories. Use /index to trigger a manual scan.
@@ -356,6 +433,7 @@ impl Session {
             hooks,
             thinking_budget: 0,
             compact_failures: 0,
+            files_changed: Vec::new(),
         })
     }
 
@@ -1015,12 +1093,13 @@ impl Session {
                 }
             }
 
-            // Reindex any files that tools reported they wrote to.
+            // Reindex and record any files that tools reported they wrote to.
             for block in &tool_calls {
                 if let ContentBlock::ToolUse { name, input, .. } = block {
                     if let Some(tool) = self.tools.get(name) {
                         if let Some(path_str) = tool.affected_path(input) {
                             crate::code_index::global_reindex_file(std::path::Path::new(path_str));
+                            self.files_changed.push(path_str.to_string());
                         }
                     }
                 }

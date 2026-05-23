@@ -12,6 +12,7 @@ pub mod llm_client;
 pub mod mcp;
 pub mod permission_manager;
 pub mod persistence;
+pub mod project;
 pub mod secret_scanner;
 pub mod session;
 pub mod shell_runner;

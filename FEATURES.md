@@ -50,7 +50,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Context bar in turn footer | `src/session/mod.rs:ctx_bar` | `[████████░░] 42%` after every LLM response |
 | Model-aware context limits | `src/session/mod.rs:model_context_limit` | Claude 200k, GPT-4o 128k, local 32k |
 | Context pressure thresholds | `src/session/mod.rs:handle_user_turn` | Silent auto-compact at 90%; reactive overflow (compact+retry on API "too long" errors and empty 0-token responses); circuit breaker after 3 failures; `DISABLE_COMPACT` and `ZAP_MAX_CONTEXT_TOKENS` env vars |
-| CLAUDE.md caching | `src/session/mod.rs:handle_user_turn` | Skill-triggered turns append to cached `self.system` instead of re-reading CLAUDE.md from disk; also stabilises Anthropic prompt-cache prefix |
+| ZAP.md caching | `src/session/mod.rs:handle_user_turn` | Skill-triggered turns append to cached `self.system` instead of re-reading CLAUDE.md from disk; also stabilises Anthropic prompt-cache prefix |
 | Tool result truncation | `src/session/mod.rs:handle_user_turn` | tool outputs capped at 20 000 chars before being sent to LLM; prevents context overflow on large file/dir reads |
 | Empty response detection | `src/session/mod.rs:handle_user_turn` | two-case detection: zero input_tokens → reactive compact+retry, then warn with ctx size; non-zero input_tokens → proxy/gateway dropped body (warns with stop_reason + log path) |
 | Multi-turn history fix | `src/session/mod.rs:handle_user_turn` | assistant response is now always pushed to `self.messages` before the tool-calls check; previously text-only turns were not saved, breaking context on subsequent turns |
@@ -253,7 +253,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 |---|---|---|
 | System prompt builder | `src/context_manager.rs` | identity, env, code nav, tool policy, security rules |
 | Casual system prompt | `src/context_manager.rs:build_casual_system_prompt` | ~50-token minimal prompt for greeting/casual turns; skips code-nav, tool-policy, security, CLAUDE.md, git status |
-| CLAUDE.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
+| ZAP.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
 | Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
 | Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
 
@@ -308,7 +308,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `--budget N` token cap | `src/cli.rs`, `src/config.rs`, `src/session/mod.rs` | overrides model context limit for fill-% tracking; warns at 80%, hard-stops at 100% |
 | MCP startup banner | `src/session/mod.rs:Session::new` | shows `⬡ N MCP server(s) connected: name (M tools)` for successes and `✗ MCP 'name' failed: reason` for failures |
 | Server description field | `src/mcp.rs:McpServerConfig` | optional `"description"` in `.mcp.json` stored and shown in `/mcp list` |
-| `/init` | `src/session.rs:cmd_init` | creates CLAUDE.md + agent fills it in |
+| `/init` | `src/session/commands.rs:cmd_init` | guided setup: language confirm, indexing, writes ZAP.md + .zap/project.json; agent fills in ZAP.md + creates .zap/understanding.md |
 
 ### Tests
 | Area | File | Count |
@@ -341,12 +341,12 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 | # | Feature | Status | Files | Effort | Notes |
 |---|---|---|---|---|---|
-| C1 | `context.md` — session handoff file | ⬜ planned | `.zap/context.md`, `src/session/commands.rs:cmd_exit`, `src/hooks.rs` | 1 day | Written at session end via `SessionEnd` hook (already exists). Content: goal, what was done, what's next, files touched. On next startup: banner "Last session: X — Done: Y — Next: Z · Resume? [Y/n]". No competitor does this. |
-| C2 | `project.json` — persist init state | ⬜ planned | `.zap/project.json`, `src/persistence.rs` or new `src/project.rs`, `src/session/mod.rs:Session::new` | 0.5 day | Thin file: `{language, indexed_at, initialized_at}`. On startup: if present, skip domain-scope prompt entirely (already detected). Builds on `detect_stack_skills` — no re-detection. |
-| C3 | Indexing nudge on first open | ⬜ planned | `src/session/mod.rs:Session::new`, `src/session/commands.rs:cmd_index` | 0.5 day | If `project.json` missing or `indexed_at` is null, show one-time prompt: "This project hasn't been indexed yet. Indexing lets zap find symbols without reading every file. Index now? [Y/n]". Cursor does this silently; zap should explain the benefit. |
-| C4 | `.zap/understanding.md` — auto-updated project knowledge | ⬜ planned | `.zap/understanding.md`, `src/session/commands.rs`, `src/context_manager.rs` | 2 days | Separate from user-controlled CLAUDE.md. Written/appended at session end via LLM summarization call. Sections: Architecture, Key Files, Patterns, Known Constraints. Injected into system prompt after CLAUDE.md (capped at 2000 tokens to protect casual-turn savings). Auto-update is the differentiator vs Claude Code's manual CLAUDE.md. ⚠ Don't free-form rewrite — append with timestamps to avoid LLM drift. |
-| C5 | `.zap/session_log.md` — session intent log | ⬜ planned | `.zap/session_log.md`, `src/session/commands.rs`, `src/hooks.rs` | 1 day | One entry per session: `{session_id, goal, files_touched, outcome}`. Written at session end. **Not** per-edit logging (redundant with git). The value is intent ("why") that git log doesn't have. Referenced by C1 context.md to show recent history. |
-| C6 | `/init` upgrade — guided onboarding flow | ⬜ planned | `src/session/commands.rs:cmd_init` | 1 day | Extend existing `/init`: (1) detect + confirm language, (2) offer indexing with explanation, (3) write `project.json`, (4) fill CLAUDE.md as today, (5) print "Project initialized — zap will remember this project." Make `/init` the recommended first step, shown in startup hint for new projects. |
+| C1 | `context.md` — session handoff file | ✅ done | `.zap/context.md`, `src/session/commands.rs:cmd_exit`, `src/hooks.rs` | 1 day | Written at session end via `SessionEnd` hook (already exists). Content: goal, what was done, what's next, files touched. On next startup: banner "Last session: X — Done: Y — Next: Z · Resume? [Y/n]". No competitor does this. |
+| C2 | `project.json` — persist init state | ✅ done | `.zap/project.json`, `src/persistence.rs` or new `src/project.rs`, `src/session/mod.rs:Session::new` | 0.5 day | Thin file: `{language, indexed_at, initialized_at}`. On startup: if present, skip domain-scope prompt entirely (already detected). Builds on `detect_stack_skills` — no re-detection. |
+| C3 | Indexing nudge on first open | ✅ done | `src/session/mod.rs:Session::new`, `src/session/commands.rs:cmd_index` | 0.5 day | If `project.json` missing or `indexed_at` is null, show one-time prompt: "This project hasn't been indexed yet. Indexing lets zap find symbols without reading every file. Index now? [Y/n]". Cursor does this silently; zap should explain the benefit. |
+| C4 | `.zap/understanding.md` — auto-updated project knowledge | ✅ done | `.zap/understanding.md`, `src/session/commands.rs`, `src/context_manager.rs` | 2 days | Separate from user-controlled CLAUDE.md. Written/appended at session end via LLM summarization call. Sections: Architecture, Key Files, Patterns, Known Constraints. Injected into system prompt after CLAUDE.md (capped at 2000 tokens to protect casual-turn savings). Auto-update is the differentiator vs Claude Code's manual CLAUDE.md. ⚠ Don't free-form rewrite — append with timestamps to avoid LLM drift. |
+| C5 | `.zap/session_log.md` — session intent log | ✅ done | `.zap/session_log.md`, `src/session/commands.rs`, `src/hooks.rs` | 1 day | One entry per session: `{session_id, goal, files_touched, outcome}`. Written at session end. **Not** per-edit logging (redundant with git). The value is intent ("why") that git log doesn't have. Referenced by C1 context.md to show recent history. |
+| C6 | `/init` upgrade — guided onboarding flow | ✅ done | `src/session/commands.rs:cmd_init` | 1 day | Extend existing `/init`: (1) detect + confirm language, (2) offer indexing with explanation, (3) write `project.json`, (4) fill CLAUDE.md as today, (5) print "Project initialized — zap will remember this project." Make `/init` the recommended first step, shown in startup hint for new projects. |
 
 **Implementation order:** C2 → C3 → C1 → C6 → C4 → C5 (C2/C3 are small+safe, C1 is highest value, C4/C5 need C1 infrastructure)
 

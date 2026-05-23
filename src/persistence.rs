@@ -73,6 +73,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn get_session_goal(&self, session_id: i64) -> Option<String> {
+        self.conn
+            .query_row("SELECT goal FROM sessions WHERE id = ?1", params![session_id], |r| r.get(0))
+            .ok()
+    }
+
     pub fn recent_sessions(&self, limit: usize) -> Result<Vec<(i64, String, String, String)>> {
         let mut stmt = self
             .conn

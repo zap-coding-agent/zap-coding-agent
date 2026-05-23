@@ -215,7 +215,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/permissions", "ask|auto|deny"),
     ("/clear",       "clear history"),
     ("/compact",     "compress conversation"),
-    ("/init",        "create CLAUDE.md"),
+    ("/init",        "set up project (ZAP.md, index, project.json)"),
     ("/attach",      "<path>  stage image file"),
     ("/paste",       "paste image from clipboard"),
     ("/history",     "show turn count"),

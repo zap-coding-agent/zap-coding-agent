@@ -26,7 +26,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/goal",              "run autonomously until condition met"),
     ("/index",             "reindex AST code symbols"),
     ("/undo",              "undo last file edit"),
-    ("/init",              "create CLAUDE.md for this project"),
+    ("/init",              "set up project (ZAP.md, index, project.json)"),
     ("/run",               "run a workflow"),
     ("/memory",            "manage memory entries"),
     ("/skill",             "list, use, show skills"),
@@ -391,7 +391,7 @@ fn help_text() -> String {
             ("/tasks",                    "browse & execute task sessions"),
             ("/index [path|stats]",       "reindex AST code symbols"),
             ("/undo [file]",              "undo last file edit"),
-            ("/init",                     "create CLAUDE.md for this project"),
+            ("/init",                     "set up project (ZAP.md, index, project.json)"),
             ("/run <workflow>",           "run a workflow"),
         ]),
         ("memory & skills", &[

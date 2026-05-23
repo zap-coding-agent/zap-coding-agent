@@ -119,6 +119,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     );
     let _ = terminal.show_cursor();
 
+    session.save_context();
     session.hooks.fire_session_end();
     result
 }

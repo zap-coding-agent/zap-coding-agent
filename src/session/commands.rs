@@ -48,7 +48,7 @@ impl Session {
                 ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),
                 ("/index [path|stats]",      "reindex AST code symbols"),
                 ("/undo [file]",             "undo last file edit"),
-                ("/init",                    "create CLAUDE.md for this project"),
+                ("/init",                    "set up this project (ZAP.md, index, project.json)"),
                 ("/run <workflow>",          "run a workflow from .zap/workflows/"),
             ]),
             ("media", &[
@@ -817,28 +817,116 @@ $img.Save('{dest}'); exit 0"#
 // ── Code ──────────────────────────────────────────────────────────────────────
 
 impl Session {
-    pub fn cmd_init(&self) -> Option<String> {
-        let claude_md = std::path::Path::new("CLAUDE.md");
-        if claude_md.exists() {
-            println!("  {} CLAUDE.md already exists.", "✗".red());
+    pub fn cmd_init(&mut self) -> Option<String> {
+        let project_type = detect_project_type();
+        let cfg = crate::ui::inquire_render_config();
+
+        // ── 1. Confirm / correct detected language ────────────────────────────
+        println!(
+            "  {} Detected project type: {}",
+            "◌".dimmed(),
+            project_type.cyan(),
+        );
+        let language_input = inquire::Text::new("Language(s) for this project:")
+            .with_initial_value(project_type)
+            .with_render_config(cfg)
+            .prompt()
+            .unwrap_or_else(|_| project_type.to_string());
+        let languages: Vec<String> = language_input
+            .split([',', ' '])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+
+        // ── 2. Offer indexing ─────────────────────────────────────────────────
+        println!(
+            "  {} Indexing lets zap find symbols and definitions instantly without reading every file.",
+            "◌".dimmed(),
+        );
+        let do_index = inquire::Confirm::new("Index this project now? (recommended, ~10s)")
+            .with_default(true)
+            .prompt()
+            .unwrap_or(true);
+        if do_index {
+            self.cmd_index("");
+            crate::project::mark_indexed();
+        }
+
+        // ── 3. Write / update project.json ────────────────────────────────────
+        let cwd_name = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "project".to_string());
+        let meta = crate::project::ProjectMeta {
+            name: cwd_name,
+            language: languages,
+            indexed: do_index,
+            indexed_at: if do_index { Some(chrono::Utc::now().to_rfc3339()) } else { None },
+            initialized_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+        if let Err(e) = crate::project::save_project_meta(&meta) {
+            println!("  {} Could not write project.json: {}", "✗".red(), e);
+        } else {
+            println!("  {} .zap/project.json written.", "✓".green());
+        }
+
+        // ── 4. Create ZAP.md if it doesn't exist ─────────────────────────────
+        let zap_md = std::path::Path::new("ZAP.md");
+        if zap_md.exists() {
+            println!("  {} ZAP.md already exists — skipping template.", "◌".dimmed());
+            println!(
+                "  {} Project initialized. zap will remember this project.",
+                "✓".green(),
+            );
             return None;
         }
-        let project_type = detect_project_type();
-        let template     = generate_claude_md_template(project_type);
-        match std::fs::write("CLAUDE.md", &template) {
+        let template = generate_zap_md_template(project_type);
+        match std::fs::write("ZAP.md", &template) {
             Ok(_) => {
-                println!("  {} Created CLAUDE.md for {} project.", "✓".green(), project_type.cyan());
-                println!("  {} Asking the agent to analyse the repo and fill it in…", "⚡".bright_yellow());
+                println!("  {} Created ZAP.md for {} project.", "✓".green(), project_type.cyan());
+                println!(
+                    "  {} Project initialized. zap will remember this project.",
+                    "✓".green(),
+                );
+                println!("  {} Asking the agent to analyse the repo and fill in ZAP.md…", "⚡".bright_yellow());
                 Some(
-                    "I just created CLAUDE.md with a template. Please read the project \
-                     source files and fill in every section of CLAUDE.md accurately: \
+                    "I just created ZAP.md with a template. Please read the project \
+                     source files and fill in every section of ZAP.md accurately: \
                      Overview, Build & Test commands, Code Style conventions, Architecture, \
-                     Important Files, and Do Not Touch sections. Use edit_file to update CLAUDE.md \
-                     in place with real information from the repo."
+                     Important Files, and Do Not Touch sections. Use edit_file to update ZAP.md \
+                     in place with real information from the repo. Also create \
+                     .zap/understanding.md with a concise technical summary: main modules, \
+                     key data flows, important patterns, and any non-obvious constraints."
                         .to_string(),
                 )
             }
-            Err(e) => { println!("  {} Could not write CLAUDE.md: {}", "✗".red(), e); None }
+            Err(e) => { println!("  {} Could not write ZAP.md: {}", "✗".red(), e); None }
+        }
+    }
+
+    /// Write `.zap/context.md` and append to `.zap/session_log.md` at session end.
+    /// Called from all exit paths (REPL, TUI, SDK).
+    pub fn save_context(&self) {
+        if self.turn_count == 0 {
+            return; // nothing happened this session — don't overwrite existing context
+        }
+        let goal = self.store
+            .get_session_goal(self.session_id)
+            .unwrap_or_else(|| "(untitled session)".to_string());
+        if let Err(e) = crate::project::save_session_context(
+            self.session_id,
+            &goal,
+            &self.files_changed,
+        ) {
+            crate::log::write("WARN ", &format!("could not write context.md: {}", e));
+        }
+        if let Err(e) = crate::project::append_session_log(
+            self.session_id,
+            &goal,
+            &self.files_changed,
+        ) {
+            crate::log::write("WARN ", &format!("could not update session_log.md: {}", e));
         }
     }
 
@@ -1673,7 +1761,7 @@ pub(super) fn detect_project_type() -> &'static str {
     "generic"
 }
 
-pub(super) fn generate_claude_md_template(project_type: &str) -> String {
+pub(super) fn generate_zap_md_template(project_type: &str) -> String {
     let (build_cmd, test_cmd, lint_cmd) = match project_type {
         "rust"        => ("cargo build",     "cargo test",   "cargo clippy"),
         "go"          => ("go build ./...",  "go test ./...", "golint ./..."),

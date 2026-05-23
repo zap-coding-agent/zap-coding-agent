@@ -6,7 +6,7 @@ pub fn build_system_prompt(config: &Config) -> Result<String> {
 }
 
 /// Minimal system prompt for casual/greeting turns — omits code-nav, tool-policy,
-/// sub-agent, security, git-status, and CLAUDE.md sections. Saves ~6-8k tokens.
+/// sub-agent, security, git-status, and ZAP.md sections. Saves ~6-8k tokens.
 pub fn build_casual_system_prompt(config: &Config) -> String {
     format!(
         "You are a helpful AI coding assistant (model: {}).\n\
@@ -202,9 +202,12 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         }
     }
 
-    // ── Project context (CLAUDE.md) ───────────────────────────────────────────
-    if let Some(claude_md) = load_claude_md() {
-        sections.push(format!("## Project Context\n{}", claude_md));
+    // ── Project context (ZAP.md + .zap/understanding.md) ─────────────────────
+    if let Some(zap_md) = load_zap_md() {
+        sections.push(format!("## Project Context\n{}", zap_md));
+    }
+    if let Some(understanding) = crate::project::load_understanding(8_000) {
+        sections.push(format!("## Project Understanding\n{}", understanding));
     }
 
     // ── Git status ────────────────────────────────────────────────────────────
@@ -222,50 +225,47 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     Ok(sections.join("\n\n"))
 }
 
-/// Walk from cwd up to $HOME, loading CLAUDE.md at each level.
-/// Also loads ~/.claude/CLAUDE.md as a global config layer.
-/// Sections are ordered most-general → most-specific so that project-level
-/// instructions appear last and carry more weight with the model.
-fn load_claude_md() -> Option<String> {
+/// Walk from cwd up to $HOME loading ZAP.md at each level (falls back to CLAUDE.md
+/// for projects that haven't migrated yet). Also loads ~/.zap/ZAP.md as a global layer.
+/// Sections ordered most-general → most-specific so project instructions take priority.
+fn load_zap_md() -> Option<String> {
     let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
     let cwd  = std::env::current_dir().ok()?;
 
-    // Collect ancestor directories from cwd up to (and including) $HOME.
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let mut cur = cwd.as_path();
     loop {
         dirs.push(cur.to_path_buf());
-        // Stop at $HOME so we don't walk the entire filesystem.
-        if home.as_deref() == Some(cur) {
-            break;
-        }
+        if home.as_deref() == Some(cur) { break; }
         match cur.parent() {
             Some(p) => cur = p,
             None    => break,
         }
     }
-    // Reverse: most-general (home/ancestor) first, most-specific (cwd) last.
     dirs.reverse();
 
     let mut sections: Vec<String> = Vec::new();
 
-    // Global layer: ~/.claude/CLAUDE.md
+    // Global layer: ~/.zap/ZAP.md (also checks ~/.claude/CLAUDE.md for compat)
     if let Some(ref h) = home {
-        let global = h.join(".claude").join("CLAUDE.md");
-        if let Ok(contents) = std::fs::read_to_string(&global) {
-            if !contents.trim().is_empty() {
-                sections.push(format!("### {} (global)\n{}", global.display(), contents.trim()));
+        for global_path in &[h.join(".zap").join("ZAP.md"), h.join(".claude").join("CLAUDE.md")] {
+            if let Ok(contents) = std::fs::read_to_string(global_path) {
+                if !contents.trim().is_empty() {
+                    sections.push(format!("### {} (global)\n{}", global_path.display(), contents.trim()));
+                    break; // use whichever exists first
+                }
             }
         }
     }
 
-    // Per-directory layers.
+    // Per-directory layers: ZAP.md preferred, CLAUDE.md as fallback.
     for dir in &dirs {
-        for name in &["CLAUDE.md", ".claude/CLAUDE.md"] {
+        for name in &["ZAP.md", "CLAUDE.md", ".zap/ZAP.md", ".claude/CLAUDE.md"] {
             let path = dir.join(name);
             if let Ok(contents) = std::fs::read_to_string(&path) {
                 if !contents.trim().is_empty() {
                     sections.push(format!("### {}\n{}", path.display(), contents.trim()));
+                    break; // prefer ZAP.md over CLAUDE.md in same dir
                 }
             }
         }
