@@ -4,7 +4,7 @@ use ratatui::{
     widgets::*,
 };
 
-use super::app::{App, AppState, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
+use super::app::{App, AppState, CommandPopup, DiffFile, DiffPanel, DiffViewerState, InitWizardState, InitWizardStep, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
 use std::collections::HashSet;
 use ratatui::style::Modifier;
 use super::commands::filter_commands;
@@ -140,6 +140,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_dir_panel(frame, app, left[2]);
         draw_sidebar(frame, app, body[1]);
     } else {
+        // When sidebar is hidden, clear the area where it would have been
+        // to prevent ghost characters from a previous wide-frame render.
+        let sidebar_ghost = Rect {
+            x: outer[1].x + outer[1].width.saturating_sub(SIDEBAR_W),
+            y: outer[1].y,
+            width: SIDEBAR_W,
+            height: outer[1].height,
+        };
+        frame.render_widget(Clear, sidebar_ghost);
+
         let left = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(2),
@@ -172,6 +182,22 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Draw session picker overlay if open
     if app.session_picker.is_some() {
         draw_session_picker(frame, app, size);
+    }
+
+    // Draw /init wizard overlay if open (takes priority over other content)
+    if app.init_wizard.is_some() {
+        draw_init_wizard(frame, app, size);
+    }
+
+    // Draw diff viewer overlay if open (takes priority over everything except mode picker)
+    if app.diff_viewer.is_some() {
+        draw_diff_viewer(frame, app, size);
+        return; // nothing else rendered until diff viewer is closed
+    }
+
+    // Draw command output popup if open (dismissed with Esc).
+    if app.command_popup.is_some() {
+        draw_command_popup(frame, app, size);
     }
 }
 
@@ -1447,4 +1473,459 @@ fn draw_mode_picker(frame: &mut Frame, app: &App, area: Rect) {
     )));
 
     frame.render_widget(Paragraph::new(rows), inner);
+}
+
+// ── /init wizard overlay ──────────────────────────────────────────────────────
+
+fn draw_init_wizard(frame: &mut Frame, app: &App, area: Rect) {
+    let wizard = match app.init_wizard.as_ref() {
+        Some(w) => w,
+        None    => return,
+    };
+
+    let (title, hint, content_h) = match &wizard.step {
+        InitWizardStep::Language       => (" ⚡ Set up this project ", "  Edit   Enter next   Esc skip", 14u16),
+        InitWizardStep::IndexConfirm   => (" ⚡ Set up this project ", "  y/Enter = yes   n = no   Esc back", 10u16),
+        InitWizardStep::UnderstandConfirm => (" ⚡ Set up this project ", "  y/Enter = yes   n = no   Esc back", 10u16),
+    };
+
+    let w = 62u16.min(area.width);
+    let h = (content_h + 2).min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let border_c  = Color::Rgb(255, 200, 50);
+    let accent    = Color::Rgb(100, 210, 255);
+    let muted     = Color::Rgb(100, 95, 125);
+    let dim       = Color::Rgb(70, 65, 90);
+    let body_c    = Color::Rgb(210, 205, 235);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .title(Span::styled(title, Style::default().fg(border_c).add_modifier(Modifier::BOLD)));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    let hint_area    = Rect { y: inner.y + inner.height.saturating_sub(1), height: 1, ..inner };
+    let content_area = Rect { height: inner.height.saturating_sub(1), ..inner };
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(hint, Style::default().fg(dim))),
+        hint_area,
+    );
+
+    let mut rows: Vec<Line<'static>> = Vec::new();
+
+    match &wizard.step {
+        InitWizardStep::Language => {
+            // Step indicator
+            rows.push(Line::from(vec![
+                Span::styled("  Step 1 of 3  ", Style::default().fg(dim)),
+                Span::styled("language", Style::default().fg(border_c).bold()),
+                Span::styled("  ·  index  ·  understand", Style::default().fg(dim)),
+            ]));
+            rows.push(Line::from(""));
+
+            // What init does
+            rows.push(Line::from(Span::styled(
+                "  Init prepares zap to work well in this project:",
+                Style::default().fg(body_c),
+            )));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("Index code symbols", Style::default().fg(body_c).bold()),
+                Span::styled(" — jump to any function/type instantly", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("Write ZAP.md", Style::default().fg(body_c).bold()),
+                Span::styled(" — your project's instructions, loaded every session", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("Build understanding", Style::default().fg(body_c).bold()),
+                Span::styled(" — zap reads your code and learns its structure", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(""));
+
+            // Language input
+            let label  = Span::styled("  Language(s): ", Style::default().fg(Color::Rgb(140, 135, 165)));
+            let text   = wizard.language_input.clone();
+            let cursor = Span::styled("▋", Style::default().fg(border_c));
+            rows.push(Line::from(vec![
+                label,
+                Span::styled(text, Style::default().fg(Color::White).bold()),
+                cursor,
+            ]));
+            rows.push(Line::from(""));
+            let note = if wizard.detected_language.is_empty() {
+                "  no build file detected — type language (e.g. rust, python, typescript)".to_string()
+            } else {
+                format!("  auto-detected from project files: {}", wizard.detected_language)
+            };
+            rows.push(Line::from(Span::styled(note, Style::default().fg(dim))));
+        }
+
+        InitWizardStep::IndexConfirm => {
+            rows.push(Line::from(vec![
+                Span::styled("  Step 2 of 3  ", Style::default().fg(dim)),
+                Span::styled("language  ·  ", Style::default().fg(dim)),
+                Span::styled("index", Style::default().fg(border_c).bold()),
+                Span::styled("  ·  understand", Style::default().fg(dim)),
+            ]));
+            rows.push(Line::from(""));
+            rows.push(Line::from(Span::styled(
+                "  Index code symbols now?  (recommended, ~10–30s)",
+                Style::default().fg(body_c).bold(),
+            )));
+            rows.push(Line::from(""));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("zap parses every file with tree-sitter", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("extracts functions, types, structs, imports", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("stays current: auto-refreshes every 2 min + at session end", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("run /index any time to force a refresh", Style::default().fg(muted)),
+            ]));
+        }
+
+        InitWizardStep::UnderstandConfirm => {
+            rows.push(Line::from(vec![
+                Span::styled("  Step 3 of 3  ", Style::default().fg(dim)),
+                Span::styled("language  ·  index  ·  ", Style::default().fg(dim)),
+                Span::styled("understand", Style::default().fg(border_c).bold()),
+            ]));
+            rows.push(Line::from(""));
+            rows.push(Line::from(Span::styled(
+                "  Let zap read your codebase and write ZAP.md?  (~30–60s)",
+                Style::default().fg(body_c).bold(),
+            )));
+            rows.push(Line::from(""));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("zap reads your source files and fills ZAP.md", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("records architecture, build commands, conventions", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("ZAP.md is loaded into every future session automatically", Style::default().fg(muted)),
+            ]));
+            rows.push(Line::from(vec![
+                Span::styled("  ◎ ", Style::default().fg(accent)),
+                Span::styled("you can edit ZAP.md any time to update zap's context", Style::default().fg(muted)),
+            ]));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(rows), content_area);
+}
+
+// ── Diff Viewer Overlay ─────────────────────────────────────────────────────
+
+fn draw_diff_viewer(frame: &mut Frame, app: &App, area: Rect) {
+    let dv = match &app.diff_viewer {
+        Some(dv) => dv,
+        None => return,
+    };
+
+    // Create centered overlay (80% width, 80% height)
+    let overlay_w = (area.width as f32 * 0.8) as u16;
+    let overlay_h = (area.height as f32 * 0.8) as u16;
+    let overlay_x = area.x + (area.width - overlay_w) / 2;
+    let overlay_y = area.y + (area.height - overlay_h) / 2;
+
+    let overlay_area = Rect {
+        x: overlay_x,
+        y: overlay_y,
+        width: overlay_w,
+        height: overlay_h,
+    };
+
+    // Clear background
+    frame.render_widget(Clear, overlay_area);
+
+    // Split into file list (left) and diff content (right)
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(40),
+        Constraint::Percentage(60),
+    ])
+    .split(overlay_area);
+
+    draw_diff_file_list(frame, dv, chunks[0]);
+    draw_diff_content(frame, dv, chunks[1]);
+}
+
+fn draw_diff_file_list(frame: &mut Frame, dv: &DiffViewerState, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(" Files ", Style::default().fg(Color::Cyan).bold()));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for (idx, file) in dv.files.iter().enumerate() {
+        let is_selected = idx == dv.selected && dv.panel == DiffPanel::Files;
+        let path_disp = if file.path.chars().count() > inner.width.saturating_sub(12) as usize {
+            format!(
+                "…{}",
+                file.path
+                    .chars()
+                    .rev()
+                    .take(inner.width.saturating_sub(13) as usize)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>()
+            )
+        } else {
+            file.path.clone()
+        };
+        let stats = format!(" +{}/-{}", file.added, file.removed);
+
+        if is_selected {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    path_disp,
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    stats,
+                    Style::default()
+                        .fg(Color::Rgb(100, 210, 120))
+                        .bg(Color::DarkGray),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(path_disp, Style::default().fg(Color::White)),
+                Span::styled(
+                    stats,
+                    Style::default().fg(Color::Rgb(100, 210, 120)),
+                ),
+            ]));
+        }
+    }
+
+    if lines.len() < inner.height as usize - 2 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "↑↓ navigate  Tab switch  Esc close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, inner);
+}
+
+fn draw_diff_content(frame: &mut Frame, dv: &DiffViewerState, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(" Diff ", Style::default().fg(Color::Cyan).bold()));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Build diff lines from the selected file
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if let Some(file) = dv.files.get(dv.selected) {
+        for raw in &file.diff_lines {
+            let display =
+                expand_tabs_and_truncate(raw, inner.width.saturating_sub(4) as usize);
+            let style = if raw.starts_with("+++") || raw.starts_with("---") {
+                Style::default().fg(Color::Rgb(120, 115, 145))
+            } else if raw.starts_with('+') {
+                Style::default().fg(Color::Rgb(100, 210, 120))
+            } else if raw.starts_with('-') {
+                Style::default().fg(Color::Rgb(220, 80, 80))
+            } else if raw.starts_with("@@") {
+                Style::default().fg(Color::Rgb(100, 180, 255))
+            } else {
+                Style::default().fg(Color::Rgb(175, 170, 200))
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(display, style),
+            ]));
+        }
+    }
+
+    if lines.len() < inner.height as usize - 2 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "↑↓ navigate  Tab switch  Esc close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let scroll = if dv.panel == DiffPanel::Diff {
+        dv.diff_scroll as u16
+    } else {
+        0
+    };
+    let para = Paragraph::new(lines).scroll((scroll, 0));
+    frame.render_widget(para, inner);
+}
+
+/// Run `git diff` and parse the output into a `DiffViewerState`.
+/// Returns `None` if git fails or there are no changes.
+pub fn open_diff_viewer() -> Option<DiffViewerState> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--unified=5"])
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+
+    let mut files: Vec<DiffFile> = Vec::new();
+    let mut current_path = String::new();
+    let mut current_lines: Vec<String> = Vec::new();
+    let mut added = 0usize;
+    let mut removed = 0usize;
+
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("diff --git a/") {
+            // Save previous file
+            if !current_path.is_empty() {
+                files.push(DiffFile {
+                    path: current_path,
+                    added,
+                    removed,
+                    diff_lines: current_lines,
+                });
+            }
+            // Extract the path from "diff --git a/... b/..."
+            let b_part = path.split_once(" b/").map(|(_, b)| b).unwrap_or(path);
+            current_path = b_part.to_string();
+            current_lines = Vec::new();
+            added = 0;
+            removed = 0;
+            current_lines.push(line.to_string());
+        } else if !current_path.is_empty() {
+            current_lines.push(line.to_string());
+            if line.starts_with('+') && !line.starts_with("+++") {
+                added += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                removed += 1;
+            }
+        }
+    }
+
+    // Push last file
+    if !current_path.is_empty() {
+        files.push(DiffFile {
+            path: current_path,
+            added,
+            removed,
+            diff_lines: current_lines,
+        });
+    }
+
+    if files.is_empty() {
+        return None;
+    }
+
+    Some(DiffViewerState {
+        files,
+        selected: 0,
+        diff_scroll: 0,
+        panel: DiffPanel::Files,
+    })
+}
+
+// ── Command output popup ─────────────────────────────────────────────────────
+//
+// A centered overlay that shows output from inline slash commands (/help, /config,
+// /skill list, etc.). Dismissed with Esc.
+
+fn draw_command_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let popup = match app.command_popup.as_ref() {
+        Some(p) => p,
+        None    => return,
+    };
+
+    // Centered overlay: 80% wide, up to 70% tall.
+    let w = (area.width as f32 * 0.82) as u16;
+    let h = ((area.height as f32 * 0.7) as u16).max(6).min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let border_c = Color::Rgb(100, 180, 255);
+    let dim = Color::Rgb(80, 75, 100);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .title(Span::styled(
+            format!(" {}  Esc dismiss ", popup.title),
+            Style::default().fg(Color::Yellow).bold(),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    // Render content with scroll support for long output.
+    let text_lines: Vec<Line<'static>> = popup.text.lines().map(|l| {
+        Line::from(Span::styled(l.to_string(), Style::default().fg(Color::Rgb(205, 200, 230))))
+    }).collect();
+
+    let total = text_lines.len();
+    let viewport_h = inner.height as usize;
+    let scroll = popup.scroll.min(total.saturating_sub(viewport_h));
+
+    let para = Paragraph::new(text_lines)
+        .scroll((scroll as u16, 0));
+    frame.render_widget(para, inner);
+
+    // Scrollbar if content overflows.
+    if total > viewport_h {
+        let mut sb_state = ScrollbarState::new(total.saturating_sub(viewport_h))
+            .position(scroll);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            inner,
+            &mut sb_state,
+        );
+    }
+
+    // Footer hint
+    let hint = Rect { y: inner.y + inner.height.saturating_sub(1), height: 1, ..inner };
+    frame.render_widget(
+        Paragraph::new(Span::styled("  ↑↓ scroll   Esc dismiss ", Style::default().fg(dim))),
+        hint,
+    );
 }

@@ -60,6 +60,26 @@ pub struct UiMessage {
     pub blocks: Vec<UiBlock>,
 }
 
+// ── Diff viewer ───────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct DiffFile {
+    pub path: String,
+    pub added: usize,
+    pub removed: usize,
+    pub diff_lines: Vec<String>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum DiffPanel { Files, Diff }
+
+pub struct DiffViewerState {
+    pub files: Vec<DiffFile>,
+    pub selected: usize,
+    pub diff_scroll: usize,
+    pub panel: DiffPanel,
+}
+
 // ── Goal mode ─────────────────────────────────────────────────────────────────
 
 pub struct GoalState {
@@ -67,6 +87,23 @@ pub struct GoalState {
     pub max_turns: usize,
     pub turns_done: usize,
     pub started_at: std::time::Instant,
+}
+
+// ── /init wizard ──────────────────────────────────────────────────────────────
+
+pub enum InitWizardStep {
+    Language,
+    IndexConfirm,
+    UnderstandConfirm,
+}
+
+pub struct InitWizardState {
+    pub step: InitWizardStep,
+    pub detected_language: String,
+    pub language_input: String,
+    pub language_cursor: usize,
+    /// Set when the user answers the Index step — carried forward to UnderstandConfirm.
+    pub do_index: bool,
 }
 
 // ── Session mode picker ────────────────────────────────────────────────────────
@@ -116,6 +153,19 @@ pub struct SessionEntry {
 pub struct SessionPickerState {
     pub entries:  Vec<SessionEntry>,
     pub selected: usize,
+}
+
+// ── Command output popup ──────────────────────────────────────────────────────
+
+/// A centered popup that displays textual output from inline slash commands
+/// (e.g. /help, /config, /cost, /skill list). Dismissed with Esc.
+pub struct CommandPopup {
+    /// Title shown in the border, e.g. "help" or "skill list".
+    pub title: String,
+    /// Full text content (may be multi-line).
+    pub text: String,
+    /// Scroll offset for long output.
+    pub scroll: usize,
 }
 
 // ── App ────────────────────────────────────────────────────────────────────────
@@ -188,6 +238,13 @@ pub struct App {
     /// Session picker overlay (None when closed).
     pub session_picker: Option<SessionPickerState>,
 
+    /// /init wizard overlay (None when closed).
+    pub init_wizard: Option<InitWizardState>,
+
+    /// When true, show the mode picker after the init wizard is dismissed.
+    /// Set at startup for new projects so mode picker comes after setup.
+    pub show_mode_picker_after_init: bool,
+
     /// True after first Ctrl+Q press; second press confirms quit.
     pub quit_confirm: bool,
 
@@ -196,6 +253,12 @@ pub struct App {
 
     /// Active autonomous goal (set by `/goal <condition>`).
     pub goal_state: Option<GoalState>,
+
+    /// Diff viewer overlay (opened by /diff or after session end).
+    pub diff_viewer: Option<DiffViewerState>,
+
+    /// Command output popup (opened by inline commands like /help, /config, etc.).
+    pub command_popup: Option<CommandPopup>,
 }
 
 impl App {
@@ -234,9 +297,13 @@ impl App {
             mode_picker: None,
             domain_picker: None,
             session_picker: None,
+            init_wizard: None,
+            show_mode_picker_after_init: false,
             quit_confirm: false,
             skill_names: Vec::new(),
             goal_state: None,
+            diff_viewer: None,
+            command_popup: None,
         }
     }
 

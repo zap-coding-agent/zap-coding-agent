@@ -905,6 +905,153 @@ impl Session {
         }
     }
 
+    /// TUI-native init: takes wizard choices, returns (output_text, optional_llm_prompt).
+    /// No inquire prompts — all input was collected by the TUI wizard overlay.
+    pub fn cmd_init_direct(
+        &mut self,
+        languages: Vec<String>,
+        do_index: bool,
+        do_understand: bool,
+    ) -> (String, Option<String>) {
+        let project_type = detect_project_type();
+        let lang_label = if languages.is_empty() {
+            project_type.to_string()
+        } else {
+            languages.join(", ")
+        };
+        let mut sections: Vec<String> = Vec::new();
+
+        // ── Index ──────────────────────────────────────────────────────────────
+        if do_index {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let index_section = match self.code_index.lock() {
+                Ok(mut guard) => match guard.index_dir(&cwd) {
+                    Ok((new_files, new_syms)) => {
+                        crate::project::mark_indexed();
+                        let (total_files, total_syms) = guard.total_stats().unwrap_or((new_files, new_syms));
+                        // Per-language breakdown from DB
+                        let lang_counts = guard.stats_by_language().unwrap_or_default();
+                        let db_kb = cwd.join(".zap").join("code.db")
+                            .metadata().map(|m| m.len() / 1024).unwrap_or(0);
+                        let mut s = format!(
+                            "Code index\n  {} files · {} symbols indexed",
+                            total_files, total_syms
+                        );
+                        if !lang_counts.is_empty() {
+                            let breakdown: Vec<String> = lang_counts.iter()
+                                .map(|(l, n)| format!("{} ({})", l, n))
+                                .collect();
+                            s.push_str(&format!("\n  Languages: {}", breakdown.join(", ")));
+                        }
+                        if db_kb > 0 {
+                            s.push_str(&format!("\n  DB: {} KB · .zap/code.db", db_kb));
+                        }
+                        s.push_str("\n  Auto-updates: every 2 min while running · at session end");
+                        s.push_str("\n  Run /index any time to refresh manually");
+                        s
+                    }
+                    Err(e) => format!("Index error: {}", e),
+                },
+                Err(_) => "Index busy — run /index manually".to_string(),
+            };
+            sections.push(index_section);
+        }
+
+        // ── Write project.json ────────────────────────────────────────────────
+        let cwd_name = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "project".to_string());
+        let meta = crate::project::ProjectMeta {
+            name:           cwd_name.clone(),
+            language:       languages,
+            indexed:        do_index,
+            indexed_at:     if do_index { Some(chrono::Utc::now().to_rfc3339()) } else { None },
+            initialized_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+        if let Err(e) = crate::project::save_project_meta(&meta) {
+            sections.push(format!("✗ Could not write project.json: {}", e));
+        }
+
+        // ── Create ZAP.md if missing ──────────────────────────────────────────
+        let zap_md = std::path::Path::new("ZAP.md");
+        let created_zap_md = if !zap_md.exists() {
+            let template = generate_zap_md_template(project_type);
+            std::fs::write("ZAP.md", &template).is_ok()
+        } else {
+            false
+        };
+
+        // ── Summary block ──────────────────────────────────────────────────────
+        let mut created = Vec::new();
+        created.push("✓ .zap/project.json — language, index state, timestamps".to_string());
+        if created_zap_md {
+            created.push("✓ ZAP.md — project instructions loaded into every session".to_string());
+        } else {
+            created.push("· ZAP.md already exists".to_string());
+        }
+        if do_understand {
+            created.push("✓ .zap/understanding.md — technical deep-dive (being written…)".to_string());
+        }
+        sections.push(format!("Files\n{}", created.join("\n")));
+
+        // Analysis provenance note — shown whenever indexing ran
+        if do_index {
+            sections.push(
+                "Analysis method\n\
+                 Everything above is grounded in your actual source code:\n\
+                 ◎ tree-sitter AST — symbols parsed directly from files, not inferred\n\
+                 ◎ grep / search  — pattern matches against real file content\n\
+                 ◎ file reads     — key files read in full for context\n\
+                 The index is deterministic: same code → same results, every time.\n\
+                 If you refactor or add files, /index refreshes it instantly."
+                .to_string(),
+            );
+        }
+
+        let output = format!(
+            "Project '{}' initialized  ({})\n\n{}",
+            cwd_name,
+            lang_label,
+            sections.join("\n\n")
+        );
+
+        // ── Optional LLM prompt to fill ZAP.md ───────────────────────────────
+        let llm_prompt = if do_understand {
+            Some(
+                "I just initialized this project with /init. Your job is to analyse the \
+                 codebase and produce two files.\n\
+                 \n\
+                 METHODOLOGY — use these tools in order, and mention which ones you used \
+                 at the start of your response so the user can see the analysis is grounded \
+                 in real source:\n\
+                 1. Use the code index (search_symbols / code_map) to get a full symbol map\n\
+                 2. Use grep / glob_read to find entry points, config files, key patterns\n\
+                 3. Read the most important source files in full with read_file\n\
+                 4. Only write after you have seen the actual code — no guessing\n\
+                 \n\
+                 OUTPUT:\n\
+                 1. Fill every section of ZAP.md (Overview, Build & Test, Code Style, \
+                 Architecture, Important Files, Do Not Touch) with facts from the source.\n\
+                 2. Create .zap/understanding.md: main modules, entry points, data flows, \
+                 key abstractions, non-obvious constraints, and a one-line summary of each \
+                 top-level file/directory.\n\
+                 \n\
+                 Use edit_file for both files. Be specific — no generic filler. \
+                 Start your reply with a brief one-line summary of the tools you used \
+                 (e.g. 'Analysed via code index (247 symbols), grep (12 patterns), \
+                 read_file (8 files)')."
+                .to_string(),
+            )
+        } else if created_zap_md {
+            None
+        } else {
+            None
+        };
+
+        (output, llm_prompt)
+    }
+
     /// Write `.zap/context.md` and append to `.zap/session_log.md` at session end.
     /// Called from all exit paths (REPL, TUI, SDK).
     pub fn save_context(&self) {
@@ -927,6 +1074,22 @@ impl Session {
             &self.files_changed,
         ) {
             crate::log::write("WARN ", &format!("could not update session_log.md: {}", e));
+        }
+        // Auto-create/update understanding.md if it doesn't exist or is the
+        // placeholder template (e.g. projects initialised before this feature).
+        let (files, symbols, langs): (usize, usize, Vec<(String, usize)>) =
+            self.code_index.lock().ok().and_then(|mut guard| {
+                let cwd = std::env::current_dir().ok()?;
+                let _ = guard.index_dir(&cwd); // re-index so stats are fresh
+                let (f, s) = guard.total_stats().ok()?;
+                let l = guard.stats_by_language().ok().unwrap_or_default();
+                Some((f, s, l))
+            }).unwrap_or_default();
+        if let Err(e) = crate::project::ensure_understanding_md(
+            std::env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().to_string())),
+            files, symbols, &langs,
+        ) {
+            crate::log::write("WARN ", &format!("could not ensure understanding.md: {}", e));
         }
     }
 
@@ -1751,26 +1914,53 @@ impl Session {
 
 // ── /init helpers (no Session dependency) ────────────────────────────────────
 
-pub(super) fn detect_project_type() -> &'static str {
-    if std::path::Path::new("Cargo.toml").exists()   { return "rust"; }
-    if std::path::Path::new("go.mod").exists()        { return "go"; }
-    if std::path::Path::new("package.json").exists()  { return "node"; }
+pub fn detect_project_type() -> &'static str {
+    if std::path::Path::new("Cargo.toml").exists()            { return "rust"; }
+    if std::path::Path::new("go.mod").exists()                { return "go"; }
+    if std::path::Path::new("package.json").exists() {
+        if std::path::Path::new("tsconfig.json").exists()     { return "typescript"; }
+        return "javascript";
+    }
     if std::path::Path::new("pyproject.toml").exists()
-        || std::path::Path::new("setup.py").exists()  { return "python"; }
-    if std::path::Path::new("pom.xml").exists()       { return "java/maven"; }
-    if std::path::Path::new("build.gradle").exists()  { return "java/gradle"; }
-    "generic"
+        || std::path::Path::new("setup.py").exists()
+        || std::path::Path::new("requirements.txt").exists()  { return "python"; }
+    if std::path::Path::new("pom.xml").exists()               { return "java"; }
+    if std::path::Path::new("build.gradle").exists()
+        || std::path::Path::new("build.gradle.kts").exists()  { return "kotlin"; }
+    if std::path::Path::new("*.swift").exists()
+        || std::path::Path::new("Package.swift").exists()     { return "swift"; }
+    if std::path::Path::new("CMakeLists.txt").exists()
+        || std::path::Path::new("Makefile").exists() {
+        // Check for C++ vs C
+        if std::fs::read_dir(".")
+            .ok()
+            .map(|d| d.filter_map(|e| e.ok())
+                .any(|e| e.path().extension()
+                    .map(|x| x == "cpp" || x == "cc" || x == "cxx")
+                    .unwrap_or(false)))
+            .unwrap_or(false)
+        {
+            return "c++";
+        }
+        return "c";
+    }
+    // No build file found — ask the user
+    ""
 }
 
 pub(super) fn generate_zap_md_template(project_type: &str) -> String {
     let (build_cmd, test_cmd, lint_cmd) = match project_type {
-        "rust"        => ("cargo build",     "cargo test",   "cargo clippy"),
-        "go"          => ("go build ./...",  "go test ./...", "golint ./..."),
-        "node"        => ("npm run build",   "npm test",     "npm run lint"),
-        "python"      => ("pip install -e .", "pytest",      "ruff check ."),
-        "java/maven"  => ("mvn compile",     "mvn test",     "mvn checkstyle:check"),
-        "java/gradle" => ("./gradlew build", "./gradlew test", "./gradlew lint"),
-        _             => ("make",            "make test",    "make lint"),
+        "rust"       => ("cargo build",       "cargo test",      "cargo clippy"),
+        "go"         => ("go build ./...",    "go test ./...",   "golangci-lint run"),
+        "typescript" => ("npm run build",     "npm test",        "npm run lint"),
+        "javascript" => ("npm run build",     "npm test",        "npm run lint"),
+        "python"     => ("pip install -e .",  "pytest",          "ruff check ."),
+        "java"       => ("mvn compile",       "mvn test",        "mvn checkstyle:check"),
+        "kotlin"     => ("./gradlew build",   "./gradlew test",  "./gradlew lint"),
+        "swift"      => ("swift build",       "swift test",      "swiftlint"),
+        "c++"        => ("cmake --build .",   "ctest",           "clang-tidy"),
+        "c"          => ("make",              "make test",       "clang-tidy"),
+        _            => ("make",              "make test",       "make lint"),
     };
     format!(
         r#"# Project Instructions

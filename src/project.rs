@@ -186,3 +186,60 @@ pub fn save_understanding(content: &str) -> Result<()> {
     std::fs::write(zap_dir().join("understanding.md"), content)?;
     Ok(())
 }
+
+/// Create a default `.zap/understanding.md` if it doesn't already exist,
+/// or if it contains the auto-created placeholder text (meaning /init never
+/// ran the LLM analysis). When index stats are available, fills in project
+/// structure from the code index deterministically.
+pub fn ensure_understanding_md(
+    cwd_name: Option<String>,
+    files: usize,
+    symbols: usize,
+    lang_counts: &[(String, usize)],
+) -> Result<()> {
+    let path = zap_dir().join("understanding.md");
+    let is_placeholder = match std::fs::read_to_string(&path) {
+        Ok(s) => s.contains("This project has not yet been analysed"),
+        Err(_) => true, // doesn't exist → treat as placeholder
+    };
+    if path.exists() && !is_placeholder {
+        return Ok(()); // has real content — don't touch
+    }
+
+    let content = if let Some(name) = cwd_name {
+        let langs = if lang_counts.is_empty() {
+            String::new()
+        } else {
+            let parts: Vec<String> = lang_counts.iter()
+                .map(|(l, n)| format!("  - {l}: {n} symbols"))
+                .collect();
+            format!("\n## Languages\n{}\n", parts.join("\n"))
+        };
+        format!("\
+# Understanding
+
+Auto-generated from code index. Run `/init` for a detailed LLM-powered analysis.
+
+## Project
+{files} files · {symbols} symbols indexed · root: {name}
+{langs}
+## Structure
+<!-- File-by-file analysis not yet run. Use /init to generate one. -->
+"
+        )
+    } else {
+        "\
+# Understanding
+
+<!-- This file was auto-created by zap. Run `/init` or manually edit it to add project-specific knowledge. -->
+
+## Overview
+
+*This project has not yet been analysed. Run `/init` to generate a full understanding based on the code index.*
+"
+        .to_string()
+    };
+
+    std::fs::write(&path, content)?;
+    Ok(())
+}

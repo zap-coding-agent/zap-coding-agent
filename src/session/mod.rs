@@ -257,8 +257,9 @@ impl Session {
             }
         } else if !detected.is_empty() {
             detected.iter().cloned().collect()
-        } else if !config.is_subagent && !config.skip_domain_prompt {
-            // Nothing auto-detected — ask the user once (interactive sessions only).
+        } else if !config.is_subagent && !config.skip_domain_prompt
+                  && unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
+            // Nothing auto-detected — ask the user once (TTY only).
             crate::skill_manager::prompt_domain_scope(&skills)
                 .map(|v| v.into_iter().collect())
                 .unwrap_or_default()
@@ -370,12 +371,17 @@ impl Session {
                         system.push_str(&ctx);
                     }
                 } else {
-                    // CLI: show banner and ask whether to resume.
+                    // CLI: show banner and ask whether to resume (TTY only).
                     println!("  {} Last session: {}{}", "◌".dimmed(), summary.truecolor(180, 175, 210), files_part.dimmed());
-                    let resume = Confirm::new("Resume from last session?")
-                        .with_default(true)
-                        .prompt()
-                        .unwrap_or(false);
+                    let is_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
+                    let resume = if is_tty {
+                        Confirm::new("Resume from last session?")
+                            .with_default(true)
+                            .prompt()
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
                     if resume {
                         if let Some(ctx) = crate::project::load_session_context() {
                             system.push_str("\n\n## Last Session Handoff\n");

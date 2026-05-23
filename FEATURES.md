@@ -96,6 +96,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Extended thinking (`/think`) | `src/session/commands.rs:cmd_think`, `src/llm_client.rs`, `src/tui/` | `/think on` (8k budget), `/think off`, `/think <N>` tokens; thinking streams in TUI as dimmed italic text with last 3 lines visible; collapses to "🧠 Thinking (N chars)" after turn completes; thinking blocks preserved in multi-turn history (with Anthropic signature); OpenAI providers ignore the budget; budget clamped to MAX_TOKENS-1 to satisfy Anthropic constraint; /think handled inline in TUI (no suspend/Press-Enter) |
 | Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
+| Command output popup | `src/tui/render.rs:draw_command_popup` | Inline slash commands show output in centered overlay instead of dumping into chat; Esc dismisses, ↑↓/PgUp/PgDn scrolls |
 
 ### Remote control
 | Feature | File | Notes |
@@ -324,6 +325,19 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `spawn_agent` char-based truncation regression (byte-slice panic fix) | `src/tools/agent.rs` | 3 |
 | `filter_commands` skill completions | `src/tui/commands.rs` | 8 |
 | Pre-push hook | `.git/hooks/pre-push` | runs `cargo test` before every push |
+
+### E2E tests (`tests/e2e/`)
+Black-box tests that run the installed `zap` binary and assert on observable output and file system state.  Run with `./tests/e2e/run_all.sh` or a single suite e.g. `./tests/e2e/run_all.sh test_basic`.
+
+| Suite | File | What it covers |
+|---|---|---|
+| T01 Basic | `test_basic.sh` | Single-shot goal answer, no panic |
+| T02 Tools | `test_tools.sh` | `list_directory`, `read_file`, `shell` tool use |
+| T03 Index | `test_index.sh` | `/index` slash command; tree-sitter log lines; `.zap/code.db`; `/index stats` |
+| T04 Init | `test_init.sh` | `/init` CLI + TUI modes; `project.json`, `ZAP.md` written; no nudge on 2nd run |
+| T05 Session | `test_session.sh` | Session end writes `context.md` and `session_log.md` |
+| T06 TUI | `test_tui.sh` | TUI starts with PTY, renders banner, exits cleanly — uses `script(1)` |
+| T07 Regression | `test_regression.sh` | R01: UTF-8 char-boundary panic on large grep output with em-dashes; R02: `/sessions` no crash |
 
 ---
 

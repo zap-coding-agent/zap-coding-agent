@@ -40,6 +40,11 @@ pub struct TaskPlan {
 // ── Mode picker ───────────────────────────────────────────────────────────────
 
 pub fn pick_session_mode() -> SessionMode {
+    // Non-interactive stdin: skip the picker.
+    if unsafe { libc::isatty(libc::STDIN_FILENO) } == 0 {
+        return SessionMode::Vibe;
+    }
+
     use inquire::{
         ui::{Attributes, Color, RenderConfig, StyleSheet},
         Select,

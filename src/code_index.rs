@@ -344,6 +344,17 @@ impl CodeIndex {
         Ok((files as usize, syms as usize))
     }
 
+    /// Count symbols per language, sorted by count descending.
+    pub fn stats_by_language(&self) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT language, COUNT(*) as n FROM symbols WHERE language != '' GROUP BY language ORDER BY n DESC"
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?.flatten().collect();
+        Ok(rows)
+    }
+
     /// Remove entries for files that no longer exist.
     pub fn prune_deleted(&mut self) -> Result<usize> {
         let paths: Vec<String> = self.conn

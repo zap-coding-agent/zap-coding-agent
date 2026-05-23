@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, GoalState, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
+use app::{App, AppState, GoalState, InitWizardState, InitWizardStep, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -59,11 +59,27 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let mut app = App::new(&session.model, &branch);
     app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
 
-    // Always show the Vibe/Task mode picker as the first TUI overlay.
-    app.mode_picker = Some(ModePickerState { cursor: 0 });
+    let is_new_project = crate::project::load_project_meta().is_none();
 
-    // Queue domain picker (behind mode picker — shows after mode is chosen).
-    if session.domain_scope.is_empty() {
+    if is_new_project {
+        // New project: init wizard first, mode picker queued for after wizard.
+        let detected = crate::session::commands::detect_project_type().to_string();
+        let cursor = detected.chars().count();
+        app.init_wizard = Some(InitWizardState {
+            step: InitWizardStep::Language,
+            detected_language: detected.clone(),
+            language_input: detected,
+            language_cursor: cursor,
+            do_index: false,
+        });
+        app.show_mode_picker_after_init = true;
+    } else {
+        // Returning project: mode picker right away, no init wizard.
+        app.mode_picker = Some(ModePickerState { cursor: 0 });
+    }
+
+    // Queue domain picker only when language is unknown (domain_scope empty = no project.json language).
+    if session.domain_scope.is_empty() && !is_new_project {
         let domain_options = crate::skill_manager::all_domain_skill_names(&session.skills);
         if !domain_options.is_empty() {
             let project_name = std::env::current_dir()
@@ -115,6 +131,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
             blocks: vec![UiBlock::Text(notice)],
         });
     }
+
 
     // 5. Main event loop
     let result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
@@ -194,15 +211,44 @@ async fn tui_loop(
                     continue;
                 }
 
-                // 1. Try native inline handler (output rendered in chat area).
-                if let Some(text) = commands::handle_inline(session, &input, config) {
-                    if !text.is_empty() {
+                // /init → open TUI wizard (no suspend)
+                if cmd == "/init" {
+                    let detected = crate::session::commands::detect_project_type().to_string();
+                    let cursor = detected.chars().count();
+                    app.init_wizard = Some(InitWizardState {
+                        step: InitWizardStep::Language,
+                        detected_language: detected.clone(),
+                        language_input: detected,
+                        language_cursor: cursor,
+                        do_index: false,
+                    });
+                    continue;
+                }
+
+                // /diff → open TUI-native diff viewer (runs `git diff`)
+                if cmd == "/diff" {
+                    app.pending_input = None;
+                    app.diff_viewer = crate::tui::render::open_diff_viewer();
+                    if app.diff_viewer.is_none() {
                         app.messages.push(UiMessage {
                             role: MsgRole::Assistant,
-                            blocks: vec![UiBlock::Text(text)],
+                            blocks: vec![UiBlock::Text("No diff available or not in a git repository.".to_string())],
                         });
-                        app.auto_scroll = true;
-                        // Force immediate redraw so the response is visible now.
+                        terminal.draw(|frame| render::draw(frame, app))?;
+                    }
+                    continue;
+                }
+
+                // 1. Try native inline handler (output rendered in a popup).
+                if let Some(text) = commands::handle_inline(session, &input, config) {
+                    if !text.is_empty() {
+                        // Derive a title from the command.
+                        let title = input.trim().split(' ').next().unwrap_or("/cmd").to_string();
+                        app.command_popup = Some(app::CommandPopup {
+                            title,
+                            text,
+                            scroll: 0,
+                        });
                         terminal.draw(|frame| render::draw(frame, app))?;
                     }
                     app.branch = git_branch();
@@ -498,25 +544,56 @@ async fn tui_loop(
                         InputAction::ConfirmDomainScope(names) => {
                             session.domain_scope = names.into_iter().collect();
                         }
+                        InputAction::ConfirmInit { language, do_index, do_understand } => {
+                            let languages: Vec<String> = language
+                                .split([',', ' '])
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_lowercase)
+                                .collect();
+                            app.state = AppState::Thinking;
+                            terminal.draw(|frame| render::draw(frame, app))?;
+                            let (output, llm_prompt) = tokio::task::block_in_place(|| {
+                                session.cmd_init_direct(languages, do_index, do_understand)
+                            });
+                            app.state = AppState::Idle;
+                            app.messages.push(UiMessage {
+                                role: MsgRole::Assistant,
+                                blocks: vec![UiBlock::Text(output)],
+                            });
+                            app.auto_scroll = true;
+                            if let Some(prompt) = llm_prompt {
+                                app.pending_input = Some(prompt);
+                            }
+                        }
+                        InputAction::CancelInit => {}
                         InputAction::PasteImage => {
                             let tmp = "/tmp/zap_clipboard_paste.png";
                             let ok = crate::session::commands::paste_clipboard_image(tmp);
                             if ok && std::path::Path::new(tmp).exists() {
-                                session.cmd_attach(tmp);
-                                let kb = std::fs::metadata(tmp)
-                                    .map(|m| m.len() / 1024)
-                                    .unwrap_or(0);
-                                app.messages.push(UiMessage {
-                                    role: MsgRole::User,
-                                    blocks: vec![UiBlock::Text("📷 (pasted image)".to_string())],
-                                });
-                                app.messages.push(UiMessage {
-                                    role: MsgRole::Assistant,
-                                    blocks: vec![UiBlock::Text(format!(
-                                        "✓ Image pasted from clipboard ({} KB). It will be sent with your next message.", kb
-                                    ))],
-                                });
-                                app.auto_scroll = true;
+                                // Stage image directly without calling cmd_attach (which println!s and corrupts TUI)
+                                match std::fs::read(tmp) {
+                                    Ok(bytes) => {
+                                        use base64::Engine;
+                                        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                        let kb = bytes.len() / 1024;
+                                        session.staged_images.push(("image/png".to_string(), data));
+                                        app.messages.push(UiMessage {
+                                            role: MsgRole::Assistant,
+                                            blocks: vec![UiBlock::Text(format!(
+                                                "✓ Image attached ({} KB) — it will be sent with your next message.", kb
+                                            ))],
+                                        });
+                                        app.auto_scroll = true;
+                                    }
+                                    Err(e) => {
+                                        app.messages.push(UiMessage {
+                                            role: MsgRole::Assistant,
+                                            blocks: vec![UiBlock::Text(format!("✗ Failed to read clipboard image: {}", e))],
+                                        });
+                                        app.auto_scroll = true;
+                                    }
+                                }
                             } else {
                                 app.messages.push(UiMessage {
                                     role: MsgRole::Assistant,
@@ -525,6 +602,61 @@ async fn tui_loop(
                                     )],
                                 });
                                 app.auto_scroll = true;
+                            }
+                        }
+                        InputAction::OpenDiffViewer => {
+                            app.diff_viewer = crate::tui::render::open_diff_viewer();
+                        }
+                        InputAction::CloseDiffViewer => {
+                            app.diff_viewer = None;
+                        }
+                        InputAction::CloseCommandPopup => {
+                            app.command_popup = None;
+                        }
+                        InputAction::CommandPopupScrollUp(n) => {
+                            if let Some(ref mut p) = app.command_popup {
+                                p.scroll = p.scroll.saturating_sub(n);
+                            }
+                        }
+                        InputAction::CommandPopupScrollDown(n) => {
+                            if let Some(ref mut p) = app.command_popup {
+                                p.scroll = p.scroll.saturating_add(n);
+                            }
+                        }
+                        InputAction::DiffNavUp => {
+                            if let Some(ref mut dv) = app.diff_viewer {
+                                if dv.panel == crate::tui::app::DiffPanel::Files && !dv.files.is_empty() {
+                                    dv.selected = dv.selected.saturating_sub(1);
+                                }
+                            }
+                        }
+                        InputAction::DiffNavDown => {
+                            if let Some(ref mut dv) = app.diff_viewer {
+                                if dv.panel == crate::tui::app::DiffPanel::Files {
+                                    dv.selected = dv.selected.saturating_add(1).min(dv.files.len().saturating_sub(1));
+                                }
+                            }
+                        }
+                        InputAction::DiffSwitchPanel => {
+                            if let Some(ref mut dv) = app.diff_viewer {
+                                dv.panel = match dv.panel {
+                                    crate::tui::app::DiffPanel::Files => crate::tui::app::DiffPanel::Diff,
+                                    crate::tui::app::DiffPanel::Diff => crate::tui::app::DiffPanel::Files,
+                                };
+                            }
+                        }
+                        InputAction::DiffScrollUp(n) => {
+                            if let Some(ref mut dv) = app.diff_viewer {
+                                if dv.panel == crate::tui::app::DiffPanel::Diff {
+                                    dv.diff_scroll = dv.diff_scroll.saturating_sub(n);
+                                }
+                            }
+                        }
+                        InputAction::DiffScrollDown(n) => {
+                            if let Some(ref mut dv) = app.diff_viewer {
+                                if dv.panel == crate::tui::app::DiffPanel::Diff {
+                                    dv.diff_scroll = dv.diff_scroll.saturating_add(n);
+                                }
                             }
                         }
                         InputAction::None => {}
