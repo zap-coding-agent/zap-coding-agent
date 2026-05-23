@@ -263,6 +263,8 @@ pub struct App {
 
     /// Count of file-writing tool calls in the current turn (write_file/edit_file/batch_edit).
     pub files_changed_this_turn: usize,
+    /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
+    pub active_skill: Option<String>,
 }
 
 impl App {
@@ -309,6 +311,7 @@ impl App {
             diff_viewer: None,
             command_popup: None,
             files_changed_this_turn: 0,
+            active_skill: None,
         }
     }
 
@@ -378,6 +381,9 @@ impl App {
             TuiEvent::ContextUpdate { pct, turn } => {
                 self.context_pct = pct;
                 self.turn = turn;
+            }
+            TuiEvent::ActiveSkill(label) => {
+                self.active_skill = Some(label);
             }
         }
     }

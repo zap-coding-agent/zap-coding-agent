@@ -356,12 +356,19 @@ async fn tui_loop(
                     let n = app.files_changed_this_turn;
                     app.files_changed_this_turn = 0;
                     let s = if n == 1 { "" } else { "s" };
+                    // Pull +/- line counts from git diff HEAD --shortstat.
+                    let stat_suffix = git_diff_shortstat();
                     app.messages.push(UiMessage {
                         role: MsgRole::Assistant,
-                        blocks: vec![UiBlock::Text(format!("  ✎ {} file{} modified — Ctrl+G or /diff to view changes", n, s))],
+                        blocks: vec![UiBlock::Text(format!(
+                            "  ✎ {} file{} modified{} — Ctrl+G or /diff to view changes",
+                            n, s, stat_suffix
+                        ))],
                     });
                     app.auto_scroll = true;
                 }
+                // Clear active skill label at turn end.
+                app.active_skill = None;
                 // Update context % from session (safe now that turn_fut is dropped)
                 app.context_pct = session.context_fill_pct();
                 app.turn = session.turn_count;
@@ -730,6 +737,33 @@ fn git_status() -> (bool, usize, usize) {
         .unwrap_or((0, 0));
     
     (dirty, ahead, behind)
+}
+
+/// Returns " (+N/-M)" from `git diff HEAD --shortstat`, or "" if no changes / git unavailable.
+fn git_diff_shortstat() -> String {
+    let out = std::process::Command::new("git")
+        .args(["diff", "HEAD", "--shortstat"])
+        .output()
+        .ok();
+    let Some(out) = out else { return String::new() };
+    if !out.status.success() { return String::new(); }
+    let text = String::from_utf8(out.stdout).unwrap_or_default();
+    // text looks like " 3 files changed, 9 insertions(+), 6 deletions(-)\n"
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    for part in text.split(',') {
+        let p = part.trim();
+        if p.contains("insertion") {
+            added = p.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        } else if p.contains("deletion") {
+            removed = p.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        }
+    }
+    if added == 0 && removed == 0 {
+        String::new()
+    } else {
+        format!(" (+{}/−{})", added, removed)
+    }
 }
 
 fn suspend_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {

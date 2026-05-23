@@ -558,11 +558,17 @@ impl Session {
             self.system.clone()
         } else {
             let skill_summary = crate::skill_manager::skills_summary(&matched_skills);
-            println!(
-                "  {} skills: {}",
-                "↳".truecolor(255, 200, 60),
-                skill_summary.dimmed()
-            );
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(
+                    crate::tui::channel::TuiEvent::ActiveSkill(skill_summary.clone())
+                );
+            } else {
+                println!(
+                    "  {} skills: {}",
+                    "↳".truecolor(255, 200, 60),
+                    skill_summary.dimmed()
+                );
+            }
             let skill_block = crate::skill_manager::build_skill_prompt(&matched_skills);
             // Append skill block to the already-built base system prompt instead of
             // rebuilding from scratch — avoids re-reading CLAUDE.md on every skill turn.

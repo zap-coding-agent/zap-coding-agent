@@ -516,6 +516,19 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(state_text, Style::default().fg(value_c)),
     ]));
 
+    // Active skill — only shown while a skill is injected this turn
+    if let Some(ref skill_label) = app.active_skill {
+        let skill_c = Color::Rgb(255, 200, 60);
+        let short: String = if skill_label.chars().count() > 15 {
+            format!("{}…", skill_label.chars().take(14).collect::<String>())
+        } else {
+            skill_label.clone()
+        };
+        rows.push(Line::from(""));
+        rows.push(Line::from(Span::styled(" skill", Style::default().fg(skill_c).bold())));
+        rows.push(kv("active", short, Color::Rgb(255, 230, 140)));
+    }
+
     // Goal section — only shown when a /goal is active
     if let Some(ref gs) = app.goal_state {
         let goal_c = Color::Rgb(120, 220, 180);
