@@ -61,12 +61,14 @@ pub fn write(level: &str, msg: &str) {
     let ts  = Utc::now().format("%Y-%m-%dT%H:%M:%S");
     let line = format!("[{}] {} {}", ts, level, msg);
 
-    // Always visible on screen.
-    println!("  {}", line);
+    // Skip raw println! in TUI mode — background thread writes race with ratatui
+    // rendering and land at whatever cursor position the last render left behind,
+    // causing visible text overlap across panel boundaries.
+    if !crate::tui::channel::is_tui_mode() {
+        println!("  {}", line);
+    }
 
-    // In TUI mode println! writes to the alternate screen buffer and is hidden
-    // by the next render. Route WARN/ERROR into the chat via LlmChunk so the
-    // user actually sees them.
+    // Route WARN/ERROR into the chat so the user sees them even in TUI mode.
     if level.trim() == "WARN" || level.trim() == "ERROR" {
         crate::tui::channel::tui_send(
             crate::tui::channel::TuiEvent::LlmChunk(format!("\n⚠ {}\n", msg))
