@@ -1806,34 +1806,75 @@ fn draw_diff_content(frame: &mut Frame, dv: &DiffViewerState, area: Rect) {
     frame.render_widget(para, inner);
 }
 
-/// Run `git diff` (falling back to `git diff HEAD~1` when the working tree is
-/// clean) and parse the output into a `DiffViewerState`.
-/// Returns `None` if git fails or there are genuinely no changes anywhere.
+/// Run `git diff` (falling back to `git diff HEAD~1`, then session snapshots)
+/// and parse the output into a `DiffViewerState`.
+/// Returns `None` only if git fails AND no session snapshots exist.
 pub fn open_diff_viewer() -> Option<DiffViewerState> {
     // Try unstaged working-tree changes first.
-    let (text, title) = {
+    let git_result: Option<(String, String)> = (|| {
         let out = std::process::Command::new("git")
             .args(["diff", "--unified=5"])
             .output()
             .ok()?;
         let t = String::from_utf8(out.stdout).ok()?;
         if out.status.success() && !t.trim().is_empty() {
-            (t, "working changes".to_string())
-        } else {
-            // Nothing unstaged — fall back to the previous commit.
-            let out2 = std::process::Command::new("git")
-                .args(["diff", "HEAD~1", "--unified=5"])
-                .output()
-                .ok()?;
-            let t2 = String::from_utf8(out2.stdout).ok()?;
-            if out2.status.success() && !t2.trim().is_empty() {
-                (t2, "last commit".to_string())
-            } else {
-                return None;
-            }
+            return Some((t, "working changes".to_string()));
         }
-    };
+        // Nothing unstaged — try the previous commit.
+        let out2 = std::process::Command::new("git")
+            .args(["diff", "HEAD~1", "--unified=5"])
+            .output()
+            .ok()?;
+        let t2 = String::from_utf8(out2.stdout).ok()?;
+        if out2.status.success() && !t2.trim().is_empty() {
+            return Some((t2, "last commit".to_string()));
+        }
+        None
+    })();
 
+    if let Some((text, title)) = git_result {
+        return parse_git_diff(text, title);
+    }
+
+    // Git unavailable or no changes — fall back to in-session snapshots.
+    snapshot_diff_viewer()
+}
+
+/// Build a DiffViewerState from in-memory session snapshots (works in non-git dirs).
+fn snapshot_diff_viewer() -> Option<DiffViewerState> {
+    use similar::TextDiff;
+    let diffs = crate::snapshot::snapshot_diffs();
+    if diffs.is_empty() {
+        return None;
+    }
+    let mut files: Vec<DiffFile> = Vec::new();
+    for (path, before, after) in &diffs {
+        let diff = TextDiff::from_lines(before.as_str(), after.as_str());
+        let mut diff_lines: Vec<String> = Vec::new();
+        let mut added = 0usize;
+        let mut removed = 0usize;
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        diff_lines.push(format!("diff --session a/{name} b/{name}"));
+        diff_lines.push(format!("--- a/{name}"));
+        diff_lines.push(format!("+++ b/{name}"));
+        for change in diff.iter_all_changes() {
+            let tag = match change.tag() {
+                similar::ChangeTag::Delete => { removed += 1; "-" },
+                similar::ChangeTag::Insert => { added += 1; "+" },
+                similar::ChangeTag::Equal  => " ",
+            };
+            diff_lines.push(format!("{}{}", tag, change.value().trim_end_matches('\n')));
+        }
+        let short = path.to_string_lossy().to_string();
+        files.push(DiffFile { path: short, added, removed, diff_lines });
+    }
+    if files.is_empty() {
+        return None;
+    }
+    Some(DiffViewerState { files, selected: 0, diff_scroll: 0, panel: DiffPanel::Files, title: "session edits".to_string() })
+}
+
+fn parse_git_diff(text: String, title: String) -> Option<DiffViewerState> {
     let mut files: Vec<DiffFile> = Vec::new();
     let mut current_path = String::new();
     let mut current_lines: Vec<String> = Vec::new();

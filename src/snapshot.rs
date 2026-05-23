@@ -65,3 +65,18 @@ pub fn list_snapshots() -> Vec<String> {
         .map(|(path, stack)| format!("{} ({} undo(s))", path.display(), stack.len()))
         .collect()
 }
+
+/// Return (path, before, after) for every file edited this session.
+/// `before` = content before the first edit; `after` = current on-disk content.
+/// Used by the TUI diff viewer when git is unavailable (non-git directories).
+pub fn snapshot_diffs() -> Vec<(PathBuf, String, String)> {
+    let map = SNAPSHOTS.lock().unwrap_or_else(|e| e.into_inner());
+    map.iter()
+        .filter(|(_, stack)| !stack.is_empty())
+        .filter_map(|(path, stack)| {
+            let before = stack[0].clone(); // original before any edits
+            let after = std::fs::read_to_string(path).ok()?;
+            Some((path.clone(), before, after))
+        })
+        .collect()
+}
