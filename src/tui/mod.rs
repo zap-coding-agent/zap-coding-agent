@@ -618,6 +618,9 @@ async fn tui_loop(
                         }
                         InputAction::OpenDiffViewer => {
                             app.diff_viewer = crate::tui::render::open_diff_viewer();
+                            if app.diff_viewer.is_none() {
+                                app.error = Some("No diff found (clean working tree and no previous commit)".to_string());
+                            }
                         }
                         InputAction::CloseDiffViewer => {
                             app.diff_viewer = None;

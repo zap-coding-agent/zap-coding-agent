@@ -1673,10 +1673,11 @@ fn draw_diff_viewer(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_diff_file_list(frame: &mut Frame, dv: &DiffViewerState, area: Rect) {
+    let header = format!(" {} ", dv.title);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(Span::styled(" Files ", Style::default().fg(Color::Cyan).bold()));
+        .title(Span::styled(header, Style::default().fg(Color::Cyan).bold()));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1792,20 +1793,33 @@ fn draw_diff_content(frame: &mut Frame, dv: &DiffViewerState, area: Rect) {
     frame.render_widget(para, inner);
 }
 
-/// Run `git diff` and parse the output into a `DiffViewerState`.
-/// Returns `None` if git fails or there are no changes.
+/// Run `git diff` (falling back to `git diff HEAD~1` when the working tree is
+/// clean) and parse the output into a `DiffViewerState`.
+/// Returns `None` if git fails or there are genuinely no changes anywhere.
 pub fn open_diff_viewer() -> Option<DiffViewerState> {
-    let output = std::process::Command::new("git")
-        .args(["diff", "--unified=5"])
-        .output()
-        .ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    let text = String::from_utf8(output.stdout).ok()?;
-    if text.trim().is_empty() {
-        return None;
-    }
+    // Try unstaged working-tree changes first.
+    let (text, title) = {
+        let out = std::process::Command::new("git")
+            .args(["diff", "--unified=5"])
+            .output()
+            .ok()?;
+        let t = String::from_utf8(out.stdout).ok()?;
+        if out.status.success() && !t.trim().is_empty() {
+            (t, "working changes".to_string())
+        } else {
+            // Nothing unstaged — fall back to the previous commit.
+            let out2 = std::process::Command::new("git")
+                .args(["diff", "HEAD~1", "--unified=5"])
+                .output()
+                .ok()?;
+            let t2 = String::from_utf8(out2.stdout).ok()?;
+            if out2.status.success() && !t2.trim().is_empty() {
+                (t2, "last commit".to_string())
+            } else {
+                return None;
+            }
+        }
+    };
 
     let mut files: Vec<DiffFile> = Vec::new();
     let mut current_path = String::new();
@@ -1860,6 +1874,7 @@ pub fn open_diff_viewer() -> Option<DiffViewerState> {
         selected: 0,
         diff_scroll: 0,
         panel: DiffPanel::Files,
+        title,
     })
 }
 

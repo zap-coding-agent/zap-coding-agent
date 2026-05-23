@@ -78,6 +78,7 @@ pub struct DiffViewerState {
     pub selected: usize,
     pub diff_scroll: usize,
     pub panel: DiffPanel,
+    pub title: String,
 }
 
 // ── Goal mode ─────────────────────────────────────────────────────────────────
