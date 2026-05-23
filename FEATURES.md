@@ -278,6 +278,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | TUI (ratatui) | `src/tui/` | Scrollable conversation, header bar, input box, streaming; default mode; `--cli` for REPL |
+| TUI textarea input | `src/tui/render.rs:draw_input` | Input area renders as bordered box (always visible); replaces bare top-border line |
+| Windows TTY check | `src/session/mod.rs`, `src/task_planner.rs` | `libc::STDIN_FILENO` → `0 as libc::c_int`; `STDIN_FILENO` not exported on Windows MSVC |
 | TUI syntax highlighting | `src/tui/syntax.rs` | syntect integration, 50+ languages, base16-ocean.dark theme |
 | TUI markdown rendering | `src/tui/syntax.rs` | pulldown-cmark, bold/italic/headers/lists/links |
 | TUI git status | `src/tui/mod.rs` | branch with dirty/ahead/behind indicators in header |

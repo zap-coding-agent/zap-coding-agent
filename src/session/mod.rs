@@ -258,7 +258,7 @@ impl Session {
         } else if !detected.is_empty() {
             detected.iter().cloned().collect()
         } else if !config.is_subagent && !config.skip_domain_prompt
-                  && unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
+                  && unsafe { libc::isatty(0 as libc::c_int) } != 0 {
             // Nothing auto-detected — ask the user once (TTY only).
             crate::skill_manager::prompt_domain_scope(&skills)
                 .map(|v| v.into_iter().collect())
@@ -373,7 +373,7 @@ impl Session {
                 } else {
                     // CLI: show banner and ask whether to resume (TTY only).
                     println!("  {} Last session: {}{}", "◌".dimmed(), summary.truecolor(180, 175, 210), files_part.dimmed());
-                    let is_tty = unsafe { libc::isatty(libc::STDIN_FILENO) } != 0;
+                    let is_tty = unsafe { libc::isatty(0 as libc::c_int) } != 0;
                     let resume = if is_tty {
                         Confirm::new("Resume from last session?")
                             .with_default(true)

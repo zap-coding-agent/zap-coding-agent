@@ -129,7 +129,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         // messages | input | dir-panel (keeps input off the bottom edge)
         let left = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Length(3),
         ])
         .split(body[0]);
@@ -152,7 +152,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         let left = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Length(6),
         ])
         .split(outer[1]);
@@ -604,15 +604,7 @@ fn draw_dir_panel(frame: &mut Frame, app: &App, area: Rect) {
 // ── Input ─────────────────────────────────────────────────────────────────────
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-
-    frame.render_widget(Block::default().borders(Borders::TOP), chunks[0]);
-
-    let prefix = "  ❯ ";
+    let prefix = "❯ ";
     let char_count = app.input.chars().count();
     let cursor_pos = app.cursor;
 
@@ -631,7 +623,14 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::raw(after));
     }
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(80, 80, 80)));
+
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).block(block),
+        area,
+    );
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────

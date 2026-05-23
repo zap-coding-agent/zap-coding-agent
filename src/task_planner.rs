@@ -41,7 +41,7 @@ pub struct TaskPlan {
 
 pub fn pick_session_mode() -> SessionMode {
     // Non-interactive stdin: skip the picker.
-    if unsafe { libc::isatty(libc::STDIN_FILENO) } == 0 {
+    if unsafe { libc::isatty(0 as libc::c_int) } == 0 {
         return SessionMode::Vibe;
     }
 
