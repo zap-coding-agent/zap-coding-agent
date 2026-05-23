@@ -227,7 +227,6 @@ async fn tui_loop(
 
                 // /diff → open TUI-native diff viewer (runs `git diff`)
                 if cmd == "/diff" {
-                    app.pending_input = None;
                     app.diff_viewer = crate::tui::render::open_diff_viewer();
                     if app.diff_viewer.is_none() {
                         app.messages.push(UiMessage {
@@ -299,6 +298,7 @@ async fn tui_loop(
                 // Normal message — run session turn with 16ms tick for animation
                 app.state = AppState::Thinking;
                 app.auto_scroll = true;
+                app.files_changed_this_turn = 0;
 
                 {
                     let turn_fut = session.handle_user_turn(&input);
@@ -350,6 +350,18 @@ async fn tui_loop(
                 app.state = AppState::Idle;
                 // Discard any stragglers that arrived in the gap after drain.
                 while rx.try_recv().is_ok() {}
+
+                // Show a "files modified" hint if the agent wrote/edited files.
+                if app.files_changed_this_turn > 0 {
+                    let n = app.files_changed_this_turn;
+                    app.files_changed_this_turn = 0;
+                    let s = if n == 1 { "" } else { "s" };
+                    app.messages.push(UiMessage {
+                        role: MsgRole::Assistant,
+                        blocks: vec![UiBlock::Text(format!("  ✎ {} file{} modified — Ctrl+G or /diff to view changes", n, s))],
+                    });
+                    app.auto_scroll = true;
+                }
                 // Update context % from session (safe now that turn_fut is dropped)
                 app.context_pct = session.context_fill_pct();
                 app.turn = session.turn_count;

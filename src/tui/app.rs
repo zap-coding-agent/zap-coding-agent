@@ -254,11 +254,14 @@ pub struct App {
     /// Active autonomous goal (set by `/goal <condition>`).
     pub goal_state: Option<GoalState>,
 
-    /// Diff viewer overlay (opened by /diff or after session end).
+    /// Diff viewer overlay (opened by /diff or Ctrl+G).
     pub diff_viewer: Option<DiffViewerState>,
 
     /// Command output popup (opened by inline commands like /help, /config, etc.).
     pub command_popup: Option<CommandPopup>,
+
+    /// Count of file-writing tool calls in the current turn (write_file/edit_file/batch_edit).
+    pub files_changed_this_turn: usize,
 }
 
 impl App {
@@ -304,6 +307,7 @@ impl App {
             goal_state: None,
             diff_viewer: None,
             command_popup: None,
+            files_changed_this_turn: 0,
         }
     }
 
@@ -354,6 +358,9 @@ impl App {
                 for sb in self.streaming_blocks.iter_mut().rev() {
                     if let StreamingBlock::Tool(ref mut tc) = sb {
                         if tc.id == id {
+                            if success && matches!(tc.name.as_str(), "write_file" | "edit_file" | "batch_edit") {
+                                self.files_changed_this_turn += 1;
+                            }
                             tc.result = Some(ToolDone { elapsed_ms, success, preview });
                             break;
                         }

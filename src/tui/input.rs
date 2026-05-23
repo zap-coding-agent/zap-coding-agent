@@ -130,6 +130,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
+    // Ctrl+G: open diff viewer (idle only)
+    if key.code == KeyCode::Char('g') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Idle) {
+            return InputAction::OpenDiffViewer;
+        }
+        return InputAction::None;
+    }
+
     // Ctrl+Q: quit with confirmation (idle only; two presses required)
     if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
