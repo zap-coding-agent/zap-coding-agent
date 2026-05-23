@@ -321,8 +321,13 @@ impl Session {
                     Ok(msgs) => {
                         self.messages   = msgs;
                         self.turn_count = self.messages.iter().filter(|m| m.role == "user").count();
-                        println!("  {} Loaded session #{} — {} messages, model was {}",
-                            "✓".green(), session_id, self.messages.len().to_string().cyan(), model.dimmed());
+                        self.session_id = *session_id;
+                        self.model      = model.clone();
+                        let mut cfg     = self.config.clone();
+                        cfg.model       = model.clone();
+                        self.client     = crate::llm_client::create_client(&cfg);
+                        println!("  {} Loaded session #{} — {} messages, model {}",
+                            "✓".green(), session_id, self.messages.len().to_string().cyan(), model.cyan());
                         println!("  {} {}", "◌".dimmed(), goal.dimmed());
                     }
                     Err(e) => println!("  {} Could not parse messages: {}", "✗".red(), e),
