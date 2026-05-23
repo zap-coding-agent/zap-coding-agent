@@ -199,6 +199,8 @@ pub struct Session {
     pub compact_failures: u8,
     /// Paths written/edited this session — used to populate context.md at exit.
     pub files_changed: Vec<String>,
+    /// Info lines shown at TUI startup (context banner, init nudge). Drained by run_tui().
+    pub startup_notices: Vec<String>,
 }
 
 impl Session {
@@ -265,26 +267,17 @@ impl Session {
         };
 
         // ── C3: Index nudge (shown once when project isn't indexed yet) ────────
-        if !config.is_subagent && !config.tui_mode {
+        let index_nudge: Option<String> = if config.is_subagent {
+            None
+        } else {
             match &project_meta {
-                Some(meta) if !meta.indexed => {
-                    println!(
-                        "  {} Project not indexed. {} for fast symbol lookup, or {} to re-run full setup.",
-                        "◌".dimmed(),
-                        "/index".cyan(),
-                        "/init".cyan(),
-                    );
-                }
-                None => {
-                    println!(
-                        "  {} Run {} to set up this project — language detection, indexing, and project context.",
-                        "◌".dimmed(),
-                        "/init".cyan(),
-                    );
-                }
-                _ => {}
+                Some(meta) if !meta.indexed =>
+                    Some("Project not indexed — run /index for fast symbol lookup, or /init to re-run full setup.".into()),
+                None =>
+                    Some("Run /init to set up this project — language detection, tree-sitter indexing, and project context.".into()),
+                _ => None,
             }
-        }
+        };
 
         if !skills.is_empty() && !config.is_subagent && !config.tui_mode {
             let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
@@ -357,25 +350,28 @@ impl Session {
         }
 
         // ── C1: Session context banner + system prompt injection ──────────────
+        let mut startup_notices: Vec<String> = Vec::new();
         if !config.is_subagent {
             if let Some(summary) = crate::project::context_summary() {
                 let files = crate::project::context_files();
-                if !config.tui_mode {
-                    // CLI: show banner and ask whether to resume.
-                    println!(
-                        "  {} Last session: {}",
-                        "◌".dimmed(),
-                        summary.truecolor(180, 175, 210),
-                    );
-                    if !files.is_empty() {
-                        let list = if files.len() <= 3 {
-                            files.join(", ")
-                        } else {
-                            format!("{} and {} more", files[..3].join(", "), files.len() - 3)
-                        };
-                        println!("  {} Files: {}", "·".dimmed(), list.dimmed());
+                let files_part = if files.is_empty() {
+                    String::new()
+                } else if files.len() <= 3 {
+                    format!(" · {}", files.join(", "))
+                } else {
+                    format!(" · {} and {} more", files[..3].join(", "), files.len() - 3)
+                };
+
+                if config.tui_mode {
+                    // TUI: silently inject + queue notice for welcome area.
+                    startup_notices.push(format!("↩ Last session: {}{}", summary, files_part));
+                    if let Some(ctx) = crate::project::load_session_context() {
+                        system.push_str("\n\n## Last Session Handoff\n");
+                        system.push_str(&ctx);
                     }
-                    // Ask — default yes (Enter accepts).
+                } else {
+                    // CLI: show banner and ask whether to resume.
+                    println!("  {} Last session: {}{}", "◌".dimmed(), summary.truecolor(180, 175, 210), files_part.dimmed());
                     let resume = Confirm::new("Resume from last session?")
                         .with_default(true)
                         .prompt()
@@ -386,12 +382,15 @@ impl Session {
                             system.push_str(&ctx);
                         }
                     }
+                }
+            }
+
+            // C3 nudge: print for CLI, queue for TUI.
+            if let Some(nudge) = index_nudge {
+                if config.tui_mode {
+                    startup_notices.push(nudge);
                 } else {
-                    // TUI: silently inject context into system prompt.
-                    if let Some(ctx) = crate::project::load_session_context() {
-                        system.push_str("\n\n## Last Session Handoff\n");
-                        system.push_str(&ctx);
-                    }
+                    println!("  {} {}", "◌".dimmed(), nudge);
                 }
             }
         }
@@ -408,6 +407,11 @@ impl Session {
             crate::code_index::set_global(arc.clone());
             arc
         };
+
+        // Spawn background tree-sitter indexer for interactive sessions.
+        if !config.is_subagent {
+            crate::code_index::spawn_background_indexer(cwd.clone());
+        }
 
         Ok(Self {
             client: create_client(config),
@@ -434,6 +438,7 @@ impl Session {
             thinking_budget: 0,
             compact_failures: 0,
             files_changed: Vec::new(),
+            startup_notices,
         })
     }
 

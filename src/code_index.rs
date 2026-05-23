@@ -85,9 +85,48 @@ pub fn global_stats() -> (usize, usize) {
 pub fn global_reindex_file(path: &Path) {
     if let Some(g) = GLOBAL_INDEX.get() {
         if let Ok(mut guard) = g.lock() {
-            let _ = guard.index_file(path);
+            match guard.index_file(path) {
+                Ok(n) => crate::log::write(
+                    "INDEX",
+                    &format!("tree-sitter · reindex · {} · {} symbols", path.display(), n),
+                ),
+                Err(e) => crate::log::write(
+                    "WARN ",
+                    &format!("tree-sitter · reindex failed · {}: {}", path.display(), e),
+                ),
+            }
         }
     }
+}
+
+/// Spawn a background tokio task that periodically re-indexes changed files.
+/// Interval: `ZAP_INDEX_INTERVAL` env var (seconds), default 120.
+/// Only logs to `zap.log` — never writes to stdout/TUI to avoid interrupting the user.
+pub fn spawn_background_indexer(cwd: PathBuf) {
+    tokio::spawn(async move {
+        let secs = std::env::var("ZAP_INDEX_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(120);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(secs));
+        interval.tick().await; // skip the immediate first tick
+        loop {
+            interval.tick().await;
+            let Some(g) = GLOBAL_INDEX.get() else { continue };
+            // try_lock so we don't block a foreground tool-use reindex
+            let Ok(mut guard) = g.try_lock() else { continue };
+            match guard.index_dir(&cwd) {
+                Ok((files, symbols)) if files > 0 => {
+                    crate::log::write(
+                        "INDEX",
+                        &format!("tree-sitter · background · {} files updated · {} symbols", files, symbols),
+                    );
+                }
+                Ok(_) => {} // nothing changed — skip log noise
+                Err(e) => crate::log::write("WARN ", &format!("background index error: {}", e)),
+            }
+        }
+    });
 }
 
 // ── CodeIndex ─────────────────────────────────────────────────────────────────
@@ -183,6 +222,13 @@ impl CodeIndex {
         )?;
         tx.commit()?;
 
+        if !lang.is_empty() {
+            crate::log::write(
+                "INDEX",
+                &format!("tree-sitter · {} · {} · {} symbols", lang, path_str, symbols.len()),
+            );
+        }
+
         Ok(symbols.len())
     }
 
@@ -199,9 +245,16 @@ impl CodeIndex {
             if self.needs_reindex(&path) {
                 match self.index_file(&path) {
                     Ok(n) => { files += 1; symbols += n; }
-                    Err(e) => crate::zap_warn!("index: skip {:?}: {}", path, e),
+                    Err(e) => crate::log::write("WARN ", &format!("index: skip {:?}: {}", path, e)),
                 }
             }
+        }
+
+        if files > 0 {
+            crate::log::write(
+                "INDEX",
+                &format!("tree-sitter · scan complete · {} files · {} symbols · {}", files, symbols, dir.display()),
+            );
         }
 
         Ok((files, symbols))

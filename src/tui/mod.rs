@@ -108,6 +108,14 @@ pub async fn run_tui(config: &Config) -> Result<()> {
         ))],
     });
 
+    // Drain startup notices (context banner, init nudge) accumulated during Session::new().
+    for notice in session.startup_notices.drain(..) {
+        app.messages.push(UiMessage {
+            role: MsgRole::Assistant,
+            blocks: vec![UiBlock::Text(notice)],
+        });
+    }
+
     // 5. Main event loop
     let result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
 

@@ -969,7 +969,7 @@ impl Session {
 
         if arg == "stats" || arg == "status" {
             let (files, syms) = crate::code_index::global_stats();
-            println!("  {} {} file(s) indexed, {} symbol(s)", "◎".truecolor(100, 200, 255), files, syms);
+            println!("  {} tree-sitter index: {} file(s) · {} symbol(s)", "◎".truecolor(100, 200, 255), files, syms);
             let db = cwd.join(".zap").join("code.db");
             if db.exists() {
                 if let Ok(meta) = std::fs::metadata(&db) {
@@ -1048,14 +1048,15 @@ impl Session {
             return;
         }
 
-        println!("  {} Indexing {}…", "◎".truecolor(100, 200, 255), target.display().to_string().cyan());
+        println!("  {} tree-sitter scanning {}…", "◎".truecolor(100, 200, 255), target.display().to_string().cyan());
         if let Ok(mut guard) = self.code_index.lock() {
             match guard.index_dir(&target) {
                 Ok((files, syms)) => {
-                    println!("  {} indexed {} file(s), {} symbol(s)",
+                    println!("  {} tree-sitter: {} file(s) indexed · {} symbol(s) extracted",
                         "✓".green(), files.to_string().cyan(), syms.to_string().cyan());
                     let (total_f, total_s) = guard.total_stats().unwrap_or((0, 0));
-                    println!("  {} total: {} file(s), {} symbol(s)", "·".dimmed(), total_f, total_s);
+                    println!("  {} total in index: {} file(s) · {} symbol(s)", "·".dimmed(), total_f, total_s);
+                    crate::project::mark_indexed();
                 }
                 Err(e) => println!("  {} index error: {}", "✗".red(), e),
             }
