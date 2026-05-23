@@ -326,6 +326,37 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Planned 🗓
 
+### Bet C — Smart `.zap/` Project Intelligence
+
+> Status key: ⬜ planned · 🔨 in progress · ✅ done · ⚠ redesigned (see notes)
+>
+> **Market context:** Claude Code has `/init` → manual CLAUDE.md (fills once, never auto-updates). Cursor auto-indexes silently. Aider has a repo map (condensed tree-sitter, always in context). Windsurf/Cascade has per-project Memories (auto-maintained, but it's a full IDE). **No CLI agent** does structured session handoff or auto-updates a project knowledge file at session end — that's the gap.
+>
+> **What already exists in zap** that this builds on (don't re-implement):
+> - Stack detection: `detect_stack_skills` reads Cargo.toml/go.mod/package.json/pyproject.toml (`src/skill_manager.rs:469`)
+> - `SessionEnd` hook: `fire_session_end()` already fires in all exit paths — CLI, TUI, SDK (`src/agent_core.rs:209`)
+> - CLAUDE.md load + inject: `load_claude_md` already runs every session (`src/context_manager.rs`)
+> - Code index: tree-sitter, SQLite, auto-reindex on write — fully built (`src/code_index.rs`)
+> - `/init`: already creates and fills CLAUDE.md via LLM (`src/session/commands.rs:820`)
+
+| # | Feature | Status | Files | Effort | Notes |
+|---|---|---|---|---|---|
+| C1 | `context.md` — session handoff file | ⬜ planned | `.zap/context.md`, `src/session/commands.rs:cmd_exit`, `src/hooks.rs` | 1 day | Written at session end via `SessionEnd` hook (already exists). Content: goal, what was done, what's next, files touched. On next startup: banner "Last session: X — Done: Y — Next: Z · Resume? [Y/n]". No competitor does this. |
+| C2 | `project.json` — persist init state | ⬜ planned | `.zap/project.json`, `src/persistence.rs` or new `src/project.rs`, `src/session/mod.rs:Session::new` | 0.5 day | Thin file: `{language, indexed_at, initialized_at}`. On startup: if present, skip domain-scope prompt entirely (already detected). Builds on `detect_stack_skills` — no re-detection. |
+| C3 | Indexing nudge on first open | ⬜ planned | `src/session/mod.rs:Session::new`, `src/session/commands.rs:cmd_index` | 0.5 day | If `project.json` missing or `indexed_at` is null, show one-time prompt: "This project hasn't been indexed yet. Indexing lets zap find symbols without reading every file. Index now? [Y/n]". Cursor does this silently; zap should explain the benefit. |
+| C4 | `.zap/understanding.md` — auto-updated project knowledge | ⬜ planned | `.zap/understanding.md`, `src/session/commands.rs`, `src/context_manager.rs` | 2 days | Separate from user-controlled CLAUDE.md. Written/appended at session end via LLM summarization call. Sections: Architecture, Key Files, Patterns, Known Constraints. Injected into system prompt after CLAUDE.md (capped at 2000 tokens to protect casual-turn savings). Auto-update is the differentiator vs Claude Code's manual CLAUDE.md. ⚠ Don't free-form rewrite — append with timestamps to avoid LLM drift. |
+| C5 | `.zap/session_log.md` — session intent log | ⬜ planned | `.zap/session_log.md`, `src/session/commands.rs`, `src/hooks.rs` | 1 day | One entry per session: `{session_id, goal, files_touched, outcome}`. Written at session end. **Not** per-edit logging (redundant with git). The value is intent ("why") that git log doesn't have. Referenced by C1 context.md to show recent history. |
+| C6 | `/init` upgrade — guided onboarding flow | ⬜ planned | `src/session/commands.rs:cmd_init` | 1 day | Extend existing `/init`: (1) detect + confirm language, (2) offer indexing with explanation, (3) write `project.json`, (4) fill CLAUDE.md as today, (5) print "Project initialized — zap will remember this project." Make `/init` the recommended first step, shown in startup hint for new projects. |
+
+**Implementation order:** C2 → C3 → C1 → C6 → C4 → C5 (C2/C3 are small+safe, C1 is highest value, C4/C5 need C1 infrastructure)
+
+**Risks to watch:**
+- `understanding.md` injection token cost: cap at 2000 tokens, summarize if over limit
+- `SessionEnd` hook doesn't fire on SIGKILL — context saves are best-effort (clean exit = guaranteed)
+- `context.md` resume banner must be skippable (Esc/n) — can't block users who don't want it
+
+---
+
 ### Bet A — Skill ecosystem (priority order)
 
 | Feature | What it does | Effort |
