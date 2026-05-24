@@ -311,6 +311,24 @@ The model can also undo its own edits using the `undo_edit` tool.
 
 ---
 
+### Token efficiency — smart context detection
+
+Pure greetings and social messages use a minimal 31-token prompt with no tools, even mid-conversation. Everything else gets the full context injection:
+
+| Message | After model asks a question? | Result |
+|---|---|---|
+| "hi", "hello", "hey" | yes | ~31 tokens (casual) |
+| "thanks", "thank you", "ty" | yes | ~31 tokens (casual) |
+| "good morning", "how are you" | yes | ~31 tokens (casual) |
+| "yes" | yes | full context |
+| "go ahead" | yes | full context |
+| "ok", "cool", "sounds good" | yes | full context |
+| any technical question | — | full context |
+
+After the model asks a clarifying question, short replies like "yes", "ok", "go ahead" are treated as answers and receive the full context. Pure social messages always stay casual.
+
+---
+
 ## Install
 
 | Platform | Status |
