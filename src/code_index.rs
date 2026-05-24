@@ -13,6 +13,41 @@ use std::time::UNIX_EPOCH;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
+/// Output of `CodeIndex::quality_report()` — used by `/index quality`.
+#[derive(Debug, Default)]
+pub struct QualityReport {
+    pub total_files:     usize,
+    pub total_syms:      usize,
+    /// (impl_label, method_count, example_path)
+    pub god_objects:     Vec<(String, usize, String)>,
+    /// (path, symbol_count)
+    pub large_files:     Vec<(String, usize)>,
+    /// (fn_name, path, line, ref_count)
+    pub high_coupling:   Vec<(String, String, usize, usize)>,
+    /// (fn_name, path, line) — pub fn with ≤1 reference (likely dead code)
+    pub dead_candidates: Vec<(String, String, usize)>,
+    /// (fn_name, path, line) — signature was truncated (very long = complex)
+    pub complex_fns:     Vec<(String, String, usize)>,
+    /// (path, total_fns, async_fns)
+    pub async_files:     Vec<(String, usize, usize)>,
+}
+
+impl QualityReport {
+    /// 0-100 score. Deducts for structural issues.
+    pub fn score(&self) -> u32 {
+        let mut s = 100i32;
+        for (_, methods, _) in &self.god_objects {
+            s -= if *methods > 40 { 15 } else if *methods > 25 { 10 } else { 5 };
+        }
+        for (_, syms) in &self.large_files {
+            s -= if *syms > 100 { 8 } else { 4 };
+        }
+        s -= (self.dead_candidates.len() as i32).min(15);
+        s -= (self.complex_fns.len() as i32 * 2).min(10);
+        s.max(0) as u32
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub path: String,
@@ -80,6 +115,37 @@ pub fn global_stats() -> (usize, usize) {
         .and_then(|g| g.lock().ok())
         .and_then(|g| g.total_stats().ok())
         .unwrap_or((0, 0))
+}
+
+pub fn global_stats_by_kind() -> Vec<(String, usize)> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.stats_by_kind().ok())
+        .unwrap_or_default()
+}
+
+pub fn global_top_files(n: usize) -> Vec<(String, usize)> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.top_files(n).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_quality_report() -> Option<QualityReport> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.quality_report().ok())
+}
+
+pub fn global_compute_reference_counts() -> usize {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|mut g| g.compute_reference_counts().ok())
+        .unwrap_or(0)
 }
 
 pub fn global_reindex_file(path: &Path) {
@@ -168,6 +234,9 @@ impl CodeIndex {
             );
         ")?;
 
+        // Migrations: add columns that may not exist in older DBs.
+        let _ = conn.execute("ALTER TABLE symbols ADD COLUMN ref_count INTEGER DEFAULT 0", []);
+
         Ok(Self { conn, db_path })
     }
 
@@ -255,6 +324,8 @@ impl CodeIndex {
                 "INDEX",
                 &format!("tree-sitter · scan complete · {} files · {} symbols · {}", files, symbols, dir.display()),
             );
+            // Refresh reference counts after every reindex so quality data stays current.
+            let _ = self.compute_reference_counts();
         }
 
         Ok((files, symbols))
@@ -344,6 +415,28 @@ impl CodeIndex {
         Ok((files as usize, syms as usize))
     }
 
+    /// Count symbols per kind (fn, struct, enum, …), sorted by count descending.
+    pub fn stats_by_kind(&self) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, COUNT(*) as n FROM symbols GROUP BY kind ORDER BY n DESC"
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?.flatten().collect();
+        Ok(rows)
+    }
+
+    /// Top N files by symbol count.
+    pub fn top_files(&self, n: usize) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, symbol_count FROM indexed_files ORDER BY symbol_count DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map([n as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?.flatten().collect();
+        Ok(rows)
+    }
+
     /// Count symbols per language, sorted by count descending.
     pub fn stats_by_language(&self) -> Result<Vec<(String, usize)>> {
         let mut stmt = self.conn.prepare(
@@ -353,6 +446,121 @@ impl CodeIndex {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
         })?.flatten().collect();
         Ok(rows)
+    }
+
+    /// Compute reference counts for all symbols by scanning source file text.
+    /// Uses a word-frequency map (O(source_size)) — fast even on large codebases.
+    /// Each symbol's ref_count includes its own definition, so `count - 1` ≈ call sites.
+    pub fn compute_reference_counts(&mut self) -> Result<usize> {
+        let files: Vec<String> = self.conn
+            .prepare("SELECT path FROM indexed_files")?
+            .query_map([], |r| r.get(0))?
+            .flatten()
+            .collect();
+
+        // Single pass: build identifier→frequency map across all source files.
+        let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for path in &files {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                for word in content.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                    if word.len() >= 2 {
+                        *freq.entry(word.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // Update ref_count for every indexed symbol.
+        let symbols: Vec<(i64, String)> = self.conn
+            .prepare("SELECT id, name FROM symbols")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .flatten()
+            .collect();
+
+        let tx = self.conn.unchecked_transaction()?;
+        let mut updated = 0usize;
+        for (id, name) in &symbols {
+            let count = freq.get(name.as_str()).copied().unwrap_or(0) as i64;
+            tx.execute("UPDATE symbols SET ref_count=?1 WHERE id=?2", params![count, id])?;
+            updated += 1;
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
+
+    /// Structured quality report for `/index quality`.
+    pub fn quality_report(&self) -> Result<QualityReport> {
+        let (total_files, total_syms) = self.total_stats().unwrap_or((0, 0));
+
+        let mut stmt = self.conn.prepare(
+            "SELECT context, COUNT(*) as n, MAX(path) as path \
+             FROM symbols WHERE kind='fn' AND context != '' \
+             GROUP BY context HAVING n > 15 ORDER BY n DESC LIMIT 10"
+        )?;
+        let god_objects: Vec<(String, usize, String)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize, r.get::<_, String>(2)?))
+        })?.flatten().collect();
+        drop(stmt);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT path, symbol_count FROM indexed_files WHERE symbol_count > 50 \
+             ORDER BY symbol_count DESC LIMIT 8"
+        )?;
+        let large_files: Vec<(String, usize)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
+        })?.flatten().collect();
+        drop(stmt);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT name, path, line, ref_count FROM symbols \
+             WHERE kind='fn' AND ref_count > 5 \
+             ORDER BY ref_count DESC LIMIT 10"
+        )?;
+        let high_coupling: Vec<(String, String, usize, usize)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? as usize, r.get::<_, i64>(3)? as usize))
+        })?.flatten().collect();
+        drop(stmt);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT name, path, line FROM symbols \
+             WHERE kind='fn' AND signature LIKE 'pub %' \
+             AND (ref_count = 0 OR ref_count = 1) \
+             AND name NOT IN ('main','new','default','from','into','clone','fmt','drop') \
+             ORDER BY path LIMIT 15"
+        )?;
+        let dead_candidates: Vec<(String, String, usize)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as usize))
+        })?.flatten().collect();
+        drop(stmt);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT name, path, line FROM symbols \
+             WHERE kind='fn' AND signature LIKE '%…' \
+             ORDER BY LENGTH(signature) DESC LIMIT 10"
+        )?;
+        let complex_fns: Vec<(String, String, usize)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as usize))
+        })?.flatten().collect();
+        drop(stmt);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT path, COUNT(*) as total, \
+             SUM(CASE WHEN signature LIKE '%async%' THEN 1 ELSE 0 END) as async_n \
+             FROM symbols WHERE kind='fn' \
+             GROUP BY path HAVING total > 5 AND async_n > 0 \
+             ORDER BY CAST(async_n AS REAL)/total DESC LIMIT 8"
+        )?;
+        let async_files: Vec<(String, usize, usize)> = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize, r.get::<_, i64>(2)? as usize))
+        })?.flatten().collect();
+        drop(stmt);
+
+        Ok(QualityReport {
+            total_files, total_syms,
+            god_objects, large_files, high_coupling,
+            dead_candidates, complex_fns, async_files,
+        })
     }
 
     /// Remove entries for files that no longer exist.
@@ -483,8 +691,8 @@ fn signature(node: tree_sitter::Node, source: &[u8]) -> String {
     let s = std::str::from_utf8(text).unwrap_or("").trim();
     // Collapse whitespace and trim.
     let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() > 120 {
-        let truncated: String = collapsed.chars().take(120).collect();
+    if collapsed.chars().count() > 200 {
+        let truncated: String = collapsed.chars().take(200).collect();
         format!("{}…", truncated)
     } else {
         collapsed

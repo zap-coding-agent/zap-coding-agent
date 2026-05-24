@@ -142,6 +142,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `skill_to_markdown()` | `src/skill_manager.rs` | serialize Skill struct → `.md` frontmatter + body |
 | `/skill create` | `src/session/commands.rs:cmd_skill` | scaffolds frontmatter template |
 | `/skill capture` | `src/session/commands.rs:cmd_skill` | LLM extracts session rules → skill file |
+| `/skill log` | `src/session/commands.rs:cmd_skill` | per-session skill trace: shows turn#, input preview, skills that fired; "no match" in orange, "casual" in dimmed — lets you debug why a skill didn't trigger |
+| `skill_trace` | `src/session/mod.rs` | `Vec<(usize, String, Vec<String>, Option<String>)>` — (turn, input preview, skill names, reason); recorded after every skill match before turn_count increment |
 | Pinned skills | `src/session/mod.rs:pinned_skills` | `HashSet` of skills pinned via `/skill use`; merged into per-turn matched skills before prompt build |
 | Project skills | `src/skill_manager.rs:skill_dirs` | `.zap/skills/` in CWD scanned at session start and on `/skill list`; highest priority, overrides same-name global/built-in |
 | Frontmatter: name, description, license, trigger, tokens | `src/skill_manager.rs:parse_frontmatter` | SKILL.md standard + zap extensions |
@@ -198,9 +200,6 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `write_file` | create or overwrite |
 | `undo_edit` | restore from pre-edit snapshot |
 | `shell` | with permission check; description required; output printed inline |
-| `git_status` | status + recent log |
-| `git_pull` | fetch + merge; `rebase` flag; triggered by "pull / sync / get latest"; output printed inline |
-| `git_diff` | unstaged, staged (--cached), or between refs; output printed inline |
 | `search_code` | ripgrep (grep fallback), file-type filter |
 | `list_directory` | pure Rust `read_dir` — works on Windows without Git Bash; trailing `/` on dirs |
 | `glob_read` | list/preview files matching a pattern |
@@ -218,7 +217,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | SQLite persistence | `src/code_index.rs` | `.zap/code.db`, incremental re-parse |
 | Global index singleton | `src/code_index.rs:set_global` | shared across tool calls |
 | Auto-reindex on write/edit | `src/session.rs:handle_user_turn` | fires after `write_file`/`edit_file`/`batch_edit` |
-| `/index [path|stats]` | `src/session.rs:cmd_index` | manual reindex or stats; appears in / picker and tab-completion |
+| `/index [path\|stats]` | `src/session.rs:cmd_index` | manual reindex or stats; appears in / picker and tab-completion |
+| `/index quality` | `src/session/commands.rs:cmd_index`, `src/code_index.rs:quality_report` | structural quality report: god objects (>15 methods), large files (>50 syms), high coupling (ref_count rank), dead code candidates (pub fn with 0 external refs), async density, quality score 0–100 with improvement tips |
+| `QualityReport` struct | `src/code_index.rs` | god_objects, large_files, high_coupling, dead_candidates, complex_fns, async_files fields; `score()` method returns 0–100 |
+| `compute_reference_counts()` | `src/code_index.rs` | word-frequency HashMap pass O(source_size); updates `ref_count` column for all symbols in one batch transaction after each index run |
+| `ref_count` column | `src/code_index.rs` | added via `ALTER TABLE` migration in `open()`; how many times a symbol name appears in source |
+| Signature cap | `src/code_index.rs:signature()` | increased 120 → 200 chars for more useful symbol previews |
+| `stats_by_kind()` | `src/code_index.rs` | `SELECT kind, COUNT(*) FROM symbols GROUP BY kind` — used in `/index stats` kind breakdown |
+| `top_files(n)` | `src/code_index.rs` | top N files by symbol count — used in `/index stats` bar chart |
+| Global helpers | `src/code_index.rs` | `global_quality_report()`, `global_compute_reference_counts()`, `global_stats_by_kind()`, `global_top_files(n)` |
 
 ### Hooks (src/hooks.rs)
 | Feature | File | Notes |
@@ -304,7 +311,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
 | TUI permission event-race fix | `src/tui/channel.rs`, `src/permission_manager.rs`, `src/tui/mod.rs` | `PERM_PROMPT_ACTIVE` AtomicBool: set while `prompt_batch_tui` owns the crossterm queue; TUI tick loop skips its own `event::poll` so Y/N/A keypresses aren't stolen — fixes MCP/shell dialogs hanging silently |
-| Deploy skill | `src/default_skills/deploy.md` | triggers on: deploy, release, ship, publish; documents full workflow: pre-deploy checklist, deploy.sh path, install locations |
+| Deploy skill | `src/default_skills/deploy.md` | triggers on: deploy, release, ship, publish; nohup background pattern (`nohup bash scripts/deploy.sh > /tmp/zap-deploy.log 2>&1 &`) avoids the 60s shell timeout |
+| `/deploy [--check]` | `src/session/commands.rs:cmd_deploy`, `src/session/mod.rs:handle_slash` | streams live output from `bash scripts/deploy.sh` with no timeout; `--check` just shows installed versions; bypasses the LLM entirely — build output arrives line-by-line via tokio async read |
 | TUI scrollbar | `src/tui/render.rs:draw_messages` | `Scrollbar`/`ScrollbarState` overlay on the messages area; only shown when content overflows the viewport height |
 | Dynamic skill picker | `src/tui/commands.rs:filter_commands` | `/skill ` shows sub-commands (list/use/unuse/show/scope); `/skill use <name>` auto-completes loaded skill names; `filter_commands` now accepts `skill_names: &[String]`; `App::skill_names` populated at session start and refreshed after `/skill` commands |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |

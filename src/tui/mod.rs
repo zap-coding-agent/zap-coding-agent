@@ -302,6 +302,7 @@ async fn tui_loop(
                 app.state = AppState::Thinking;
                 app.auto_scroll = true;
                 app.files_changed_this_turn = 0;
+                let mut cancelled = false;
 
                 {
                     let turn_fut = session.handle_user_turn(&input);
@@ -335,16 +336,15 @@ async fn tui_loop(
                                 // Always draw — permission popup renders as a TUI overlay.
                                 terminal.draw(|frame| render::draw(frame, app))?;
 
-                                // When a permission popup is active, poll for key
-                                // events and route Y/N/A/Esc to it instead of
-                                // normal Ctrl+C handling.
-                                if app.permission_popup.is_some()
-                                    && crossterm::event::poll(Duration::ZERO)?
-                                {
+                                // Drain all pending key events per tick so we never miss
+                                // a Ctrl+C when other events precede it in the queue.
+                                while crossterm::event::poll(Duration::ZERO)? {
                                     if let Ok(Event::Key(k)) = crossterm::event::read() {
                                         use crossterm::event::KeyEventKind;
-                                        if k.kind == KeyEventKind::Release { /* skip */ }
-                                        else {
+                                        if k.kind == KeyEventKind::Release { continue; }
+
+                                        if app.permission_popup.is_some() {
+                                            // Route Y/N/A to the permission popup.
                                             match handle_key(app, k) {
                                                 InputAction::PermitAllow => {
                                                     if let Some(ref mut popup) = app.permission_popup {
@@ -370,30 +370,22 @@ async fn tui_loop(
                                                     }
                                                     app.permission_popup = None;
                                                 }
-                                                _ => {} // ignore other keys while popup is active
+                                                _ => {}
                                             }
-                                        }
-                                    }
-                                }
-
-                                // Check for Ctrl+C — skip while permission dialog is active
-                                // (Esc/N handled above via PermitDeny, Ctrl+C = Esc here).
-                                if app.permission_popup.is_none()
-                                    && crossterm::event::poll(Duration::ZERO)?
-                                {
-                                    if let Ok(Event::Key(k)) = crossterm::event::read() {
-                                        if k.code == KeyCode::Char('c')
+                                        } else if k.code == KeyCode::Char('c')
                                             && k.modifiers.contains(KeyModifiers::CONTROL)
                                         {
                                             done = true;
-                                            app.goal_state = None; // cancel goal on Ctrl+C
+                                            cancelled = true;
+                                            app.goal_state = None;
+                                            break; // stop draining — turn is cancelled
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                } // turn_fut dropped here, releasing mutable borrow of session
+                } // turn_fut dropped here, cancelling the LLM request
 
                 // Drain ALL remaining events before finalizing so that
                 // late-arriving LlmChunk events are folded into the message
@@ -405,6 +397,14 @@ async fn tui_loop(
                 app.state = AppState::Idle;
                 // Discard any stragglers that arrived in the gap after drain.
                 while rx.try_recv().is_ok() {}
+
+                if cancelled {
+                    app.messages.push(UiMessage {
+                        role: MsgRole::Assistant,
+                        blocks: vec![UiBlock::Text("  ⏹ Turn cancelled.".to_string())],
+                    });
+                    app.auto_scroll = true;
+                }
 
                 // Show a "files modified" hint if the agent wrote/edited files.
                 if app.files_changed_this_turn > 0 {

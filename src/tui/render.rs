@@ -694,7 +694,11 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         String::new()
     };
 
-    let keybinds = "  ↑↓ scroll  Tab  Ctrl+O expand  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+Q quit";
+    let keybinds = if matches!(app.state, AppState::Idle) {
+        "  ↑↓ scroll  Tab  Ctrl+O expand  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+Q quit"
+    } else {
+        "  ↑↓ scroll  Ctrl+O expand  Ctrl+C cancel"
+    };
     let mut spans = vec![
         Span::styled(hint, Style::default().fg(hint_color)),
     ];

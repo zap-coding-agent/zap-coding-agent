@@ -8,6 +8,28 @@ use crate::config::{Config, OutputFormat, Provider};
 const MAX_TOKENS: u32 = 16_000;
 const MAX_RETRIES: u32 = 5;
 
+/// On deepseek.com, only V4 models (deepseek-v4-pro, deepseek-v4-flash) support vision.
+/// Legacy deepseek-chat / deepseek-reasoner do not.
+fn deepseek_vision_support(url: &str, model: &str) -> bool {
+    if url.contains("deepseek.com") {
+        model.contains("v4")
+    } else {
+        true
+    }
+}
+
+/// Returns false for providers/models known to reject image content blocks.
+/// Used to warn the user at paste/attach time instead of silently at send time.
+pub fn provider_supports_vision(config: &Config) -> bool {
+    match config.provider {
+        Provider::Anthropic => true,
+        Provider::OpenAi => {
+            let url = config.base_url.as_deref().unwrap_or("");
+            deepseek_vision_support(url, &config.model)
+        }
+    }
+}
+
 /// Redact an API key for log files: show first 4 + last 4 chars and the total
 /// length so you can distinguish keys without exposing usable credentials.
 fn redact_token(token: &str) -> String {
@@ -696,7 +718,7 @@ struct OpenAiClient {
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let url = normalize_openai_url(base_url.as_deref());
-        let image_support = !url.contains("deepseek.com");
+        let image_support = deepseek_vision_support(&url, &model);
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream, image_support }
     }
 
@@ -704,7 +726,12 @@ impl OpenAiClient {
     fn encode_messages(&self, system: &str, messages: &[Message]) -> Vec<serde_json::Value> {
         let mut out = vec![serde_json::json!({ "role": "system", "content": system })];
 
-        for msg in messages {
+        // Index of the last user message — we only warn about dropped images there.
+        // Silently dropping images from history avoids a repeated warning every turn
+        // after a user once pasted an image that the provider doesn't support.
+        let last_user_idx = messages.iter().rposition(|m| m.role == "user");
+
+        for (idx, msg) in messages.iter().enumerate() {
             match msg.role.as_str() {
                 "user" => {
                     let tool_results: Vec<&ContentBlock> = msg
@@ -730,9 +757,15 @@ impl OpenAiClient {
                             }
                         }).collect();
 
-                        // Warn only when image blocks were dropped.
-                        if !self.image_support && parts.len() < msg.content.len() {
-                            let dropped = msg.content.len() - parts.len();
+                        // Warn only for the current turn's input (last user message).
+                        // History drops are silent — the user was already told once.
+                        if !self.image_support
+                            && parts.len() < msg.content.len()
+                            && Some(idx) == last_user_idx
+                        {
+                            let dropped = msg.content.iter()
+                                .filter(|b| matches!(b, ContentBlock::Image { .. }))
+                                .count();
                             crate::zap_warn!("Dropping {dropped} image block(s): the model at '{}' does not support vision.", self.url);
                         }
 

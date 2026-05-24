@@ -2,54 +2,45 @@
 category: practice
 name: deploy
 trigger: ["deploy", "deployment", "release", "ship", "publish", "install locally", "update zap", "build zap"]
-tokens: ~300
+tokens: ~200
 ---
 
 ## Deploy zap
 
-Deploy means: build a release binary and install it to both `~/.cargo/bin/zap` and `~/.local/bin/zap` (codesigned on macOS).
+Deploy = `cargo build --release` + install to `~/.cargo/bin/zap` and `~/.local/bin/zap` + codesign on macOS.
 
-### Pre-deploy checklist (before running deploy.sh)
+The build takes 2-3 minutes and exceeds the shell timeout — **always run as a background process**:
 
-1. **Tests pass:** `cargo test` (all 83 tests)
-2. **Build passes:** `cargo build` (no errors)
-3. **Version bumped:** `Cargo.toml` → `version = "x.y.z"` (semver)
-4. **FEATURES.md updated:** any new feature entries added under the relevant section
-5. **Committed + pushed:** `git push` (pre-push hook runs `cargo test`)
-
-### Deploy command
+### Step 1 — pre-flight (fast, run inline)
 
 ```bash
-bash scripts/deploy.sh
+git status && grep '^version' Cargo.toml
 ```
 
-This runs from the repo root. It does:
-1. `cargo build --release` → `target/release/zap`
-2. Copies to `~/.cargo/bin/zap` and `~/.local/bin/zap`
-3. Codesigns both copies (macOS only, non-fatal on failure)
-4. Smoke test: `zap --help` exits 0
+Confirm: version bumped, changes committed.
+
+### Step 2 — launch deploy in background
+
+```bash
+nohup bash scripts/deploy.sh > /tmp/zap-deploy.log 2>&1 & echo "deploy PID: $!"
+```
+
+Returns instantly. Build runs in background.
+
+### Step 3 — show initial output
+
+```bash
+sleep 3 && tail -40 /tmp/zap-deploy.log
+```
+
+### Monitor until done
+
+```bash
+tail -f /tmp/zap-deploy.log
+```
 
 ### Check installed versions (no build)
 
 ```bash
 bash scripts/deploy.sh --check
 ```
-
-### Typical deploy workflow
-
-```
-# 1. Bump version in Cargo.toml
-# 2. Add entry to FEATURES.md
-# 3. git add -A && git commit -m "feat: short description (vX.Y.Z)"
-# 4. git push  # triggers pre-push cargo test
-# 5. bash scripts/deploy.sh  # release build + install
-```
-
-### Locations
-
-| Path | Purpose |
-|---|---|
-| `scripts/deploy.sh` | The deploy script |
-| `~/.cargo/bin/zap` | Primary install (cargo PATH) |
-| `~/.local/bin/zap` | Secondary install (user PATH) |
-| `target/release/zap` | Build output (~19MB) |

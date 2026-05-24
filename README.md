@@ -6,7 +6,7 @@
   ╭────────────────────────────────────────────────────────────────────╮
   │                                                                    │
   │   _____     _     ___                                              │
-  │    ___/    /_\   | _ \   fast AI coding agent  v0.12.0            │
+  │    ___/    /_\   | _ \   fast AI coding agent  v0.12.5            │
   │   /       / _ \  |  _/                                            │
   │  /_____  /_/ \_\ |_|                                              │
   │                                                                    │
@@ -112,7 +112,7 @@ Most agents navigate code the same way a shell script does — grep for a string
 
 When you ask zap to "refactor the `UserStore` struct", it doesn't search for the string `"UserStore"` — it looks up the symbol in the index, finds the exact file and line number, reads only that section, and makes a precise edit. No false matches, no reading entire files to find one function.
 
-The index is **incremental** — on subsequent runs, only files that changed since the last session are re-parsed. Cold-indexing a 50k-line repo takes a few seconds; warm starts are near-instant.
+The index is **incremental** — on subsequent runs, only files that changed since the last session are re-parsed. A background indexer runs every 120s during interactive sessions so the index stays fresh as you edit. Cold-indexing a 50k-line repo takes a few seconds; warm starts are near-instant.
 
 **Supported languages:** Rust, Python, TypeScript, JavaScript, Go, Java
 
@@ -125,6 +125,34 @@ The index is **incremental** — on subsequent runs, only files that changed sin
 | `find_references` | Every call site of a symbol across the entire codebase |
 
 The model is instructed to always use `code_map` or `find_definition` before reaching for `read_file` — so it reads only the lines it actually needs, not whole files.
+
+**Code quality report** — the index also powers structural analysis via `/index quality`:
+
+```
+  ◎ code quality — 54 files · 1021 symbols
+  ────────────────────────────────────────────────────────────
+
+  ⚠ god objects  (>15 methods — split recommended)
+    impl Session             62 methods  ████████████  src/session/
+    impl ToolRegistry        16 methods  ███           src/tool_registry.rs
+
+  ⚠ large files  (>50 symbols)
+     116 sym  ████████████████████  src/tool_registry.rs
+      68 sym  █████████████         src/session/commands.rs
+
+  ✦ high coupling  (many references — risky to change)
+    handle_user_turn          46×  src/session/mod.rs:500
+    match_skills_scoped        8×  src/skill_manager.rs:477
+
+  ◌ dead code candidates  (pub fn, 0 external refs)
+    export_skill              src/skill_manager.rs:599
+
+  quality score  68/100
+  → impl Session has 62 methods — extract sub-handlers
+  → 3 pub fn never referenced — check if they can be removed
+```
+
+Reference counts are computed in one O(source_size) pass at the end of every `/index` run — no call graph required.
 
 ---
 
@@ -290,9 +318,12 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Providers** | LM Studio, Ollama, Anthropic, OpenAI, Gemini, DeepSeek, Groq, Mistral, xAI, Together AI, Perplexity, Cohere + any OpenAI-compatible endpoint; per-provider settings persisted in `~/.agent.toml` |
 | **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
 | **Languages** | AST index: Rust, Python, TypeScript, JavaScript, Go, Java |
+| **Code quality** | `/index quality` — god objects, coupling, dead code candidates, quality score (0–100); reference counts computed in one O(source-size) pass |
 | **Permission modes** | `ask` (prompt per op), `auto` (approve all), `deny` (read-only) |
 | **Skills** | 23 built-in; always-on + keyword-triggered; user skills in `~/.zap/skills/` or `.zap/skills/`; SKILL.md standard compatible with Claude Code and Cursor |
+| **Skill trace** | `/skill log` — see which skills fired (or why they didn't) for every turn this session |
 | **Skill capture** | `/skill capture <name>` — extract session rules into a reusable skill file |
+| **Deploy** | `/deploy` — builds and installs zap with live streamed output; no shell timeout |
 | **Context mgmt** | Skill injection, casual-turn optimization (~20 tokens for greetings), sliding history window, tool-result pruning, `/compact` in-place summarisation, Anthropic prompt caching |
 | **Project intelligence** | `.zap/context.md` session handoff (last goal, files touched, what's next); `.zap/understanding.md` LLM-maintained project knowledge; `.zap/session_log.md` session history — read on demand, not pre-loaded |
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
@@ -471,6 +502,8 @@ zap --sdk                                  # JSON-lines remote control (stdin/st
 | `/provider` | Switch provider interactively |
 | `/permissions ask\|auto\|deny` | Change permission mode for this session |
 | `/index [path\|stats]` | Reindex AST code symbols |
+| `/index quality` | Code quality report: god objects, coupling, dead code, quality score |
+| `/deploy [--check]` | Build and install zap with live streaming output, no timeout |
 | `/undo [file]` | Undo the last file edit |
 | `/init` | Create a `CLAUDE.md` for this project (auto-filled by the agent) |
 | `/run <workflow>` | Run a `.zap/workflows/<name>.yaml` pipeline |
@@ -478,7 +511,7 @@ zap --sdk                                  # JSON-lines remote control (stdin/st
 | `/attach <path>` | Stage an image for the next message |
 | `/paste` | Paste an image from the clipboard |
 | `/memory list\|get\|set\|del` | Manage persistent key-value memory |
-| `/skill list\|show\|create` | Manage skills |
+| `/skill list\|show\|create\|log` | Manage skills; `log` shows which skills fired per turn |
 | `/branch <name>` | Fork the current conversation |
 | `/branches` | List all conversation branches |
 | `/switch <name>` | Switch to a different branch |
@@ -673,12 +706,22 @@ If you delete a file or want to reset a skill to its default, re-export it:
 ```
 /skill list                      list all skills (grouped: always-on / triggered)
 /skill show <name>               preview content, description, license
+/skill log                       show which skills fired (or why they didn't) per turn this session
 /skill export <name>             re-export a built-in to ~/.zap/skills/
 /skill export --all              re-export every built-in skill
 /skill create <name>             scaffold a new skill in .zap/skills/
 /skill create <name> --global    scaffold in ~/.zap/skills/
 /skill capture <name>            extract rules from this session into a skill file
 /skill capture <name> --global   save captured skill globally
+```
+
+**Skill trace** — `/skill log` lets you audit which skill fired (or didn't) for every turn this session. If a skill you expected to fire didn't, the log shows "no match" or "casual" with the turn preview so you can tune the trigger keywords:
+
+```
+  turn #3  "refactor the async fn to use channels"    → rust, karpathy-guidelines
+  turn #4  "commit these changes"                     → git, karpathy-guidelines
+  turn #5  "hey thanks"                               → (casual)
+  turn #6  "add an endpoint for POST /users"          → (no match)  ← missing api-conventions skill?
 ```
 
 Same-name skills override lower-priority ones: `.zap/skills/` > `~/.zap/skills/` > built-in.
@@ -705,11 +748,43 @@ steps:
 
 ## Code Index
 
-An incremental AST symbol index is built at startup using tree-sitter + SQLite. Only files changed since the last run are re-parsed. Supports **Rust, Python, TypeScript, JavaScript, Go, Java**.
+An incremental AST symbol index is built at startup using tree-sitter + SQLite. Only files changed since the last run are re-parsed. A background indexer refreshes every 120s during interactive sessions. Supports **Rust, Python, TypeScript, JavaScript, Go, Java**.
 
 Powers `code_map`, `find_definition`, and `find_references`.
 
-Run `/index` to reindex manually or `/index stats` for statistics.
+| Command | What it shows |
+|---|---|
+| `/index` | Reindex manually |
+| `/index stats` | File count, symbol count by kind, top files by density |
+| `/index quality` | God objects, large files, high coupling, dead code candidates, quality score |
+
+**Quality report** — reference counts are computed in a single O(source-size) pass after every index run. No call graph required; the heuristic correctly surfaces the functions most dangerous to change.
+
+Run `/index quality` to see a breakdown like:
+
+```
+◎ code quality — 54 files · 1021 symbols
+────────────────────────────────────────────────────────────
+
+⚠ god objects  (>15 methods — split recommended)
+  impl Session             62 methods  ████████████  src/session/
+  impl ToolRegistry        16 methods  ███           src/tool_registry.rs
+
+⚠ large files  (>50 symbols)
+   116 sym  ████████████████████  src/tool_registry.rs
+    68 sym  █████████████         src/session/commands.rs
+
+✦ high coupling  (many references — risky to change)
+  handle_user_turn          46×  src/session/mod.rs:500
+  match_skills_scoped        8×  src/skill_manager.rs:477
+
+◌ dead code candidates  (pub fn, 0 external refs)
+  export_skill              src/skill_manager.rs:599
+
+quality score  68/100
+→ impl Session has 62 methods — extract sub-handlers
+→ 3 pub fn never referenced — check if they can be removed
+```
 
 ---
 
@@ -722,6 +797,83 @@ Every conversation is persisted locally. Use `/sessions` to browse and resume an
 ## Sub-agents
 
 When `agent_depth > 0` (default: 3), the model can call `spawn_agent` to delegate independent tasks. Multiple spawns within a single LLM turn run in parallel, each with its own message history and tool access.
+
+---
+
+## Developer Journey — zap as your coding agent
+
+Here is how a typical day looks when you use zap as your primary coding agent.
+
+**Morning — pick up where you left off**
+
+```
+zap                                    # cold start in <1s
+```
+
+zap reads `.zap/context.md` (last session's goal, files touched, what's next) and `.zap/session_log.md` (history of past sessions). The LLM's first response already knows what you were working on.
+
+**Starting a new task**
+
+Just describe what you want in plain English. The skill system silently injects the right context — you never write prompt boilerplate:
+
+```
+"refactor the UserStore to use an async trait"
+→ rust skill fires (async, trait keywords matched)
+→ code_map fetches UserStore struct automatically
+→ find_definition locates every impl block
+→ surgical edits — only the affected lines, nothing else
+```
+
+**Understanding unfamiliar code**
+
+```
+"explain what cmd_deploy does and how it streams output"
+→ find_definition jumps to cmd_deploy in commands.rs
+→ reads the function, not the whole file
+→ gives you a concise structural explanation
+```
+
+**Debugging a failure**
+
+```
+"cargo test is failing with 'thread panicked at src/code_index.rs:312'"
+→ debugging skill fires
+→ zap reads the failing line, checks callers, traces the data flow
+→ proposes a minimal fix
+```
+
+**Checking code health**
+
+```
+/index quality
+```
+
+Instantly see which files are becoming too large, which functions are referenced too many places to safely change, and which public functions have zero callers. Score trends downward — you know it's time to refactor before the code becomes painful.
+
+**Debugging why a skill didn't fire**
+
+```
+/skill log
+```
+
+Review every turn: which skills fired, which didn't, and why. If a skill you wrote isn't triggering, the log pinpoints the turn and you can update the `trigger:` keywords in the markdown file.
+
+**Building and deploying**
+
+```
+/deploy                                # live-streamed build, no timeout
+/deploy --check                        # just show installed versions
+```
+
+No hanging terminal. Build output streams line by line; exit code is reported when done.
+
+**Wrapping up**
+
+```
+"update .zap/context.md with what we did today and what's next"
+```
+
+zap writes a clean handoff file. Tomorrow's cold start is already primed.
 
 ---
 

@@ -47,9 +47,11 @@ impl Session {
             ("code", &[
                 ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),
                 ("/index [path|stats]",      "reindex AST code symbols"),
+                ("/index quality",           "code quality report: god objects, coupling, dead code"),
                 ("/undo [file]",             "undo last file edit"),
                 ("/init",                    "set up this project (ZAP.md, index, project.json)"),
                 ("/run <workflow>",          "run a workflow from .zap/workflows/"),
+                ("/deploy [--check]",        "build & install zap (live output, no timeout)"),
             ]),
             ("media", &[
                 ("/attach <path>",           "stage an image for next message"),
@@ -61,6 +63,7 @@ impl Session {
                 ("/memory set <k> <v>",      "write a memory entry"),
                 ("/memory del <key>",        "delete a memory entry"),
                 ("/skill list",               "list available skills"),
+                ("/skill log",               "show which skills fired (or didn't) per turn"),
                 ("/skill scope",              "show/change domain skill scope for this session"),
                 ("/skill show <name>",        "preview a skill"),
                 ("/skill export <name>",      "copy a built-in skill to ~/.zap/skills/ for editing"),
@@ -741,6 +744,14 @@ fn open_in_editor(path: &std::path::Path) {
 
 impl Session {
     pub fn cmd_paste(&mut self) {
+        if !crate::llm_client::provider_supports_vision(&self.config) {
+            println!("  {} {} does not support vision — image will not be sent.",
+                "✗".red(),
+                self.config.base_url.as_deref().unwrap_or("this provider").cyan());
+            println!("  {} Switch to Claude or GPT-4o to use images.", "·".dimmed());
+            return;
+        }
+
         #[cfg(windows)]
         let tmp = r"C:\Windows\Temp\zap_clipboard_paste.png";
         #[cfg(not(windows))]
@@ -757,6 +768,14 @@ impl Session {
     }
 
     pub fn cmd_attach(&mut self, path: &str) {
+        if !crate::llm_client::provider_supports_vision(&self.config) {
+            println!("  {} {} does not support vision — image will not be sent.",
+                "✗".red(),
+                self.config.base_url.as_deref().unwrap_or("this provider").cyan());
+            println!("  {} Switch to Claude or GPT-4o to use images.", "·".dimmed());
+            return;
+        }
+
         let path = path.trim();
         if path.is_empty() {
             println!("  Usage: /attach <image-path>");
@@ -1185,13 +1204,53 @@ impl Session {
 
         if arg == "stats" || arg == "status" {
             let (files, syms) = crate::code_index::global_stats();
-            println!("  {} tree-sitter index: {} file(s) · {} symbol(s)", "◎".truecolor(100, 200, 255), files, syms);
             let db = cwd.join(".zap").join("code.db");
-            if db.exists() {
-                if let Ok(meta) = std::fs::metadata(&db) {
-                    println!("  {} db: {} KB", "·".dimmed(), meta.len() / 1024);
+            let db_kb = db.exists()
+                .then(|| std::fs::metadata(&db).ok().map(|m| m.len() / 1024))
+                .flatten()
+                .unwrap_or(0);
+
+            println!();
+            println!("  {} code index", "◎".truecolor(100, 200, 255).bold());
+            println!("  {}", "─".repeat(50).truecolor(60, 55, 80));
+            println!("  {:<10} {}    {:<10} {}    {:<6} {} KB",
+                "files".truecolor(100, 95, 130),  files.to_string().cyan().bold(),
+                "symbols".truecolor(100, 95, 130), syms.to_string().cyan().bold(),
+                "db".truecolor(100, 95, 130),      db_kb.to_string().dimmed());
+
+            // Symbol breakdown by kind
+            let by_kind = crate::code_index::global_stats_by_kind();
+            if !by_kind.is_empty() {
+                println!();
+                println!("  {} by kind", "▸".truecolor(255, 210, 50));
+                let max = by_kind.iter().map(|(_, n)| *n).max().unwrap_or(1);
+                for (kind, count) in &by_kind {
+                    let bar_len = (count * 20 / max).max(1);
+                    let bar: String = "█".repeat(bar_len);
+                    let pct = count * 100 / syms.max(1);
+                    println!("    {:<8} {:>5}  {}  {}%",
+                        kind.truecolor(150, 210, 255),
+                        count.to_string().dimmed(),
+                        bar.truecolor(80, 160, 220),
+                        pct.to_string().truecolor(100, 95, 130));
                 }
             }
+
+            // Top files
+            let top = crate::code_index::global_top_files(8);
+            if !top.is_empty() {
+                println!();
+                println!("  {} top files by symbol count", "▸".truecolor(255, 210, 50));
+                for (path, count) in &top {
+                    // Strip common prefix for readability
+                    let short = path
+                        .strip_prefix(cwd.to_str().unwrap_or(""))
+                        .unwrap_or(path)
+                        .trim_start_matches('/');
+                    println!("    {:>4}  {}", count.to_string().cyan(), short.truecolor(140, 135, 160));
+                }
+            }
+            println!();
             return;
         }
 
@@ -1261,6 +1320,147 @@ impl Session {
                     }
                 }
             }
+            return;
+        }
+
+        if arg == "quality" {
+            let cwd_str = cwd.to_string_lossy();
+            let shorten = |p: &str| -> String {
+                p.strip_prefix(cwd_str.as_ref())
+                    .unwrap_or(p)
+                    .trim_start_matches('/')
+                    .to_string()
+            };
+
+            // Ensure ref counts are fresh before reporting
+            if let Ok(mut guard) = self.code_index.lock() {
+                let _ = guard.compute_reference_counts();
+            }
+
+            let report = match crate::code_index::global_quality_report() {
+                Some(r) => r,
+                None => {
+                    println!("  {} index not ready — run {} first", "✗".red(), "/index".cyan());
+                    return;
+                }
+            };
+
+            let score = report.score();
+            let score_color = if score >= 80 { score.to_string().green().to_string() }
+                              else if score >= 60 { score.to_string().truecolor(255,200,60).to_string() }
+                              else { score.to_string().red().to_string() };
+
+            println!();
+            println!("  {} code quality — {} files · {} symbols",
+                "◎".truecolor(100, 200, 255).bold(),
+                report.total_files.to_string().cyan(),
+                report.total_syms.to_string().cyan());
+            println!("  {}", "─".repeat(60).truecolor(60, 55, 80));
+
+            // God objects
+            if !report.god_objects.is_empty() {
+                println!();
+                println!("  {} god objects  (>15 methods — split recommended)",
+                    "⚠".truecolor(255, 140, 60).bold());
+                for (label, count, path) in &report.god_objects {
+                    let bar: String = "█".repeat((*count / 5).min(20));
+                    println!("    {:<28} {} methods  {}  {}",
+                        label.truecolor(255, 180, 80).bold(),
+                        count.to_string().truecolor(255,140,60),
+                        bar.truecolor(255,140,60),
+                        shorten(path).truecolor(100, 95, 130));
+                }
+            }
+
+            // Large files
+            if !report.large_files.is_empty() {
+                println!();
+                println!("  {} large files  (>50 symbols)", "⚠".truecolor(255, 200, 60).bold());
+                let max_syms = report.large_files.iter().map(|(_, n)| *n).max().unwrap_or(1);
+                for (path, syms) in &report.large_files {
+                    let bar_len = (syms * 20 / max_syms).max(1);
+                    let bar: String = "█".repeat(bar_len);
+                    println!("    {:>5} sym  {}  {}",
+                        syms.to_string().cyan(),
+                        bar.truecolor(100, 200, 255),
+                        shorten(path).truecolor(140, 135, 160));
+                }
+            }
+
+            // High coupling
+            if !report.high_coupling.is_empty() {
+                println!();
+                println!("  {} high coupling  (many references — risky to change)",
+                    "✦".truecolor(200, 150, 255).bold());
+                for (name, path, line, refs) in &report.high_coupling {
+                    // ref_count includes definition; subtract 1 for call-site estimate
+                    let call_sites = refs.saturating_sub(1);
+                    println!("    {:<32} {}×  {}:{}",
+                        name.truecolor(200, 150, 255).bold(),
+                        call_sites.to_string().truecolor(200, 150, 255),
+                        shorten(path).truecolor(100, 95, 130),
+                        line.to_string().dimmed());
+                }
+            }
+
+            // Dead code candidates
+            if !report.dead_candidates.is_empty() {
+                println!();
+                println!("  {} dead code candidates  (pub fn, 0 external refs)",
+                    "◌".truecolor(130, 125, 150).bold());
+                for (name, path, line) in &report.dead_candidates {
+                    println!("    {:<32} {}:{}",
+                        name.truecolor(130, 125, 150),
+                        shorten(path).truecolor(100, 95, 130),
+                        line.to_string().dimmed());
+                }
+            }
+
+            // Complex functions
+            if !report.complex_fns.is_empty() {
+                println!();
+                println!("  {} complex signatures  (truncated — many params or generics)",
+                    "◈".truecolor(255, 200, 60).bold());
+                for (name, path, line) in &report.complex_fns {
+                    println!("    {:<32} {}:{}",
+                        name.truecolor(255, 200, 60),
+                        shorten(path).truecolor(100, 95, 130),
+                        line.to_string().dimmed());
+                }
+            }
+
+            // Async density
+            if !report.async_files.is_empty() {
+                println!();
+                println!("  {} async density", "⚡".bright_yellow().bold());
+                for (path, total, async_n) in &report.async_files {
+                    let pct = async_n * 100 / total.max(&1);
+                    let bar: String = "█".repeat(pct / 5);
+                    println!("    {:>3}%  {}  {}",
+                        pct.to_string().truecolor(255, 220, 80),
+                        bar.truecolor(255, 200, 60),
+                        shorten(path).truecolor(140, 135, 160));
+                }
+            }
+
+            // Score
+            println!();
+            println!("  {}", "─".repeat(60).truecolor(60, 55, 80));
+            println!("  quality score  {}/100", score_color);
+            if score < 80 {
+                println!();
+                if report.god_objects.iter().any(|(_, n, _)| *n > 30) {
+                    println!("  {} largest god object has >30 methods — extract sub-handlers", "→".truecolor(255,140,60));
+                }
+                if report.large_files.iter().any(|(_, n)| *n > 80) {
+                    println!("  {} files with >80 symbols should be split by responsibility", "→".truecolor(255,200,60));
+                }
+                if !report.dead_candidates.is_empty() {
+                    println!("  {} {} pub fn never referenced — check if they can be removed",
+                        "→".truecolor(130, 125, 150), report.dead_candidates.len());
+                }
+            }
+            println!();
             return;
         }
 
@@ -1698,7 +1898,59 @@ impl Session {
                     println!("  {} '{}' was not pinned", "·".dimmed(), name);
                 }
             }
-            _ => println!("  {} /skill list | show <name> | export <name|--all> | use <name> | unuse <name> | scope [add|remove|reset] | create <name> | capture <name> [--global]", "✗".red()),
+            "log" => {
+                if self.skill_trace.is_empty() {
+                    println!("  {} no turns yet this session", "·".dimmed());
+                    return;
+                }
+                println!();
+                println!("  {} skill trace — {} turn(s) this session",
+                    "◆".truecolor(255, 210, 50),
+                    self.skill_trace.len());
+                println!("  {}", "─".repeat(58).truecolor(60, 55, 80));
+                for (turn, preview, skills, reason) in &self.skill_trace {
+                    let turn_label = format!("#{:<3}", turn).truecolor(100, 95, 130 as u8);
+                    let preview_str = if preview.chars().count() >= 60 {
+                        format!("{}…", preview)
+                    } else {
+                        preview.clone()
+                    };
+                    if skills.is_empty() {
+                        let why = reason.as_deref().unwrap_or("no match");
+                        let why_colored = if why == "casual" {
+                            why.truecolor(120, 115, 140).to_string()
+                        } else {
+                            why.truecolor(255, 140, 80).to_string() // "no match" stands out
+                        };
+                        println!("  {}  {}  {} ({})",
+                            turn_label,
+                            preview_str.truecolor(140, 135, 160),
+                            "→ none".truecolor(100, 95, 130),
+                            why_colored);
+                    } else {
+                        let skill_list = skills.iter()
+                            .map(|s| s.as_str().truecolor(100, 210, 255).to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        println!("  {}  {}  {} {}",
+                            turn_label,
+                            preview_str.truecolor(200, 195, 220),
+                            "→".truecolor(255, 200, 60),
+                            skill_list);
+                    }
+                }
+                println!();
+                let no_match_count = self.skill_trace.iter()
+                    .filter(|(_, _, s, r)| s.is_empty() && r.as_deref() == Some("no match"))
+                    .count();
+                if no_match_count > 0 {
+                    println!("  {} {} turn(s) had no skill match — review triggers with {}",
+                        "tip:".truecolor(255, 200, 60),
+                        no_match_count.to_string().truecolor(255, 140, 80),
+                        "/skill list".cyan());
+                }
+            }
+            _ => println!("  {} /skill list | log | show <name> | export <name|--all> | use <name> | unuse <name> | scope [add|remove|reset] | create <name> | capture <name> [--global]", "✗".red()),
         }
     }
 }
@@ -1791,6 +2043,88 @@ pub fn skill_show_text(skill: &crate::skill_manager::Skill) -> String {
     s.push_str("─────────────────────────────────────────\n");
     s.push_str(&skill.content);
     s
+}
+
+// ── Deploy ────────────────────────────────────────────────────────────────────
+
+impl Session {
+    /// Run `scripts/deploy.sh` with live streaming output — no LLM involved.
+    /// Streams stdout+stderr line-by-line so the terminal never appears frozen.
+    pub async fn cmd_deploy(&self, arg: &str) {
+        use tokio::io::AsyncBufReadExt;
+
+        let script = "scripts/deploy.sh";
+        if !std::path::Path::new(script).exists() {
+            println!("  {} {} not found", "✗".red(), script.cyan());
+            return;
+        }
+
+        let args: Vec<&str> = if arg.is_empty() { vec![] } else { arg.split_whitespace().collect() };
+        let label = if args.contains(&"--check") { "deploy --check" } else { "deploy" };
+
+        println!();
+        println!("  {} {}", "⚡".bright_yellow(), label.bold());
+        println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+
+        let mut child = match tokio::process::Command::new("bash")
+            .arg(script)
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => { println!("  {} failed to start: {}", "✗".red(), e); return; }
+        };
+
+        // Merge stdout and stderr by reading both concurrently.
+        let stdout = child.stdout.take().map(tokio::io::BufReader::new);
+        let stderr = child.stderr.take().map(tokio::io::BufReader::new);
+
+        let print_line = |line: &str| {
+            println!("  {}", line);
+        };
+
+        match (stdout, stderr) {
+            (Some(mut out), Some(mut err)) => {
+                let mut out_lines = out.lines();
+                let mut err_lines = err.lines();
+                loop {
+                    tokio::select! {
+                        line = out_lines.next_line() => match line {
+                            Ok(Some(l)) => print_line(&l),
+                            Ok(None) => break,
+                            Err(_) => break,
+                        },
+                        line = err_lines.next_line() => match line {
+                            Ok(Some(l)) => print_line(&l),
+                            Ok(None) => {},
+                            Err(_) => {},
+                        },
+                    }
+                }
+                // Drain remaining stderr
+                while let Ok(Some(l)) = err_lines.next_line().await {
+                    print_line(&l);
+                }
+            }
+            _ => {}
+        }
+
+        match child.wait().await {
+            Ok(status) if status.success() => {
+                println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+                println!("  {} done", "✓".green());
+            }
+            Ok(status) => {
+                println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
+                println!("  {} exited with status {}", "✗".red(), status.code().unwrap_or(-1));
+            }
+            Err(e) => println!("  {} wait error: {}", "✗".red(), e),
+        }
+        println!();
+    }
 }
 
 // ── Workflow ──────────────────────────────────────────────────────────────────

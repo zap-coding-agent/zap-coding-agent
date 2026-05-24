@@ -201,6 +201,9 @@ pub struct Session {
     pub files_changed: Vec<String>,
     /// Info lines shown at TUI startup (context banner, init nudge). Drained by run_tui().
     pub startup_notices: Vec<String>,
+    /// Per-turn skill trace: (turn_number, input_preview, skill_names, reason_if_none).
+    /// "reason_if_none" is Some("casual") or Some("no match") when skills=[].
+    pub skill_trace: Vec<(usize, String, Vec<String>, Option<String>)>,
 }
 
 impl Session {
@@ -463,6 +466,7 @@ impl Session {
             compact_failures: 0,
             files_changed: Vec::new(),
             startup_notices,
+            skill_trace: Vec::new(),
         })
     }
 
@@ -570,6 +574,18 @@ impl Session {
             ms
         };
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
+
+        // Record per-turn skill trace for /skill log.
+        {
+            let preview: String = input.chars().take(60).collect();
+            let names: Vec<String> = matched_skills.iter().map(|s| s.name.clone()).collect();
+            let reason = if matched_skills.is_empty() {
+                Some(if is_casual { "casual".to_string() } else { "no match".to_string() })
+            } else {
+                None
+            };
+            self.skill_trace.push((self.turn_count + 1, preview, names, reason));
+        }
 
         let effective_system = if is_casual {
             context_manager::build_casual_system_prompt(&self.config)
@@ -1291,6 +1307,7 @@ impl Session {
                 if arg.is_empty() { println!("  Usage: /model <model-id>"); }
                 else              { self.cmd_model(arg, config); }
             }
+            "/deploy"      => self.cmd_deploy(arg).await,
             "/exit" | "/quit" => return true,
             other => println!("  {} Unknown command {}. Try {}.",
                 "✗".red(), other.yellow(), "/help".cyan()),
