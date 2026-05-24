@@ -189,7 +189,8 @@ pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
 
 // ── Retry helper ──────────────────────────────────────────────────────────────
 
-/// Send `body_bytes` with `send_fn`, retrying up to MAX_RETRIES times on 429.
+/// Send `body_bytes` with `send_fn`, retrying up to MAX_RETRIES times on
+/// 429 (rate limit) and 503/502 (transient server unavailable).
 async fn send_with_retry(
     http: &reqwest::Client,
     build: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
@@ -197,7 +198,9 @@ async fn send_with_retry(
     let mut last_resp = None;
     for attempt in 0..MAX_RETRIES {
         let resp = build(http).send().await?;
-        if resp.status().as_u16() != 429 {
+        let status = resp.status().as_u16();
+        let retryable = status == 429 || status == 503 || status == 502;
+        if !retryable {
             return Ok(resp);
         }
         // Honour Retry-After if present, else exponential back-off.
@@ -210,16 +213,40 @@ async fn send_with_retry(
             .unwrap_or(5_000 << attempt); // 5 s, 10 s, 20 s, 40 s, 80 s
         let remaining = MAX_RETRIES - attempt - 1;
         if remaining > 0 {
-            println!("  ⚠ rate limited — retrying in {}s… ({} attempt(s) left)",
+            let reason = if status == 429 { "rate limited" } else { "service unavailable" };
+            println!("  ⚠ {reason} (HTTP {status}) — retrying in {}s… ({} attempt(s) left)",
                 delay_ms / 1_000, remaining);
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         } else {
             last_resp = Some(resp);
         }
     }
-    // All retries exhausted — return the last 429 response so the caller
-    // can surface a clean error with the response body.
     Ok(last_resp.unwrap())
+}
+
+// ── URL normalisation helpers (also used by tests) ────────────────────────────
+
+pub fn normalize_anthropic_url(base_url: Option<&str>) -> String {
+    match base_url {
+        Some(u) => {
+            let u = u.trim_end_matches('/');
+            if u.ends_with("/messages") { u.to_string() }
+            else { format!("{}/v1/messages", u) }
+        }
+        None => ANTHROPIC_DEFAULT_URL.to_string(),
+    }
+}
+
+pub fn normalize_openai_url(base_url: Option<&str>) -> String {
+    match base_url {
+        Some(u) => {
+            let u = u.trim_end_matches('/');
+            if u.ends_with("/chat/completions") { u.to_string() }
+            else if u.ends_with("/v1") { format!("{}/chat/completions", u) }
+            else { format!("{}/v1/chat/completions", u) }
+        }
+        None => format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE),
+    }
 }
 
 // ── Anthropic streaming client ────────────────────────────────────────────────
@@ -297,19 +324,7 @@ struct AnthropicClient {
 impl AnthropicClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let bearer_auth = base_url.is_some();
-        let url = match base_url {
-            Some(u) => {
-                let u = u.trim_end_matches('/');
-                // Use as-is if the full messages endpoint is already in the URL;
-                // otherwise append the standard Anthropic path (corporate gateway support).
-                if u.ends_with("/messages") {
-                    u.to_string()
-                } else {
-                    format!("{}/v1/messages", u)
-                }
-            }
-            None => ANTHROPIC_DEFAULT_URL.to_string(),
-        };
+        let url = normalize_anthropic_url(base_url.as_deref());
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth, disable_stream }
     }
 
@@ -672,20 +687,7 @@ struct OpenAiClient {
 
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
-        let url = match base_url {
-            Some(u) => {
-                let u = u.trim_end_matches('/');
-                // Use as-is if the full chat/completions endpoint is already in the URL;
-                // otherwise append the standard path (supports both base URLs and full URLs).
-                if u.ends_with("/chat/completions") {
-                    u.to_string()
-                } else {
-                    format!("{}/v1/chat/completions", u)
-                }
-            }
-            None => format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE),
-        };
-        // Detect providers known to lack vision support.
+        let url = normalize_openai_url(base_url.as_deref());
         let image_support = !url.contains("deepseek.com");
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream, image_support }
     }
@@ -1080,5 +1082,94 @@ impl LlmProvider for OpenAiClient {
         }
 
         Ok(ApiResponse { content, stop_reason, usage })
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::{normalize_openai_url, normalize_anthropic_url, ANTHROPIC_DEFAULT_URL, OPENAI_DEFAULT_BASE};
+
+    // ── OpenAI-compatible URL normalisation ───────────────────────────────────
+
+    #[test]
+    fn openai_full_endpoint_used_as_is() {
+        // DeepSeek, Groq, Mistral etc. store the full endpoint in config.
+        assert_eq!(
+            normalize_openai_url(Some("https://api.deepseek.com/v1/chat/completions")),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_base_url_gets_path_appended() {
+        // Legacy configs that store only the base URL.
+        assert_eq!(
+            normalize_openai_url(Some("https://api.deepseek.com")),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_trailing_slash_trimmed() {
+        assert_eq!(
+            normalize_openai_url(Some("https://api.groq.com/openai/v1/chat/completions/")),
+            "https://api.groq.com/openai/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_v1_base_gets_path_appended() {
+        // Legacy configs that store only the /v1 base — should not double-up.
+        assert_eq!(
+            normalize_openai_url(Some("https://api.mistral.ai/v1")),
+            "https://api.mistral.ai/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_lm_studio_full_url() {
+        assert_eq!(
+            normalize_openai_url(Some("http://localhost:1234/v1/chat/completions")),
+            "http://localhost:1234/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_none_uses_default() {
+        assert_eq!(
+            normalize_openai_url(None),
+            format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE)
+        );
+    }
+
+    // ── Anthropic URL normalisation ───────────────────────────────────────────
+
+    #[test]
+    fn anthropic_full_endpoint_used_as_is() {
+        assert_eq!(
+            normalize_anthropic_url(Some("https://my-gateway.corp/v1/messages")),
+            "https://my-gateway.corp/v1/messages"
+        );
+    }
+
+    #[test]
+    fn anthropic_base_url_gets_path_appended() {
+        assert_eq!(
+            normalize_anthropic_url(Some("https://my-gateway.corp")),
+            "https://my-gateway.corp/v1/messages"
+        );
+    }
+
+    #[test]
+    fn anthropic_trailing_slash_trimmed() {
+        assert_eq!(
+            normalize_anthropic_url(Some("https://my-gateway.corp/v1/messages/")),
+            "https://my-gateway.corp/v1/messages"
+        );
+    }
+
+    #[test]
+    fn anthropic_none_uses_default() {
+        assert_eq!(normalize_anthropic_url(None), ANTHROPIC_DEFAULT_URL);
     }
 }

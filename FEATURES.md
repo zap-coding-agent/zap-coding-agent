@@ -176,7 +176,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Anthropic base_url | `src/llm_client.rs` | accepts full endpoint or base URL; appends `/v1/messages` if needed; handles corporate gateways that use non-standard paths |
 | OpenAI-compatible | `src/llm_client.rs` | accepts full endpoint or base URL; appends `/v1/chat/completions` if needed; LM Studio, Ollama, Gemini, DeepSeek, Groq, Mistral, xAI, Together, Perplexity, Cohere |
 | Multi-provider TOML | `src/config.rs:ProviderEntry`, `src/session/commands.rs:cmd_provider` | `[providers.<slug>]` sections in `~/.agent.toml`; switching providers preserves all other providers' keys/models/URLs; active provider set by `provider = "slug"` top-level key |
-| Rate limit retry | `src/llm_client.rs` | 5s/10s/20s/40s/80s backoff; MAX_RETRIES 5; stdout message with remaining count; clean error on exhaustion (no panic) |
+| Retry on 429/503/502 | `src/llm_client.rs:send_with_retry` | Retries on 429 (rate limit) AND 503/502 (transient server unavailable, e.g. DeepSeek "service busy"); Retry-After header honoured; 5s/10s/20s/40s/80s backoff; labelled message per status code |
+| URL normalisation tests | `src/llm_client.rs:url_tests` | 10 unit tests covering full-endpoint, base-URL, /v1-suffix, trailing-slash, and None cases for both Anthropic and OpenAI-compatible providers |
 | Provider switching | `src/session/commands.rs:cmd_provider` | interactive picker, saved to `~/.agent.toml`; shows existing key suffix when re-configuring |
 | Model switching | `src/session.rs:cmd_model` | `/model <id>` mid-session |
 | `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models; strips `/chat/completions` suffix to get `/models` URL |
