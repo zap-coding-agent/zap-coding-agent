@@ -430,17 +430,22 @@ fn help_text() -> String {
 fn config_text(session: &Session) -> String {
     let provider = match session.config.provider {
         Provider::Anthropic => "Anthropic API".to_string(),
-        Provider::OpenAi    => session.base_url.as_deref()
-            .unwrap_or("OpenAI-compatible")
-            .to_string(),
+        Provider::OpenAi    => {
+            // Strip endpoint suffix for display; show just host/base path.
+            let raw = session.base_url.as_deref().unwrap_or("OpenAI-compatible");
+            let raw = raw.strip_suffix("/chat/completions").unwrap_or(raw);
+            let raw = raw.strip_suffix("/v1").unwrap_or(raw);
+            raw.to_string()
+        }
     };
     let mode = match session.permissions.mode {
         PermissionMode::Ask  => "ask",
         PermissionMode::Auto => "auto",
         PermissionMode::Deny => "deny",
     };
-    let url = session.base_url.as_deref()
-        .unwrap_or("https://api.anthropic.com");
+    let url_raw = session.base_url.as_deref().unwrap_or("https://api.anthropic.com/v1/messages");
+    let url_raw = url_raw.strip_suffix("/chat/completions").unwrap_or(url_raw);
+    let url     = url_raw.strip_suffix("/v1").unwrap_or(url_raw);
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "?".to_string());

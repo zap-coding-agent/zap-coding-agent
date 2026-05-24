@@ -297,8 +297,19 @@ struct AnthropicClient {
 impl AnthropicClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let bearer_auth = base_url.is_some();
-        let url = base_url
-            .unwrap_or_else(|| ANTHROPIC_DEFAULT_URL.to_string());
+        let url = match base_url {
+            Some(u) => {
+                let u = u.trim_end_matches('/');
+                // Use as-is if the full messages endpoint is already in the URL;
+                // otherwise append the standard Anthropic path (corporate gateway support).
+                if u.ends_with("/messages") {
+                    u.to_string()
+                } else {
+                    format!("{}/v1/messages", u)
+                }
+            }
+            None => ANTHROPIC_DEFAULT_URL.to_string(),
+        };
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, bearer_auth, disable_stream }
     }
 
@@ -661,8 +672,19 @@ struct OpenAiClient {
 
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
-        let url = base_url
-            .unwrap_or_else(|| format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE));
+        let url = match base_url {
+            Some(u) => {
+                let u = u.trim_end_matches('/');
+                // Use as-is if the full chat/completions endpoint is already in the URL;
+                // otherwise append the standard path (supports both base URLs and full URLs).
+                if u.ends_with("/chat/completions") {
+                    u.to_string()
+                } else {
+                    format!("{}/v1/chat/completions", u)
+                }
+            }
+            None => format!("{}/v1/chat/completions", OPENAI_DEFAULT_BASE),
+        };
         // Detect providers known to lack vision support.
         let image_support = !url.contains("deepseek.com");
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream, image_support }

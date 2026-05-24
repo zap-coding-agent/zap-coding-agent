@@ -287,6 +287,8 @@ async fn tui_loop(
                         std::io::stdin().read_line(&mut buf).ok();
                     }
                     resume_tui(terminal)?;
+                    // Sync model/branch in case /provider or /model changed them.
+                    app.model = session.model.clone();
                     app.branch = git_branch();
                     let (dirty, ahead, behind) = git_status();
                     app.git_dirty = dirty;

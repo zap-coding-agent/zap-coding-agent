@@ -166,6 +166,22 @@ pub fn append_session_log(session_id: i64, goal: &str, files_changed: &[String])
     Ok(())
 }
 
+// ── session_log.md ───────────────────────────────────────────────────────────
+
+/// Load recent entries from `.zap/session_log.md`, capped at `max_chars`.
+pub fn load_session_log(max_chars: usize) -> Option<String> {
+    let s = std::fs::read_to_string(PathBuf::from(".zap").join("session_log.md")).ok()?;
+    if s.trim().is_empty() {
+        return None;
+    }
+    if s.len() <= max_chars {
+        Some(s)
+    } else {
+        let truncated: String = s.chars().take(max_chars).collect();
+        Some(format!("{}\n\n[… truncated]", truncated))
+    }
+}
+
 // ── understanding.md ──────────────────────────────────────────────────────────
 
 /// Load `.zap/understanding.md`, capped at `max_chars` for system-prompt injection.

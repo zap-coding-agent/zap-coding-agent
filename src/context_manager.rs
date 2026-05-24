@@ -21,8 +21,12 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     let mut sections: Vec<String> = Vec::new();
 
     // ── Identity ──────────────────────────────────────────────────────────────
+    let lang_hint = crate::project::load_project_meta()
+        .and_then(|m| if m.language.is_empty() { None } else { Some(m.language.join(", ")) })
+        .map(|l| format!(" ({l})"))
+        .unwrap_or_default();
     sections.push(format!(
-        "You are a secure Rust AI coding agent (model: {}).\n\
+        "You are a secure AI coding agent{lang_hint} (model: {}).\n\
          You help users accomplish coding and engineering tasks using tools.\n\
          You are precise, concise, and security-conscious.",
         config.model
@@ -206,8 +210,25 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     if let Some(zap_md) = load_zap_md() {
         sections.push(format!("## Project Context\n{}", zap_md));
     }
-    if let Some(understanding) = crate::project::load_understanding(8_000) {
-        sections.push(format!("## Project Understanding\n{}", understanding));
+    // Project knowledge files — read on demand via read_file, not pre-loaded.
+    // Tell the model they exist so it knows when to fetch them.
+    {
+        let mut hints: Vec<&str> = Vec::new();
+        if std::path::Path::new(".zap/understanding.md").exists() {
+            hints.push("- `.zap/understanding.md` — project overview, architecture, modules (read for any project summary, overview, architecture, or \"what does this project do\" question)");
+        }
+        if std::path::Path::new(".zap/context.md").exists() {
+            hints.push("- `.zap/context.md` — last session: goal, files touched, what's next (read when asked to resume, \"where were we\", or what to work on next)");
+        }
+        if std::path::Path::new(".zap/session_log.md").exists() {
+            hints.push("- `.zap/session_log.md` — history of past sessions (read when asked about past work or recent changes)");
+        }
+        if !hints.is_empty() {
+            sections.push(format!(
+                "## Project Knowledge Files\nRead these with `read_file` only when relevant — do not pre-load:\n{}",
+                hints.join("\n")
+            ));
+        }
     }
 
     // ── Git status ────────────────────────────────────────────────────────────

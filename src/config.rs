@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::io::Write;
 
@@ -21,6 +22,17 @@ pub enum PermissionMode {
 pub enum Provider {
     Anthropic,
     OpenAi,
+}
+
+/// Per-provider settings stored in the `[providers.<slug>]` TOML table.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProviderEntry {
+    /// Wire protocol: "anthropic" or "openai" (OpenAI-compatible).
+    pub kind:     Option<String>,
+    pub api_key:  Option<String>,
+    pub model:    Option<String>,
+    /// Full endpoint URL, e.g. "http://localhost:1234/v1/chat/completions".
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +79,10 @@ pub struct Config {
     /// When true, suppress all startup println!s (skills, hooks, MCP).
     /// TUI mode shows this info in its welcome message instead.
     pub tui_mode: bool,
+    /// Slug of the active provider, e.g. "anthropic", "lm_studio", "groq".
+    pub provider_slug: String,
+    /// All configured providers keyed by slug — preserved across /provider switches.
+    pub all_providers: HashMap<String, ProviderEntry>,
 }
 
 // ── Config file (~/.agent.toml) ───────────────────────────────────────────────
@@ -76,10 +92,13 @@ pub struct Config {
 #[derive(Debug, Deserialize, Default)]
 struct FileConfig {
     provider:        Option<String>,
+    /// Legacy top-level fields — used only when no `[providers.<slug>]` section exists.
     model:           Option<String>,
     api_key:         Option<String>,
     base_url:        Option<String>,
     permission_mode: Option<String>,
+    /// Per-provider settings; key is slug (e.g. "anthropic", "lm_studio").
+    providers:       Option<HashMap<String, ProviderEntry>>,
     // network
     proxy:           Option<String>,
     no_proxy:        Option<String>,
@@ -118,19 +137,32 @@ impl Config {
     pub fn load() -> Result<Self> {
         let file = FileConfig::load();
 
-        // ── provider ──────────────────────────────────────────────────────────
-        let provider_str = env::var("AGENT_PROVIDER")
+        // ── provider slug ─────────────────────────────────────────────────────
+        let provider_slug = env::var("AGENT_PROVIDER")
             .ok()
-            .or(file.provider)
-            .unwrap_or_else(|| "openai".to_string()); // default: LM Studio
+            .or(file.provider.clone())
+            .unwrap_or_else(|| "lm_studio".to_string());
 
-        let provider = match provider_str.to_lowercase().as_str() {
-            "anthropic" => Provider::Anthropic,
-            _           => Provider::OpenAi,
+        // Build the full providers map from the TOML file.
+        let all_providers: HashMap<String, ProviderEntry> =
+            file.providers.clone().unwrap_or_default();
+
+        // Look up the active provider entry (may be absent for legacy configs).
+        let active_entry = all_providers.get(&provider_slug);
+
+        // Determine the Provider enum from the entry's kind, or fall back to
+        // interpreting the slug name (backwards compat with old provider = "anthropic").
+        let provider = {
+            let kind = active_entry.and_then(|e| e.kind.as_deref());
+            match kind.unwrap_or(&provider_slug).to_lowercase().as_str() {
+                "anthropic" => Provider::Anthropic,
+                _           => Provider::OpenAi,
+            }
         };
 
         // ── api_key ───────────────────────────────────────────────────────────
         let api_key = env::var("AGENT_API_KEY").ok()
+            .or_else(|| active_entry.and_then(|e| e.api_key.clone()).filter(|k| !k.is_empty()))
             .or(file.api_key)
             .unwrap_or_else(|| match provider {
                 Provider::Anthropic => env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
@@ -143,15 +175,17 @@ impl Config {
             Provider::OpenAi    => "gemma-4-e4b-it".to_string(),
         };
         let model = env::var("AGENT_MODEL").ok()
+            .or_else(|| active_entry.and_then(|e| e.model.clone()))
             .or(file.model)
             .unwrap_or(default_model);
 
         // ── base_url ──────────────────────────────────────────────────────────
         let default_base_url = match provider {
             Provider::Anthropic => None,
-            Provider::OpenAi    => Some("http://localhost:1234".to_string()),
+            Provider::OpenAi    => Some("http://localhost:1234/v1/chat/completions".to_string()),
         };
         let base_url = env::var("AGENT_BASE_URL").ok()
+            .or_else(|| active_entry.and_then(|e| e.base_url.clone()))
             .or(file.base_url)
             .or(default_base_url);
 
@@ -202,6 +236,7 @@ impl Config {
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
             budget: None, skill_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
+            provider_slug, all_providers,
         })
     }
 
@@ -211,10 +246,6 @@ impl Config {
             .map(|h| h.join(".agent.toml"))
             .ok_or_else(|| anyhow::anyhow!("cannot locate home directory"))?;
 
-        let provider_str = match self.provider {
-            Provider::Anthropic => "anthropic",
-            Provider::OpenAi    => "openai",
-        };
         let pm_str = match self.permission_mode {
             PermissionMode::Ask  => "ask",
             PermissionMode::Auto => "auto",
@@ -223,33 +254,52 @@ impl Config {
 
         let mut f = std::fs::File::create(&path)?;
         writeln!(f, "# ~/.agent.toml — managed by zap /provider")?;
-        writeln!(f, "provider = {:?}", provider_str)?;
-        writeln!(f, "model    = {:?}", self.model)?;
-        if let Some(ref url) = self.base_url {
-            writeln!(f, "base_url = {:?}", url)?;
-        }
-        writeln!(f, "api_key  = {:?}", self.api_key)?;
-        writeln!(f)?;
+        writeln!(f, "provider        = {:?}", self.provider_slug)?;
         writeln!(f, "permission_mode = {:?}", pm_str)?;
         writeln!(f)?;
         writeln!(f, "# Network / corporate proxy settings")?;
         if let Some(ref p) = self.proxy {
-            writeln!(f, "proxy    = {:?}", p)?;
+            writeln!(f, "proxy           = {:?}", p)?;
         }
         if let Some(ref np) = self.no_proxy {
-            writeln!(f, "no_proxy = {:?}", np)?;
+            writeln!(f, "no_proxy        = {:?}", np)?;
         }
         if let Some(ref ca) = self.ca_bundle {
-            writeln!(f, "ca_bundle = {:?}", ca)?;
+            writeln!(f, "ca_bundle       = {:?}", ca)?;
         }
         if self.tls_skip_verify {
             writeln!(f, "tls_skip_verify = true")?;
         }
         if self.timeout_secs != 120 {
-            writeln!(f, "timeout_secs = {}", self.timeout_secs)?;
+            writeln!(f, "timeout_secs    = {}", self.timeout_secs)?;
         }
         if self.disable_stream {
-            writeln!(f, "disable_stream = true")?;
+            writeln!(f, "disable_stream  = true")?;
+        }
+        writeln!(f)?;
+
+        // Write one [providers.<slug>] section per configured provider.
+        // Sorted by slug so the file is deterministic.
+        let mut slugs: Vec<&String> = self.all_providers.keys().collect();
+        slugs.sort();
+        for slug in slugs {
+            let entry = &self.all_providers[slug];
+            writeln!(f, "[providers.{}]", slug)?;
+            if let Some(ref kind) = entry.kind {
+                writeln!(f, "kind     = {:?}", kind)?;
+            }
+            if let Some(ref model) = entry.model {
+                writeln!(f, "model    = {:?}", model)?;
+            }
+            if let Some(ref key) = entry.api_key {
+                if !key.is_empty() {
+                    writeln!(f, "api_key  = {:?}", key)?;
+                }
+            }
+            if let Some(ref url) = entry.base_url {
+                writeln!(f, "base_url = {:?}", url)?;
+            }
+            writeln!(f)?;
         }
 
         // Restrict to owner-read/write only — file contains API keys.

@@ -143,7 +143,12 @@ pub fn print_banner(config: &crate::config::Config) {
     let server_raw = match &config.provider {
         Provider::Anthropic => "Anthropic API".to_string(),
         Provider::OpenAi    => config.base_url.as_deref()
-            .map(|u| u.trim_start_matches("http://").trim_start_matches("https://").to_string())
+            .map(|u| {
+                // Strip endpoint suffix so we display just the host/base path.
+                let u = u.strip_suffix("/chat/completions").unwrap_or(u);
+                let u = u.strip_suffix("/v1").unwrap_or(u);
+                u.trim_start_matches("http://").trim_start_matches("https://").to_string()
+            })
             .unwrap_or_else(|| "OpenAI API".to_string()),
     };
     let server_raw = if server_raw.chars().count() > 25 {

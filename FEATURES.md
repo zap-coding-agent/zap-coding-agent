@@ -173,12 +173,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | Anthropic (native) | `src/llm_client.rs` | SSE streaming, tool use, prompt caching; `Authorization: Bearer` when custom base_url set (corporate gateways) |
-| Anthropic base_url | `src/llm_client.rs` | appends `/messages` if base_url ends with `/v1`, else `/v1/messages`; matches Anthropic SDK / Roo Code behaviour |
-| OpenAI-compatible | `src/llm_client.rs` | LM Studio, Ollama, Gemini, DeepSeek, Groq, Mistral, xAI, Together, Perplexity, Cohere |
+| Anthropic base_url | `src/llm_client.rs` | accepts full endpoint or base URL; appends `/v1/messages` if needed; handles corporate gateways that use non-standard paths |
+| OpenAI-compatible | `src/llm_client.rs` | accepts full endpoint or base URL; appends `/v1/chat/completions` if needed; LM Studio, Ollama, Gemini, DeepSeek, Groq, Mistral, xAI, Together, Perplexity, Cohere |
+| Multi-provider TOML | `src/config.rs:ProviderEntry`, `src/session/commands.rs:cmd_provider` | `[providers.<slug>]` sections in `~/.agent.toml`; switching providers preserves all other providers' keys/models/URLs; active provider set by `provider = "slug"` top-level key |
 | Rate limit retry | `src/llm_client.rs` | 5s/10s/20s/40s/80s backoff; MAX_RETRIES 5; stdout message with remaining count; clean error on exhaustion (no panic) |
-| Provider switching | `src/session.rs:cmd_provider` | interactive picker, saved to `~/.agent.toml` |
+| Provider switching | `src/session/commands.rs:cmd_provider` | interactive picker, saved to `~/.agent.toml`; shows existing key suffix when re-configuring |
 | Model switching | `src/session.rs:cmd_model` | `/model <id>` mid-session |
-| `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models |
+| `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models; strips `/chat/completions` suffix to get `/models` URL |
 | Config from file | `src/config.rs` | `~/.agent.toml` |
 | Config from env | `src/config.rs` | `AGENT_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
 
@@ -261,8 +262,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | System prompt builder | `src/context_manager.rs` | identity, env, code nav, tool policy, security rules |
+| Language-agnostic identity | `src/context_manager.rs` | reads language from `.zap/project.json`; identity line is e.g. "AI coding agent (rust)" or generic "AI coding agent" when unknown |
 | Casual system prompt | `src/context_manager.rs:build_casual_system_prompt` | ~50-token minimal prompt for greeting/casual turns; skips code-nav, tool-policy, security, CLAUDE.md, git status |
 | ZAP.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
+| On-demand .zap knowledge hints | `src/context_manager.rs` | `understanding.md`, `context.md`, `session_log.md` listed as read-on-demand hints (not pre-loaded); model reads them via `read_file` only when the query warrants it — project summary, resume, history questions |
 | Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
 | Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
 
@@ -368,7 +371,7 @@ Black-box tests that run the installed `zap` binary and assert on observable out
 | C1 | `context.md` — session handoff file | ✅ done | `.zap/context.md`, `src/session/commands.rs:cmd_exit`, `src/hooks.rs` | 1 day | Written at session end via `SessionEnd` hook (already exists). Content: goal, what was done, what's next, files touched. On next startup: banner "Last session: X — Done: Y — Next: Z · Resume? [Y/n]". No competitor does this. |
 | C2 | `project.json` — persist init state | ✅ done | `.zap/project.json`, `src/persistence.rs` or new `src/project.rs`, `src/session/mod.rs:Session::new` | 0.5 day | Thin file: `{language, indexed_at, initialized_at}`. On startup: if present, skip domain-scope prompt entirely (already detected). Builds on `detect_stack_skills` — no re-detection. |
 | C3 | Indexing nudge on first open | ✅ done | `src/session/mod.rs:Session::new`, `src/session/commands.rs:cmd_index` | 0.5 day | If `project.json` missing or `indexed_at` is null, show one-time prompt: "This project hasn't been indexed yet. Indexing lets zap find symbols without reading every file. Index now? [Y/n]". Cursor does this silently; zap should explain the benefit. |
-| C4 | `.zap/understanding.md` — auto-updated project knowledge | ✅ done | `.zap/understanding.md`, `src/session/commands.rs`, `src/context_manager.rs` | 2 days | Separate from user-controlled CLAUDE.md. Written/appended at session end via LLM summarization call. Sections: Architecture, Key Files, Patterns, Known Constraints. Injected into system prompt after CLAUDE.md (capped at 2000 tokens to protect casual-turn savings). Auto-update is the differentiator vs Claude Code's manual CLAUDE.md. ⚠ Don't free-form rewrite — append with timestamps to avoid LLM drift. |
+| C4 | `.zap/understanding.md` — auto-updated project knowledge | ✅ done | `.zap/understanding.md`, `src/session/commands.rs`, `src/context_manager.rs` | 2 days | Separate from user-controlled CLAUDE.md. Written/appended at session end via LLM summarization call. Sections: Architecture, Key Files, Patterns, Known Constraints. Listed as on-demand hint in system prompt (not pre-loaded every turn) — model reads via `read_file` when asked about architecture/overview. ⚠ Don't free-form rewrite — append with timestamps to avoid LLM drift. |
 | C5 | `.zap/session_log.md` — session intent log | ✅ done | `.zap/session_log.md`, `src/session/commands.rs`, `src/hooks.rs` | 1 day | One entry per session: `{session_id, goal, files_touched, outcome}`. Written at session end. **Not** per-edit logging (redundant with git). The value is intent ("why") that git log doesn't have. Referenced by C1 context.md to show recent history. |
 | C6 | `/init` upgrade — guided onboarding flow | ✅ done | `src/session/commands.rs:cmd_init` | 1 day | Extend existing `/init`: (1) detect + confirm language, (2) offer indexing with explanation, (3) write `project.json`, (4) fill CLAUDE.md as today, (5) print "Project initialized — zap will remember this project." Make `/init` the recommended first step, shown in startup hint for new projects. |
 
