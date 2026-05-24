@@ -108,7 +108,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | `/remote [port]` command | `src/remote.rs`, `src/remote_channel.rs` | Starts a local HTTP server + public tunnel; prints a URL you can open on any device (phone, tablet) to drive the current session |
-| Web chat UI | `src/remote.rs:UI_HTML` | Dark-theme mobile-friendly chat page embedded in the binary; WebSocket for real-time streaming; auto-reconnect on disconnect |
+| Web chat UI | `src/remote.rs:UI_HTML` | Dark-theme mobile-friendly chat page embedded in the binary; WebSocket for real-time streaming; auto-reconnect on disconnect; uses wss:// over HTTPS tunnels to avoid mixed-content block |
 | Streaming to browser | `src/llm_client.rs`, `src/remote_channel.rs` | `send_chunk()` tapped into both Anthropic SSE and OpenAI streaming paths — no-op when remote is inactive |
 | Turn-done signal | `src/session/mod.rs`, `src/remote_channel.rs` | `send_done()` called after every `handle_user_turn` so the browser re-enables input exactly when the agent finishes |
 | TUI integration | `src/tui/mod.rs` | `try_recv()` at top of each TUI loop iteration — remote messages injected as user turns with a chat bubble; zero overhead when inactive |

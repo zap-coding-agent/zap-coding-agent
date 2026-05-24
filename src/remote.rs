@@ -80,7 +80,8 @@ function addBubble(role,text=''){
 }
 
 function connect(){
-  ws=new WebSocket('ws://'+location.host+'/ws');
+  const proto=location.protocol==='https:'?'wss://':'ws://';
+  ws=new WebSocket(proto+location.host+'/ws');
   ws.onopen=()=>setReady(true);
   ws.onclose=()=>{setReady(false);setTimeout(connect,2000)};
   ws.onerror=()=>ws.close();
