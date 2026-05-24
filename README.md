@@ -6,7 +6,7 @@
   ╭────────────────────────────────────────────────────────────────────╮
   │                                                                    │
   │   _____     _     ___                                              │
-  │    ___/    /_\   | _ \   fast AI coding agent  v0.3.0             │
+  │    ___/    /_\   | _ \   fast AI coding agent  v0.12.0            │
   │   /       / _ \  |  _/                                            │
   │  /_____  /_/ \_\ |_|                                              │
   │                                                                    │
@@ -286,22 +286,28 @@ The model can also undo its own edits using the `undo_edit` tool.
 
 | | |
 |---|---|
-| **Providers** | LM Studio, Ollama, Anthropic, OpenAI, Gemini, DeepSeek, Groq, Mistral, xAI, Together AI, Perplexity, Cohere + any OpenAI-compatible URL |
-| **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, git, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
+| **TUI** | Ratatui terminal UI — streaming output, sidebar with token counts, diff viewer (Ctrl+G), file browser (Ctrl+F), syntax highlighting |
+| **Providers** | LM Studio, Ollama, Anthropic, OpenAI, Gemini, DeepSeek, Groq, Mistral, xAI, Together AI, Perplexity, Cohere + any OpenAI-compatible endpoint; per-provider settings persisted in `~/.agent.toml` |
+| **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
 | **Languages** | AST index: Rust, Python, TypeScript, JavaScript, Go, Java |
 | **Permission modes** | `ask` (prompt per op), `auto` (approve all), `deny` (read-only) |
-| **Skills** | 10 built-in; always-on + keyword-triggered; user skills in `~/.zap/skills/` or `.zap/skills/`; SKILL.md standard |
+| **Skills** | 23 built-in; always-on + keyword-triggered; user skills in `~/.zap/skills/` or `.zap/skills/`; SKILL.md standard compatible with Claude Code and Cursor |
 | **Skill capture** | `/skill capture <name>` — extract session rules into a reusable skill file |
-| **Context mgmt** | Skill injection, `/compact` in-place summarisation, Anthropic prompt caching |
+| **Context mgmt** | Skill injection, casual-turn optimization (~20 tokens for greetings), sliding history window, tool-result pruning, `/compact` in-place summarisation, Anthropic prompt caching |
+| **Project intelligence** | `.zap/context.md` session handoff (last goal, files touched, what's next); `.zap/understanding.md` LLM-maintained project knowledge; `.zap/session_log.md` session history — read on demand, not pre-loaded |
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
 | **Branching** | `/branch` forks a conversation like a git branch; `/switch` to move between them |
-| **Sub-agents** | `spawn_agent` runs parallel sub-agents, each with its own tool loop |
-| **MCP (lazy-loaded)** | Standard `.mcp.json` format — works in Claude Code, Cursor, Kiro; zap adds `description` + `toolsHint` fields (ignored by other agents); servers connect on demand via `mcp_connect` stub; zero processes and zero token cost until first use |
+| **Sub-agents** | `spawn_agent` runs parallel sub-agents with their own tool loop; multiple spawns in one turn run in parallel |
+| **Autonomous loop** | `/goal <condition>` runs turns automatically until the model signals done or a turn limit is reached |
+| **Extended thinking** | `/think [on\|off\|N]` — Anthropic extended thinking with configurable token budget |
+| **MCP (lazy-loaded)** | Standard `.mcp.json` format — works in Claude Code, Cursor, Kiro; servers connect on demand, zero cost until first use |
 | **Workflows** | Declarative YAML multi-step pipelines in `.zap/workflows/` — versioned with your repo |
+| **Hooks** | `PreToolUse` / `PostToolUse` / `SessionStart` / `SessionEnd` / `UserPromptSubmit` — shell commands that run on agent events |
+| **Remote control** | `/remote` starts a local HTTP server + public tunnel; drive the session from any browser or phone |
 | **Images** | `/attach <path>` or `/paste` clipboard — multimodal on supported models |
-| **Audit log** | Every tool call written to `agent_audit.jsonl` |
+| **Audit log** | Every tool call written to `~/.zap/audit.jsonl` |
 | **Secret scanner** | Blocks API keys, tokens, and passwords from being sent to cloud LLMs |
-| **Cost display** | Token breakdown per turn — skills, message, context, estimated $ cost |
+| **Cost display** | Token breakdown per turn — skills, message, context, estimated $ |
 
 ---
 
@@ -381,29 +387,32 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 
 All settings live in `~/.agent.toml`. Environment variables always take precedence.
 
-```toml
-# ~/.agent.toml
+Use `/provider` inside zap to switch interactively — settings are saved automatically per provider, so switching back restores your previous key and model.
 
-provider         = "openai"                 # "openai" or "anthropic"
-model            = "gemma-4-e4b-it"
-base_url         = "http://localhost:1234"   # omit for cloud providers
-api_key          = ""                       # empty for local
-permission_mode  = "ask"                    # ask | auto | deny
+```toml
+# ~/.agent.toml — managed by zap /provider
+
+provider        = "anthropic"   # active provider slug
+permission_mode = "ask"         # ask | auto | deny
+
+[providers.anthropic]
+kind     = "anthropic"
+model    = "claude-sonnet-4-6"
+api_key  = "sk-ant-..."
+
+[providers.lm_studio]
+kind     = "openai"
+model    = "gemma-4-e4b-it"
+base_url = "http://localhost:1234/v1/chat/completions"
+
+[providers.groq]
+kind     = "openai"
+model    = "llama-3.3-70b-versatile"
+base_url = "https://api.groq.com/openai/v1/chat/completions"
+api_key  = "gsk_..."
 ```
 
-### Provider quick reference
-
-| Setup | Config |
-|---|---|
-| **LM Studio** (local) | `provider="openai"` · `base_url="http://localhost:1234"` · no key |
-| **Ollama** (local) | `provider="openai"` · `base_url="http://localhost:11434"` · no key |
-| **Anthropic** | `provider="anthropic"` · `api_key="sk-ant-..."` · `model="claude-sonnet-4-6"` |
-| **OpenAI** | `provider="openai"` · `api_key="sk-..."` · `model="gpt-4o"` |
-| **Gemini** | `provider="openai"` · `base_url="https://generativelanguage.googleapis.com/v1beta/openai"` · `api_key="..."` |
-| **DeepSeek** | `provider="openai"` · `base_url="https://api.deepseek.com"` · `api_key="..."` |
-| **Groq** | `provider="openai"` · `base_url="https://api.groq.com/openai"` · `api_key="..."` |
-
-Use `/provider` inside zap to switch interactively with a guided picker — no restart needed.
+Each `[providers.<slug>]` block stores settings independently — switching providers never overwrites another provider's key.
 
 ### Environment variable overrides
 
