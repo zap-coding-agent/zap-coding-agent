@@ -169,6 +169,15 @@ pub struct CommandPopup {
     pub scroll: usize,
 }
 
+/// Permission prompt overlay — rendered as a TUI-native popup at the bottom.
+pub struct PermissionPopup {
+    /// Tool entries to display: (id, name, context).
+    pub pending: Vec<(String, String, String)>,
+    /// Send the decision back through this channel.
+    #[allow(clippy::type_complexity)]
+    pub response_tx: Option<std::sync::mpsc::SyncSender<super::channel::PermissionDecision>>,
+}
+
 // ── App ────────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -261,6 +270,10 @@ pub struct App {
     /// Command output popup (opened by inline commands like /help, /config, etc.).
     pub command_popup: Option<CommandPopup>,
 
+    /// Permission prompt popup — rendered as a TUI-native overlay at the bottom.
+    /// When Some, Y/N/A/Esc keys are routed to it instead of normal input handling.
+    pub permission_popup: Option<PermissionPopup>,
+
     /// Count of file-writing tool calls in the current turn (write_file/edit_file/batch_edit).
     pub files_changed_this_turn: usize,
     /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
@@ -310,6 +323,7 @@ impl App {
             goal_state: None,
             diff_viewer: None,
             command_popup: None,
+            permission_popup: None,
             files_changed_this_turn: 0,
             active_skill: None,
         }

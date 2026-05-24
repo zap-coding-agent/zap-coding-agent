@@ -125,113 +125,31 @@ impl PermissionManager {
         Ok(vec![allowed; pending.len()])
     }
 
-    /// TUI-native permission prompt — renders at the bottom of the screen while
-    /// raw mode stays active. Called with the alternate screen still open.
+    /// TUI-native permission prompt — posts the prompt to the TUI loop and blocks
+    /// on a response channel instead of writing raw text to stdout.
     fn prompt_batch_tui(
         &mut self,
         pending: &[(String, String, String)],
     ) -> Result<Vec<bool>> {
-        use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-        use crossterm::{cursor, execute, terminal};
-        use std::time::Duration;
+        use crate::tui::channel::{self, PermissionDecision, PermissionPromptRequest};
 
-        // Build the dialog box.
-        let width: usize = 62;
-        let bar = "─".repeat(width - 2);
-        let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("┌{}┐", bar));
-
-        if pending.len() == 1 {
-            let (_, name, ctx) = &pending[0];
-            lines.push(format!("│  Tool : {:<51} │", &name[..name.len().min(51)]));
-            if !ctx.is_empty() {
-                // Strip newlines — shell ctx includes "\n         $ cmd" which breaks the box.
-                let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
-                let s = if ctx_flat.chars().count() > 51 {
-                    format!("{}…", ctx_flat.chars().take(50).collect::<String>())
-                } else {
-                    ctx_flat
-                };
-                lines.push(format!("│  What : {:<51} │", s));
-            }
-        } else {
-            lines.push(format!("│  Agent wants to run {} operation(s):{:<25} │", pending.len(), ""));
-            for (_, name, ctx) in pending.iter().take(5) {
-                // Truncate name to fit the 12-char column (MCP names can be long).
-                let name_col = if name.chars().count() > 12 {
-                    format!("{}…", name.chars().take(11).collect::<String>())
-                } else {
-                    name.clone()
-                };
-                let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
-                let s = if ctx_flat.chars().count() > 38 {
-                    format!("{}…", ctx_flat.chars().take(37).collect::<String>())
-                } else {
-                    ctx_flat
-                };
-                lines.push(format!("│    · {:<12}  {:<38} │", name_col, s));
-            }
-            if pending.len() > 5 {
-                lines.push(format!("│    … and {} more{:<44} │", pending.len() - 5, ""));
-            }
-        }
-
-        lines.push(format!("│{:<width$}│", "", width = width - 2));
-        lines.push(format!("│  [Y] Allow   [N] Deny   [A] Always allow{:<21}│", ""));
-        lines.push(format!("└{}┘", bar));
-
-        // Position at the bottom of the terminal, clear that area, print.
-        let (_, rows) = terminal::size().unwrap_or((80, 24));
-        let dialog_h = lines.len() as u16;
-        let start_row = rows.saturating_sub(dialog_h + 1);
-
-        execute!(
-            io::stdout(),
-            cursor::MoveTo(0, start_row),
-            terminal::Clear(terminal::ClearType::FromCursorDown),
-        )?;
-        for line in &lines {
-            print!("\r{}\r\n", line);
-        }
-        io::stdout().flush()?;
-
-        // Claim the event queue so the TUI tick loop skips its Ctrl+C poll.
-        crate::tui::channel::enter_permission_prompt();
-        // Read a single keypress — raw mode is still active, no competition.
-        let decision = loop {
-            if event::poll(Duration::from_millis(200))? {
-                if let Event::Key(key) = event::read()? {
-                    // Skip Release events (Windows fires Press+Release per key).
-                    if key.kind == KeyEventKind::Release { continue; }
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => break "y",
-                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => break "n",
-                        KeyCode::Char('a') | KeyCode::Char('A') => break "a",
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break "n",
-                        _ => {}
-                    }
-                }
-            }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let req = PermissionPromptRequest {
+            pending: pending.to_vec(),
+            response_tx: tx,
         };
 
-        crate::tui::channel::exit_permission_prompt();
-        let allowed = matches!(decision, "y" | "a");
+        // Post the request for the TUI loop to pick up.
+        if !channel::set_perm_request(req) {
+            anyhow::bail!("permission prompt already pending");
+        }
 
-        // Show brief feedback in the same area, then clear (TUI will repaint).
-        let msg = match decision {
-            "a" => "  ✓ Always allowed",
-            "y" => "  ✓ Allowed",
-            _   => "  ✗ Denied",
-        };
-        execute!(
-            io::stdout(),
-            cursor::MoveTo(0, start_row),
-            terminal::Clear(terminal::ClearType::FromCursorDown),
-        )?;
-        print!("\r{}\r\n", msg);
-        io::stdout().flush()?;
+        // Block until the TUI loop sends back a decision.
+        let decision = rx.recv().unwrap_or(PermissionDecision::Deny);
 
-        if decision == "a" {
+        let allowed = matches!(decision, PermissionDecision::Allow | PermissionDecision::Always);
+
+        if matches!(decision, PermissionDecision::Always) {
             for (_, name, _) in pending {
                 let class = tool_grant_class(name);
                 if class.is_empty() {

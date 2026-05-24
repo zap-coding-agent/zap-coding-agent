@@ -37,6 +37,10 @@ pub enum InputAction {
     CloseCommandPopup,
     CommandPopupScrollUp(usize),
     CommandPopupScrollDown(usize),
+    /// Permission popup responses.
+    PermitAllow,
+    PermitDeny,
+    PermitAlways,
     /// Diff viewer navigation.
     DiffNavUp,
     DiffNavDown,
@@ -74,6 +78,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Diff viewer takes priority when open.
     if app.diff_viewer.is_some() {
         return handle_diff_viewer_key(app, key);
+    }
+
+    // Permission popup — Y/N/A/Esc to respond, everything else ignored.
+    if app.permission_popup.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => return InputAction::PermitAllow,
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => return InputAction::PermitDeny,
+            KeyCode::Char('a') | KeyCode::Char('A') => return InputAction::PermitAlways,
+            _ => return InputAction::None,
+        }
     }
 
     // Command popup — Esc to dismiss, ↑↓/PgUp/PgDn to scroll.

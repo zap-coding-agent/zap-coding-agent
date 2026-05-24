@@ -103,6 +103,18 @@ pub const SIDEBAR_W: u16 = 22;
 /// Max rows the command picker occupies (excluding its own border).
 const PICKER_MAX_ROWS: usize = 8;
 
+/// Compute the height (in terminal rows) needed for the input box.
+/// Returns a Constraint that gives the input area enough rows for wrapped text.
+fn input_height(app: &App, available_width: u16) -> Constraint {
+    let prefix_len = 2u16; // "❯ "
+    let border_w = 2u16;  // left + right border
+    let content_w = available_width.saturating_sub(prefix_len + border_w).max(1);
+    let chars = app.input.chars().count().max(1) as u16;
+    let lines = (chars + content_w - 1) / content_w; // ceil division
+    let lines = lines.min(6).max(1);
+    Constraint::Length(lines as u16 + 2) // +2 for top/bottom border
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
@@ -127,9 +139,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(outer[1]);
 
         // messages | input | dir-panel (keeps input off the bottom edge)
+        let input_h = input_height(app, body[0].width);
         let left = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(3),
+            input_h,
             Constraint::Length(3),
         ])
         .split(body[0]);
@@ -152,7 +165,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         let left = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(3),
+            input_height(app, outer[1].width),
             Constraint::Length(6),
         ])
         .split(outer[1]);
@@ -198,6 +211,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Draw command output popup if open (dismissed with Esc).
     if app.command_popup.is_some() {
         draw_command_popup(frame, app, size);
+    }
+
+    // Draw permission prompt overlay at bottom (Y/N/A to respond).
+    if app.permission_popup.is_some() {
+        draw_permission_popup(frame, app, size);
     }
 }
 
@@ -623,12 +641,31 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::raw(after));
     }
 
+    // Compute scroll offset so the cursor is always visible.
+    let content_w = area.width.saturating_sub(2) as usize; // borders
+    let prefix_chars = prefix.chars().count();
+    let cursor_char_in_text = prefix_chars + cursor_pos; // cursor_pos is char-index
+    let scroll = if content_w > 0 {
+        let cursor_row = cursor_char_in_text / content_w;
+        let visible_rows = area.height.saturating_sub(2) as usize; // borders
+        if cursor_row >= visible_rows {
+            (cursor_row - visible_rows + 1) as u16
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(80, 80, 80)));
 
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).block(block),
+        Paragraph::new(Line::from(spans))
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((scroll, 0)),
         area,
     );
 }
@@ -1996,4 +2033,114 @@ fn draw_command_popup(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(Span::styled("  ↑↓ scroll   Esc dismiss ", Style::default().fg(dim))),
         hint,
     );
+}
+
+fn draw_permission_popup(frame: &mut Frame, app: &App, area: Rect) {
+    let popup = match app.permission_popup.as_ref() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let pending = &popup.pending;
+
+    // Build dialog lines.
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if pending.len() == 1 {
+        let (_, name, ctx) = &pending[0];
+        lines.push(Line::from(vec![
+            Span::styled("  Tool: ", Style::default().fg(Color::Rgb(100, 95, 130))),
+            Span::styled(name.clone(), Style::default().fg(Color::Rgb(100, 210, 255)).bold()),
+        ]));
+        if !ctx.is_empty() {
+            let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
+            lines.push(Line::from(vec![
+                Span::styled("  What: ", Style::default().fg(Color::Rgb(100, 95, 130))),
+                Span::styled(ctx_flat, Style::default().fg(Color::Rgb(130, 125, 150))),
+            ]));
+        }
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  Agent wants to run {} operation(s):", pending.len()),
+                Style::default().fg(Color::Rgb(100, 95, 130)),
+            ),
+        ]));
+        for (_, name, ctx) in pending.iter().take(8) {
+            let name_col = if name.chars().count() > 14 {
+                format!("{}…", name.chars().take(13).collect::<String>())
+            } else {
+                name.clone()
+            };
+            let ctx_flat = ctx.replace('\n', " ").replace('\r', "");
+            let ctx_disp = if ctx_flat.chars().count() > 40 {
+                format!("{}…", ctx_flat.chars().take(39).collect::<String>())
+            } else {
+                ctx_flat
+            };
+            lines.push(Line::from(vec![
+                Span::styled("    · ", Style::default().fg(Color::Rgb(70, 65, 90))),
+                Span::styled(format!("{:<14}", name_col), Style::default().fg(Color::Rgb(100, 210, 255)).bold()),
+                Span::styled("  ", Style::default().fg(Color::Reset)),
+                Span::styled(ctx_disp, Style::default().fg(Color::Rgb(130, 125, 150))),
+            ]));
+        }
+        if pending.len() > 8 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("    … and {} more", pending.len() - 8),
+                    Style::default().fg(Color::Rgb(80, 75, 100)),
+                ),
+            ]));
+        }
+    }
+
+    // Spacer
+    lines.push(Line::from(""));
+
+    // Key hints
+    lines.push(Line::from(vec![
+        Span::styled("  [", Style::default().fg(Color::Rgb(80, 75, 100))),
+        Span::styled("Y", Style::default().fg(Color::Rgb(100, 230, 100)).bold()),
+        Span::styled("] Allow   ", Style::default().fg(Color::Rgb(80, 75, 100))),
+        Span::styled("[", Style::default().fg(Color::Rgb(80, 75, 100))),
+        Span::styled("N", Style::default().fg(Color::Rgb(230, 100, 100)).bold()),
+        Span::styled("] Deny   ", Style::default().fg(Color::Rgb(80, 75, 100))),
+        Span::styled("[", Style::default().fg(Color::Rgb(80, 75, 100))),
+        Span::styled("A", Style::default().fg(Color::Rgb(230, 230, 100)).bold()),
+        Span::styled("] Always allow", Style::default().fg(Color::Rgb(80, 75, 100))),
+    ]));
+
+    // Compute height: lines + 2 for border + 1 for padding
+    let dialog_h = (lines.len() + 3).min(area.height as usize) as u16;
+    let dialog_w = (area.width as f32 * 0.78) as u16;
+
+    // Position at bottom of screen
+    let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
+    let y = area.y + area.height.saturating_sub(dialog_h);
+
+    let overlay = Rect { x, y, width: dialog_w, height: dialog_h };
+
+    // Clear background
+    frame.render_widget(Clear, overlay);
+
+    let border_c = Color::Rgb(180, 130, 70); // amber/warning tone
+    let bg = Color::Rgb(25, 22, 35);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .style(Style::default().bg(bg))
+        .title(Span::styled(
+            " Permission Required ",
+            Style::default().fg(Color::Rgb(255, 200, 100)).bold(),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    let para = Paragraph::new(lines)
+        .style(Style::default().bg(bg));
+    frame.render_widget(para, inner);
 }

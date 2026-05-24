@@ -238,6 +238,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 |---|---|---|
 | Permission modes (ask/auto/deny) | `src/permission_manager.rs` | per-tool, per-session; WRITE_TOOLS includes batch_edit |
 | Batch permission prompt | `src/permission_manager.rs:prompt_batch` | ONE grouped UI for all pending tool calls per turn instead of per-call prompts |
+| TUI-native permission popup | `src/permission_manager.rs:prompt_batch_tui`, `src/tui/render.rs:draw_permission_popup` | amber-bordered ratatui overlay at screen bottom — Y/N/A keys, no raw stdout writes |
 | Tool grant classes | `src/permission_manager.rs:tool_grant_class` | 'a' for edit_file grants write_file + batch_edit for the session |
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | 29 patterns: API keys, VCS tokens, AWS, GCP, JWT, cert blocks, credential fields |

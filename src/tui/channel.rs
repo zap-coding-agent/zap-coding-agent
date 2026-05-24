@@ -2,24 +2,46 @@
 ///
 /// All tui_send() calls are no-ops when not in TUI mode, so they can be
 /// added unconditionally to session/stream_highlighter without side-effects.
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
 
-/// Set while `prompt_batch_tui` owns the crossterm event queue so the TUI
-/// tick loop skips its own `event::poll` and doesn't steal Y/N/A keypresses.
-static PERM_PROMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+// ── Permission popup (TUI-native) ─────────────────────────────────────────────
 
-pub fn enter_permission_prompt() {
-    PERM_PROMPT_ACTIVE.store(true, Ordering::SeqCst);
+/// Sent from `prompt_batch_tui` to the TUI loop; response comes via `response_tx`.
+pub struct PermissionPromptRequest {
+    pub pending: Vec<(String, String, String)>,
+    pub response_tx: std::sync::mpsc::SyncSender<PermissionDecision>,
 }
 
-pub fn exit_permission_prompt() {
-    PERM_PROMPT_ACTIVE.store(false, Ordering::SeqCst);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionDecision {
+    Allow,
+    Deny,
+    Always,
 }
 
-pub fn is_permission_prompt_active() -> bool {
-    PERM_PROMPT_ACTIVE.load(Ordering::SeqCst)
+static PERM_REQUEST: OnceLock<Mutex<Option<PermissionPromptRequest>>> = OnceLock::new();
+
+pub fn init_perm_channel() {
+    PERM_REQUEST.set(Mutex::new(None)).ok();
+}
+
+/// Non-blocking — takes the pending request if one exists.
+pub fn take_perm_request() -> Option<PermissionPromptRequest> {
+    PERM_REQUEST.get().and_then(|mu| mu.lock().ok()).and_then(|mut g| g.take())
+}
+
+/// Store a request for the TUI loop to pick up. Returns false if one is already pending.
+pub fn set_perm_request(req: PermissionPromptRequest) -> bool {
+    if let Some(mu) = PERM_REQUEST.get() {
+        if let Ok(mut g) = mu.lock() {
+            if g.is_none() {
+                *g = Some(req);
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone)]

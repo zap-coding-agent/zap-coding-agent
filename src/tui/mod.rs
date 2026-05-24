@@ -46,6 +46,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     // 2. Set up the TUI event channel (is_tui_mode() becomes true from here).
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
     channel::set_tui_sender(tx.clone());
+    channel::init_perm_channel();
 
     // 3. Switch to alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -322,10 +323,62 @@ async fn tui_loop(
                                     app.apply_event(ev);
                                 }
                                 app.tick_spinner();
+
+                                // Pick up any incoming permission prompt request.
+                                if let Some(req) = channel::take_perm_request() {
+                                    app.permission_popup = Some(app::PermissionPopup {
+                                        pending: req.pending,
+                                        response_tx: Some(req.response_tx),
+                                    });
+                                }
+
+                                // Always draw — permission popup renders as a TUI overlay.
                                 terminal.draw(|frame| render::draw(frame, app))?;
 
-                                // Check for Ctrl+C — skip while permission dialog owns the queue.
-                                if !channel::is_permission_prompt_active()
+                                // When a permission popup is active, poll for key
+                                // events and route Y/N/A/Esc to it instead of
+                                // normal Ctrl+C handling.
+                                if app.permission_popup.is_some()
+                                    && crossterm::event::poll(Duration::ZERO)?
+                                {
+                                    if let Ok(Event::Key(k)) = crossterm::event::read() {
+                                        use crossterm::event::KeyEventKind;
+                                        if k.kind == KeyEventKind::Release { /* skip */ }
+                                        else {
+                                            match handle_key(app, k) {
+                                                InputAction::PermitAllow => {
+                                                    if let Some(ref mut popup) = app.permission_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(channel::PermissionDecision::Allow);
+                                                        }
+                                                    }
+                                                    app.permission_popup = None;
+                                                }
+                                                InputAction::PermitDeny => {
+                                                    if let Some(ref mut popup) = app.permission_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(channel::PermissionDecision::Deny);
+                                                        }
+                                                    }
+                                                    app.permission_popup = None;
+                                                }
+                                                InputAction::PermitAlways => {
+                                                    if let Some(ref mut popup) = app.permission_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(channel::PermissionDecision::Always);
+                                                        }
+                                                    }
+                                                    app.permission_popup = None;
+                                                }
+                                                _ => {} // ignore other keys while popup is active
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Check for Ctrl+C — skip while permission dialog is active
+                                // (Esc/N handled above via PermitDeny, Ctrl+C = Esc here).
+                                if app.permission_popup.is_none()
                                     && crossterm::event::poll(Duration::ZERO)?
                                 {
                                     if let Ok(Event::Key(k)) = crossterm::event::read() {
@@ -636,6 +689,30 @@ async fn tui_loop(
                         }
                         InputAction::CloseCommandPopup => {
                             app.command_popup = None;
+                        }
+                        InputAction::PermitAllow => {
+                            if let Some(ref mut popup) = app.permission_popup {
+                                if let Some(tx) = popup.response_tx.take() {
+                                    let _ = tx.send(channel::PermissionDecision::Allow);
+                                }
+                            }
+                            app.permission_popup = None;
+                        }
+                        InputAction::PermitDeny => {
+                            if let Some(ref mut popup) = app.permission_popup {
+                                if let Some(tx) = popup.response_tx.take() {
+                                    let _ = tx.send(channel::PermissionDecision::Deny);
+                                }
+                            }
+                            app.permission_popup = None;
+                        }
+                        InputAction::PermitAlways => {
+                            if let Some(ref mut popup) = app.permission_popup {
+                                if let Some(tx) = popup.response_tx.take() {
+                                    let _ = tx.send(channel::PermissionDecision::Always);
+                                }
+                            }
+                            app.permission_popup = None;
                         }
                         InputAction::CommandPopupScrollUp(n) => {
                             if let Some(ref mut p) = app.command_popup {
