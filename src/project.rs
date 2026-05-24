@@ -203,6 +203,147 @@ pub fn save_understanding(content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Refresh the deterministic header of `.zap/understanding.md` at session start.
+///
+/// Always overwrites the auto-generated stats block (between the sentinel comments)
+/// while preserving any LLM-written analysis below it (e.g. from `/init`).
+/// Computes accurate facts from the filesystem — no LLM call needed.
+pub fn refresh_understanding_md(
+    cwd_name: Option<String>,
+    files: usize,
+    symbols: usize,
+    lang_counts: &[(String, usize)],
+) -> Result<()> {
+    let path = zap_dir().join("understanding.md");
+
+    // ── Deterministic facts ───────────────────────────────────────────────────
+    let name = cwd_name.as_deref().unwrap_or("(unknown)");
+
+    // Version: read from Cargo.toml or package.json if present.
+    let version = read_project_version().map(|v| format!(" v{v}")).unwrap_or_default();
+
+    // Language stats.
+    let langs_block = if lang_counts.is_empty() {
+        String::new()
+    } else {
+        let parts: Vec<String> = lang_counts.iter()
+            .map(|(l, n)| format!("  - {l}: {n} symbols"))
+            .collect();
+        format!("### Languages\n{}\n\n", parts.join("\n"))
+    };
+
+    // Source modules: list top-level source files (src/*.rs or similar).
+    let modules_block = list_source_modules();
+
+    // Built-in skill count: count .md files in src/default_skills/ if present.
+    let skills_block = count_builtin_skills()
+        .map(|n| format!("### Built-in skills\n  {n} skills in `src/default_skills/`\n\n"))
+        .unwrap_or_default();
+
+    let stats_block = format!(
+        "<!-- zap:auto-stats:begin -->\n\
+         ## Project\n\
+         {name}{version} · {files} files · {symbols} symbols\n\n\
+         {langs_block}\
+         {modules_block}\
+         {skills_block}\
+         <!-- zap:auto-stats:end -->\n"
+    );
+
+    // ── Merge with existing LLM-written content ───────────────────────────────
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let analysis_section = extract_analysis_section(&existing);
+
+    let content = format!(
+        "# Understanding\n\
+         <!-- auto-updated by zap at session start — edit the Analysis section freely -->\n\n\
+         {stats_block}\n\
+         {analysis_section}"
+    );
+
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+/// Read project version from Cargo.toml or package.json.
+fn read_project_version() -> Option<String> {
+    // Cargo.toml
+    if let Ok(s) = std::fs::read_to_string("Cargo.toml") {
+        for line in s.lines() {
+            let line = line.trim();
+            if line.starts_with("version") {
+                if let Some(v) = line.split('"').nth(1) {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    // package.json
+    if let Ok(s) = std::fs::read_to_string("package.json") {
+        for line in s.lines() {
+            let line = line.trim();
+            if line.contains("\"version\"") {
+                if let Some(v) = line.split('"').nth(3) {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Count .md files in src/default_skills/ (built-in skill count for zap projects).
+fn count_builtin_skills() -> Option<usize> {
+    let dir = std::path::Path::new("src").join("default_skills");
+    if !dir.exists() { return None; }
+    let count = std::fs::read_dir(&dir).ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
+        .count();
+    if count == 0 { None } else { Some(count) }
+}
+
+/// List top-level source modules (src/*.rs basenames, capped at 20).
+fn list_source_modules() -> String {
+    let src = std::path::Path::new("src");
+    if !src.exists() { return String::new(); }
+    let mut modules: Vec<String> = std::fs::read_dir(src).ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "rs").unwrap_or(false))
+        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().to_string()))
+        .filter(|n| n != "lib")
+        .collect();
+    modules.sort();
+    modules.truncate(20);
+    if modules.is_empty() { return String::new(); }
+    format!("### Source modules\n  {}\n\n", modules.join(", "))
+}
+
+/// Extract any LLM-written analysis from existing understanding.md,
+/// preserving content that lives outside the auto-stats sentinels.
+fn extract_analysis_section(existing: &str) -> String {
+    // If sentinel markers exist, take everything after the end marker.
+    if let Some(end) = existing.find("<!-- zap:auto-stats:end -->") {
+        let after = existing[end + "<!-- zap:auto-stats:end -->".len()..].trim_start_matches('\n');
+        if !after.trim().is_empty() {
+            return format!("{}\n", after);
+        }
+        return String::new();
+    }
+    // Legacy file written by /init (no sentinels) — preserve the whole thing
+    // as the analysis section if it contains real LLM content.
+    if existing.contains("## Architecture") || existing.contains("## Analysis") || existing.contains("## Overview") {
+        // Strip the old auto-generated header (up to first ## section after Project).
+        if let Some(pos) = existing.find("\n## ").and_then(|p| existing[p+1..].find("\n## ").map(|q| p + 1 + q)) {
+            return format!("{}\n", existing[pos..].trim_start_matches('\n'));
+        }
+    }
+    // No real analysis yet — add a placeholder.
+    "## Analysis\n<!-- Run `/init` for a detailed LLM-powered analysis of architecture, patterns, and key modules. -->\n".to_string()
+}
+
 /// Create a default `.zap/understanding.md` if it doesn't already exist,
 /// or if it contains the auto-created placeholder text (meaning /init never
 /// ran the LLM analysis). When index stats are available, fills in project

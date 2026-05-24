@@ -266,6 +266,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Casual system prompt | `src/context_manager.rs:build_casual_system_prompt` | ~50-token minimal prompt for greeting/casual turns; skips code-nav, tool-policy, security, CLAUDE.md, git status |
 | ZAP.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
 | On-demand .zap knowledge hints | `src/context_manager.rs` | `understanding.md`, `context.md`, `session_log.md` listed as read-on-demand hints (not pre-loaded); model reads them via `read_file` only when the query warrants it — project summary, resume, history questions |
+| understanding.md auto-refresh | `src/project.rs:refresh_understanding_md`, `src/session/mod.rs:Session::new` | At every session start, rewrites the `<!-- zap:auto-stats:begin/end -->` block with deterministic facts: version (Cargo.toml/package.json), file+symbol counts, language stats, source module list, built-in skill count. LLM-written `/init` content below the block is preserved. No LLM call — zero latency. |
 | Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
 | Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
 

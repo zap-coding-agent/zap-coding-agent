@@ -414,6 +414,20 @@ impl Session {
             arc
         };
 
+        // Refresh understanding.md with deterministic facts at session start.
+        // Uses cached index stats (no re-scan) so startup stays fast.
+        if !config.is_subagent {
+            let (files, symbols, langs) = code_index.lock().ok().and_then(|guard| {
+                let (f, s) = guard.total_stats().ok()?;
+                let l = guard.stats_by_language().ok().unwrap_or_default();
+                Some((f, s, l))
+            }).unwrap_or_default();
+            let cwd_name = cwd.file_name().map(|n| n.to_string_lossy().to_string());
+            if let Err(e) = crate::project::refresh_understanding_md(cwd_name, files, symbols, &langs) {
+                crate::log::write("WARN ", &format!("could not refresh understanding.md: {e}"));
+            }
+        }
+
         // Spawn background tree-sitter indexer for interactive sessions.
         if !config.is_subagent {
             crate::code_index::spawn_background_indexer(cwd.clone());
