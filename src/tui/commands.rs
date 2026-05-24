@@ -33,7 +33,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/audit",             "show last N audit log lines"),
     ("/hooks",             "list configured hooks"),
     ("/mcp",               "view/edit MCP server configs"),
-    ("/remote",            "start remote control — get a URL to code from anywhere"),
+    ("/remote [port]",     "start remote control — get a URL to code from anywhere"),
+    ("/remote stop",       "stop the remote control server and tunnel"),
     ("/branch",            "create a conversation branch"),
     ("/branches",          "list conversation branches"),
     ("/switch",            "switch conversation branch"),
@@ -252,26 +253,35 @@ pub fn handle_inline(
         }
         "/skill" => Some(handle_skill_inline(session, arg)),
         "/remote" => {
-            // Run asynchronously but return a placeholder immediately;
-            // the actual URL is printed via zap_warn! once the tunnel is up.
-            let port: u16 = arg.parse().unwrap_or(0);
-            tokio::spawn(async move {
-                crate::remote_channel::activate();
-                match crate::remote::start_server(port).await {
-                    Ok(actual_port) => {
-                        crate::zap_warn!("⚡ remote server listening on http://127.0.0.1:{}", actual_port);
-                        match crate::remote::launch_tunnel(actual_port).await {
-                            Ok(url) => {
-                                crate::zap_warn!("🌐 remote URL: {}", url);
-                                crate::zap_warn!("   Open on any device — type messages, get responses in real time.");
-                            }
-                            Err(e) => crate::zap_warn!("tunnel failed: {} — use http://127.0.0.1:{} on the same network", e, actual_port),
-                        }
-                    }
-                    Err(e) => crate::zap_warn!("remote server failed: {}", e),
+            if arg.trim() == "stop" {
+                if crate::remote_channel::is_active() {
+                    crate::remote_channel::deactivate();
+                    Some("Remote control stopped.".to_string())
+                } else {
+                    Some("Remote control is not running.".to_string())
                 }
-            });
-            Some("⚡ Starting remote server and tunnel… URL will appear in a moment.".to_string())
+            } else {
+                // Run asynchronously but return a placeholder immediately;
+                // the actual URL is printed via zap_warn! once the tunnel is up.
+                let port: u16 = arg.parse().unwrap_or(0);
+                tokio::spawn(async move {
+                    crate::remote_channel::activate();
+                    match crate::remote::start_server(port).await {
+                        Ok(actual_port) => {
+                            crate::zap_warn!("⚡ remote server listening on http://127.0.0.1:{}", actual_port);
+                            match crate::remote::launch_tunnel(actual_port).await {
+                                Ok(url) => {
+                                    crate::zap_warn!("🌐 remote URL: {}", url);
+                                    crate::zap_warn!("   Open on any device — type messages, get responses in real time.");
+                                }
+                                Err(e) => crate::zap_warn!("tunnel failed: {} — use http://127.0.0.1:{} on the same network", e, actual_port),
+                            }
+                        }
+                        Err(e) => crate::zap_warn!("remote server failed: {}", e),
+                    }
+                });
+                Some("⚡ Starting remote server and tunnel… URL will appear in a moment.".to_string())
+            }
         }
         _ => None,
     }

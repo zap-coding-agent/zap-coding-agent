@@ -204,9 +204,10 @@ pub async fn start_server(port: u16) -> Result<u16> {
         .with_context(|| format!("could not bind to port {}", port))?;
     let actual_port = listener.local_addr()?.port();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
+    crate::remote_channel::set_server_abort(handle.abort_handle());
 
     Ok(actual_port)
 }
@@ -219,12 +220,15 @@ pub async fn launch_tunnel(port: u16) -> Result<String> {
     // ── ngrok ─────────────────────────────────────────────────────────────────
     if let Ok(ngrok_path) = which_ngrok() {
         // Start ngrok in background.
-        let _ = tokio::process::Command::new(&ngrok_path)
+        if let Ok(child) = tokio::process::Command::new(&ngrok_path)
             .args(["http", &port.to_string()])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn();
+            .spawn()
+        {
+            if let Some(pid) = child.id() { crate::remote_channel::set_tunnel_pid(pid); }
+        }
 
         // Poll ngrok's local API until the tunnel is up (max 5s).
         for _ in 0..10 {
@@ -299,7 +303,8 @@ async fn localhost_run_tunnel(port: u16) -> Result<String> {
     let stderr = child.stderr.take().unwrap();
     let stdout = child.stdout.take().unwrap();
 
-    // Keep child alive.
+    // Track PID for clean shutdown, then keep child alive.
+    if let Some(pid) = child.id() { crate::remote_channel::set_tunnel_pid(pid); }
     tokio::spawn(async move { let _ = child.wait().await; });
 
     // Parse the URL from either stream (within 10s).
