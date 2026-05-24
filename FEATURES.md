@@ -304,6 +304,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
 | TUI permission event-race fix | `src/tui/channel.rs`, `src/permission_manager.rs`, `src/tui/mod.rs` | `PERM_PROMPT_ACTIVE` AtomicBool: set while `prompt_batch_tui` owns the crossterm queue; TUI tick loop skips its own `event::poll` so Y/N/A keypresses aren't stolen — fixes MCP/shell dialogs hanging silently |
+| Deploy skill | `src/default_skills/deploy.md` | triggers on: deploy, release, ship, publish; documents full workflow: pre-deploy checklist, deploy.sh path, install locations |
 | TUI scrollbar | `src/tui/render.rs:draw_messages` | `Scrollbar`/`ScrollbarState` overlay on the messages area; only shown when content overflows the viewport height |
 | Dynamic skill picker | `src/tui/commands.rs:filter_commands` | `/skill ` shows sub-commands (list/use/unuse/show/scope); `/skill use <name>` auto-completes loaded skill names; `filter_commands` now accepts `skill_names: &[String]`; `App::skill_names` populated at session start and refreshed after `/skill` commands |
 | Thinking spinner | `src/ui.rs:ThinkingSpinner` | manual tick (no enable_steady_tick) + `stopped` flag; before_output waits for thread exit before clearing bar — prevents Windows terminal race |

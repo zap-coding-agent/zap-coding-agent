@@ -321,6 +321,7 @@ fn bundled_skills() -> Vec<Skill> {
         ("git",          include_str!("default_skills/git.md")),
         ("code-review",  include_str!("default_skills/code-review.md")),
         ("debugging",    include_str!("default_skills/debugging.md")),
+        ("deploy",       include_str!("default_skills/deploy.md")),
         ("security",     include_str!("default_skills/security.md")),
         // Domain — session-scoped language/framework skills
         ("bash",         include_str!("default_skills/bash.md")),
