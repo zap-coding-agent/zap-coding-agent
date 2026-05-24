@@ -319,6 +319,10 @@ impl Session {
 
         if let Some(idx) = chosen_idx {
             let (session_id, goal, model, _) = &rows[idx];
+            // Always show session content (goal + files).
+            let files_info = crate::project::session_log_files(*session_id)
+                .map(|f| format!("  {} Files: {}", "◌".dimmed(), f.dimmed()))
+                .unwrap_or_default();
             match self.store.load_messages(*session_id) {
                 Ok(Some(json)) => match serde_json::from_str::<Vec<Message>>(&json) {
                     Ok(msgs) => {
@@ -332,10 +336,19 @@ impl Session {
                         println!("  {} Loaded session #{} — {} messages, model {}",
                             "✓".green(), session_id, self.messages.len().to_string().cyan(), model.cyan());
                         println!("  {} {}", "◌".dimmed(), goal.dimmed());
+                        if !files_info.is_empty() {
+                            println!("{}", files_info);
+                        }
                     }
                     Err(e) => println!("  {} Could not parse messages: {}", "✗".red(), e),
                 },
-                Ok(None) => println!("  {} No message history saved for that session.", "✗".red()),
+                Ok(None) => {
+                    println!("  {} Session #{} has no saved messages.", "◌".yellow(), session_id);
+                    println!("  {} {}", "◌".dimmed(), goal.dimmed());
+                    if !files_info.is_empty() {
+                        println!("{}", files_info);
+                    }
+                },
                 Err(e)   => println!("  {} {}", "✗".red(), e),
             }
         }

@@ -182,6 +182,28 @@ pub fn load_session_log(max_chars: usize) -> Option<String> {
     }
 }
 
+/// Look up the files string for a session from session_log.md.
+pub fn session_log_files(session_id: i64) -> Option<String> {
+    let s = std::fs::read_to_string(PathBuf::from(".zap").join("session_log.md")).ok()?;
+    let marker = format!("## Session #{}", session_id);
+    let mut in_target = false;
+    for line in s.lines() {
+        if line.starts_with(&marker) {
+            in_target = true;
+            continue;
+        }
+        if in_target {
+            if line.starts_with("## Session #") {
+                break; // next session entry — not ours
+            }
+            if let Some(files) = line.strip_prefix("Files: ") {
+                return Some(files.to_string());
+            }
+        }
+    }
+    None
+}
+
 // ── understanding.md ──────────────────────────────────────────────────────────
 
 /// Load `.zap/understanding.md`, capped at `max_chars` for system-prompt injection.

@@ -357,22 +357,26 @@ impl Session {
                 let files = crate::project::context_files();
                 let files_part = if files.is_empty() {
                     String::new()
-                } else if files.len() <= 3 {
-                    format!(" · {}", files.join(", "))
                 } else {
-                    format!(" · {} and {} more", files[..3].join(", "), files.len() - 3)
+                    format!("Files: {}", files.join(", "))
                 };
 
                 if config.tui_mode {
-                    // TUI: silently inject + queue notice for welcome area.
-                    startup_notices.push(format!("↩ Last session: {}{}", summary, files_part));
+                    // TUI: silently inject + queue notices for welcome area.
+                    startup_notices.push(format!("↩ Last: {}", summary));
+                    if !files_part.is_empty() {
+                        startup_notices.push(format!("   {}", files_part));
+                    }
                     if let Some(ctx) = crate::project::load_session_context() {
                         system.push_str("\n\n## Last Session Handoff\n");
                         system.push_str(&ctx);
                     }
                 } else {
                     // CLI: show banner and ask whether to resume (TTY only).
-                    println!("  {} Last session: {}{}", "◌".dimmed(), summary.truecolor(180, 175, 210), files_part.dimmed());
+                    println!("  {} Last: {}", "◌".dimmed(), summary.truecolor(180, 175, 210));
+                    if !files_part.is_empty() {
+                        println!("  {} {}", "◌".dimmed(), files_part.dimmed());
+                    }
                     let is_tty = unsafe { libc::isatty(0 as libc::c_int) } != 0;
                     let resume = if is_tty {
                         Confirm::new("Resume from last session?")
