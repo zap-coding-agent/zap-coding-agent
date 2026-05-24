@@ -1369,8 +1369,37 @@ fn last_message_was_question(messages: &[Message]) -> bool {
 
 /// Returns true when the message, despite appearing casual, needs prior
 /// conversation history to be answered correctly.
+///
+/// Pure greetings (hi, hello, hey, thanks…) are NEVER considered to need
+/// prior context — even if the model's last message ended with "?".
+/// A user saying "hi" again mid-session is always a greeting, not an answer.
+/// Only action-confirmations (yes/no/proceed/go ahead) that are replying to
+/// a question get full history injected.
 fn needs_prior_context(text: &str, messages: &[Message]) -> bool {
-    is_action_confirmation(text) || last_message_was_question(messages)
+    if is_action_confirmation(text) {
+        return true;
+    }
+    // Only treat last-message-was-question as requiring context when the
+    // reply could plausibly be an answer — not for bare greetings.
+    if last_message_was_question(messages) && !is_pure_greeting(text) {
+        return true;
+    }
+    false
+}
+
+/// True when the text is a bare greeting or social phrase that can never be
+/// an answer to a question: "hi", "hello", "hey", "thanks", "cool", etc.
+fn is_pure_greeting(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    let greetings = ["hi", "hello", "hey", "howdy", "yo", "sup",
+                     "thanks", "thank you", "ty", "thx",
+                     "good morning", "good evening", "good afternoon", "good night",
+                     "how are you", "what's up", "whats up",
+                     "what can you do", "what do you do"];
+    greetings.iter().any(|g| t == *g
+        || t.starts_with(&format!("{} ", g))
+        || t.starts_with(&format!("{},", g))
+        || t.starts_with(&format!("{}!", g)))
 }
 
 /// Build the message slice to send for a non-casual turn:
@@ -1544,6 +1573,86 @@ mod casual_tests {
         for msg in &cases {
             assert!(!is_casual_message(msg), "{msg:?} should NOT be casual");
         }
+    }
+}
+
+#[cfg(test)]
+mod prior_context_tests {
+    use super::{needs_prior_context, is_pure_greeting};
+    use crate::llm_client::{Message, ContentBlock};
+
+    fn assistant_msg(text: &str) -> Message {
+        Message { role: "assistant".to_string(), content: vec![ContentBlock::Text { text: text.to_string() }] }
+    }
+
+    // ── Pure greetings are NEVER context-dependent ────────────────────────────
+
+    #[test]
+    fn hi_after_question_stays_casual() {
+        // Regression: second "hi" in a session was getting full context because
+        // the model's previous reply ("How can I help you today?") ended with "?".
+        let history = vec![
+            Message::user_text("hi"),
+            assistant_msg("Hello! How can I help you today?"),
+        ];
+        assert!(!needs_prior_context("hi", &history));
+        assert!(!needs_prior_context("hello", &history));
+        assert!(!needs_prior_context("hey", &history));
+        assert!(!needs_prior_context("thanks", &history));
+    }
+
+    #[test]
+    fn hi_with_no_history_not_context_dependent() {
+        assert!(!needs_prior_context("hi", &[]));
+    }
+
+    // ── Action confirmations always need context ──────────────────────────────
+
+    #[test]
+    fn yes_after_question_needs_context() {
+        let history = vec![
+            Message::user_text("refactor auth"),
+            assistant_msg("Should I also update the tests?"),
+        ];
+        assert!(needs_prior_context("yes", &history));
+        assert!(needs_prior_context("go ahead", &history));
+        assert!(needs_prior_context("proceed", &history));
+    }
+
+    #[test]
+    fn yes_without_question_still_needs_context() {
+        // Confirmations always need history — they're action-driven.
+        assert!(needs_prior_context("yes", &[]));
+        assert!(needs_prior_context("no", &[]));
+    }
+
+    // ── Non-greeting short replies need context when model asked a question ───
+
+    #[test]
+    fn short_answer_after_question_needs_context() {
+        let history = vec![
+            Message::user_text("fix the bug"),
+            assistant_msg("Which file should I start with?"),
+        ];
+        // "main.rs" is not a greeting — it's an answer
+        assert!(needs_prior_context("main.rs", &history));
+        assert!(needs_prior_context("the second one", &history));
+    }
+
+    // ── is_pure_greeting coverage ─────────────────────────────────────────────
+
+    #[test]
+    fn pure_greetings_recognised() {
+        for g in &["hi", "hello", "hey", "thanks", "thank you", "good morning"] {
+            assert!(is_pure_greeting(g), "{g:?} should be a pure greeting");
+        }
+    }
+
+    #[test]
+    fn technical_text_not_pure_greeting() {
+        assert!(!is_pure_greeting("main.rs"));
+        assert!(!is_pure_greeting("yes"));
+        assert!(!is_pure_greeting("the auth module"));
     }
 }
 
