@@ -472,6 +472,7 @@ impl Session {
                 ContentBlock::ToolResult { content, .. } => content.len(),
                 ContentBlock::Image { data, .. }         => data.len() / 4,
                 ContentBlock::Thinking { thinking, .. }  => thinking.len() / 4,
+                ContentBlock::Reasoning { content, .. }  => content.len() / 4,
             }).sum::<usize>()
         }).sum();
         chars / 4

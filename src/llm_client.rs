@@ -110,6 +110,8 @@ pub enum ContentBlock {
     /// Anthropic extended-thinking block. `signature` is opaque — required
     /// when echoing the block back for multi-turn continuations.
     Thinking { thinking: String, signature: String },
+    /// DeepSeek V4 reasoning block. Must be echoed back in subsequent turns.
+    Reasoning { content: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,6 +295,10 @@ fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
                         "thinking": thinking,
                         "signature": signature,
                     }),
+
+                // Reasoning blocks are DeepSeek-specific — not sent to Anthropic.
+                ContentBlock::Reasoning { .. } =>
+                    serde_json::json!({ "type": "text", "text": "" }),
             }
         }).collect();
 
@@ -649,6 +655,8 @@ impl LlmProvider for AnthropicClient {
                         serde_json::json!({ "type": "image", "data": "<redacted>" }),
                     ContentBlock::Thinking { thinking, .. } =>
                         serde_json::json!({ "type": "thinking", "thinking": format!("<{} chars>", thinking.len()) }),
+                    ContentBlock::Reasoning { content } =>
+                        serde_json::json!({ "type": "reasoning", "reasoning": format!("<{} chars>", content.len()) }),
                 }).collect::<Vec<_>>(),
             });
             if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
@@ -754,6 +762,9 @@ impl OpenAiClient {
                     }
                 }
                 "assistant" => {
+                    let reasoning = msg.content.iter().find_map(|b| {
+                        if let ContentBlock::Reasoning { content } = b { Some(content.clone()) } else { None }
+                    });
                     let text = msg.content.iter().find_map(|b| {
                         if let ContentBlock::Text { text } = b { Some(text.clone()) } else { None }
                     });
@@ -783,6 +794,9 @@ impl OpenAiClient {
                         .unwrap_or(serde_json::Value::Null);
                     if !tool_calls.is_empty() {
                         m["tool_calls"] = serde_json::json!(tool_calls);
+                    }
+                    if let Some(rc) = reasoning {
+                        m["reasoning_content"] = serde_json::Value::String(rc);
                     }
                     out.push(m);
                 }
@@ -910,6 +924,11 @@ impl LlmProvider for OpenAiClient {
             let finish_reason = choice["finish_reason"].as_str().unwrap_or("stop").to_string();
 
             let mut content: Vec<ContentBlock> = Vec::new();
+            if let Some(rc) = message["reasoning_content"].as_str() {
+                if !rc.is_empty() {
+                    content.push(ContentBlock::Reasoning { content: rc.to_string() });
+                }
+            }
             if let Some(t) = message["content"].as_str() {
                 if !t.is_empty() {
                     if !self.suppress_stream {
@@ -965,6 +984,7 @@ impl LlmProvider for OpenAiClient {
             let mut stream = resp.bytes_stream();
             let mut buf = String::new();
             let mut text_acc = String::new();
+            let mut reasoning_acc = String::new();
             let mut tool_accums: std::collections::HashMap<usize, OaiToolAccum> = Default::default();
             let mut finish_reason = "stop".to_string();
             let mut usage_acc = Usage::default();
@@ -982,6 +1002,10 @@ impl LlmProvider for OpenAiClient {
                         if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                             let choice = &event["choices"][0];
                             let delta = &choice["delta"];
+
+                            if let Some(rc) = delta["reasoning_content"].as_str() {
+                                if !rc.is_empty() { reasoning_acc.push_str(rc); }
+                            }
 
                             if let Some(text) = delta["content"].as_str() {
                                 if !text.is_empty() {
@@ -1032,6 +1056,9 @@ impl LlmProvider for OpenAiClient {
             }
 
             let mut content: Vec<ContentBlock> = Vec::new();
+            if !reasoning_acc.is_empty() {
+                content.push(ContentBlock::Reasoning { content: reasoning_acc });
+            }
             if !text_acc.is_empty() {
                 content.push(ContentBlock::Text { text: text_acc });
             }
@@ -1074,6 +1101,8 @@ impl LlmProvider for OpenAiClient {
                         serde_json::json!({ "type": "image", "data": "<redacted>" }),
                     ContentBlock::Thinking { thinking, .. } =>
                         serde_json::json!({ "type": "thinking", "thinking": format!("<{} chars>", thinking.len()) }),
+                    ContentBlock::Reasoning { content } =>
+                        serde_json::json!({ "type": "reasoning", "reasoning": format!("<{} chars>", content.len()) }),
                 }).collect::<Vec<_>>(),
             });
             if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
