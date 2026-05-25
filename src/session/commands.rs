@@ -1094,6 +1094,7 @@ impl Session {
                         if db_kb > 0 {
                             s.push_str(&format!("\n  DB: {} KB · .zap/code.db", db_kb));
                         }
+                        s.push_str("\n  Stored in .zap/code.db (SQLite, local only — your code never leaves your machine)");
                         s.push_str("\n  Auto-updates: every 2 min while running · at session end");
                         s.push_str("\n  Run /index any time to refresh manually");
                         s

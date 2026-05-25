@@ -146,7 +146,9 @@ pub async fn run_tui(config: &Config) -> Result<()> {
             role: MsgRole::Assistant,
             blocks: vec![UiBlock::Text(
                 "Tip: run /init to index this project for faster code navigation. \
-                 Code stays local — nothing is uploaded unless you send it in chat."
+                 Indexing is 100% local — your code is parsed by tree-sitter and stored \
+                 in .zap/code.db (SQLite) on your machine. Nothing is sent to any server \
+                 or cloud during indexing. Only the messages you type go to the LLM."
                     .to_string(),
             )],
         });
