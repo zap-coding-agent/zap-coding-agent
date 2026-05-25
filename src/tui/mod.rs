@@ -65,20 +65,77 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let is_new_project = crate::project::load_project_meta().is_none();
 
     if is_new_project {
-        // New project: init wizard first, mode picker queued for after wizard.
         let detected = crate::session::commands::detect_project_type().to_string();
-        let cursor = detected.chars().count();
-        app.init_wizard = Some(InitWizardState {
-            step: InitWizardStep::Language,
-            detected_language: detected.clone(),
-            language_input: detected,
-            language_cursor: cursor,
-            do_index: false,
-        });
-        app.show_mode_picker_after_init = true;
+        // detected is "" only for a genuinely empty directory with no files at all.
+        // For any project that has files (even docs/markdown/config-only), auto-detect
+        // returns "general" or a real language — skip the wizard and auto-init.
+        if detected.is_empty() {
+            // Truly empty project with unknown type — show the wizard so user can confirm.
+            let cursor = detected.chars().count();
+            app.init_wizard = Some(InitWizardState {
+                step: InitWizardStep::Language,
+                detected_language: detected.clone(),
+                language_input: detected,
+                language_cursor: cursor,
+                do_index: false,
+            });
+            app.show_mode_picker_after_init = true;
+        } else {
+            // Project has files — auto-init without the wizard popup.
+            app.show_mode_picker_after_init = true;
+            let langs = vec![detected];
+            app.state = AppState::Thinking;
+            terminal.draw(|frame| render::draw(frame, &app))?;
+            let (output, llm_prompt) = tokio::task::block_in_place(|| {
+                session.cmd_init_direct(langs, true, true)
+            });
+            app.state = AppState::Idle;
+            app.messages.push(UiMessage {
+                role: MsgRole::Assistant,
+                blocks: vec![UiBlock::Text(output)],
+            });
+            app.auto_scroll = true;
+            if let Some(prompt) = llm_prompt {
+                app.messages.push(UiMessage {
+                    role: MsgRole::Assistant,
+                    blocks: vec![UiBlock::Text(
+                        "Analysing codebase — this may take a moment…".to_string()
+                    )],
+                });
+                app.pending_input = Some(prompt);
+                // mode picker shown after LLM analysis completes (post-turn check)
+            } else {
+                // init ran but no LLM turn needed — show mode picker now
+                app.show_mode_picker_after_init = false;
+                app.mode_picker = Some(ModePickerState { cursor: 0 });
+            }
+        }
     } else {
-        // Returning project: mode picker right away, no init wizard.
-        app.mode_picker = Some(ModePickerState { cursor: 0 });
+        // Returning project: check if understanding.md still needs analysis.
+        if crate::project::understanding_needs_analysis() {
+            // Queue a background understanding turn before showing the mode picker.
+            app.show_mode_picker_after_init = true;
+            let langs = vec![crate::session::commands::detect_project_type().to_string()];
+            let (_output, llm_prompt) = tokio::task::block_in_place(|| {
+                // do_index=false (already indexed), do_understand=true
+                session.cmd_init_direct(langs, false, true)
+            });
+            if let Some(prompt) = llm_prompt {
+                app.messages.push(UiMessage {
+                    role: MsgRole::Assistant,
+                    blocks: vec![UiBlock::Text(
+                        "Analysing codebase to build project overview…".to_string()
+                    )],
+                });
+                app.pending_input = Some(prompt);
+                // mode picker shown after analysis completes
+            } else {
+                app.show_mode_picker_after_init = false;
+                app.mode_picker = Some(ModePickerState { cursor: 0 });
+            }
+        } else {
+            app.mode_picker = Some(ModePickerState { cursor: 0 });
+        }
     }
 
     // Queue domain picker only when language is unknown (domain_scope empty = no project.json language).

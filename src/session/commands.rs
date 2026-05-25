@@ -2416,8 +2416,39 @@ pub fn detect_project_type() -> &'static str {
         }
         return "c";
     }
-    // No build file found — ask the user
-    ""
+    // No build manifest found — scan file extensions in cwd as a fallback.
+    let ext_counts = {
+        let mut m: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for e in entries.flatten() {
+                if let Some(ext) = e.path().extension().and_then(|x| x.to_str()) {
+                    match ext {
+                        "rs"  => *m.entry("rust").or_default()       += 1,
+                        "go"  => *m.entry("go").or_default()          += 1,
+                        "py"  => *m.entry("python").or_default()      += 1,
+                        "ts"  => *m.entry("typescript").or_default()  += 1,
+                        "js"  => *m.entry("javascript").or_default()  += 1,
+                        "rb"  => *m.entry("ruby").or_default()        += 1,
+                        "java"=> *m.entry("java").or_default()        += 1,
+                        "cs"  => *m.entry("csharp").or_default()      += 1,
+                        "cpp" | "cc" | "cxx" => *m.entry("c++").or_default() += 1,
+                        "c"   => *m.entry("c").or_default()           += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        m
+    };
+    // Return the most common language found, if any.
+    if let Some((&lang, _)) = ext_counts.iter().max_by_key(|(_, &v)| v) {
+        return lang;
+    }
+    // Project with docs/markdown/config only — treat as general.
+    let has_any_files = std::fs::read_dir(".")
+        .map(|d| d.flatten().any(|e| e.path().is_file()))
+        .unwrap_or(false);
+    if has_any_files { "general" } else { "" }
 }
 
 pub(super) fn generate_zap_md_template(project_type: &str) -> String {

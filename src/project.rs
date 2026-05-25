@@ -220,6 +220,23 @@ pub fn load_understanding(max_chars: usize) -> Option<String> {
     }
 }
 
+/// Returns true when understanding.md has no real LLM-written analysis yet —
+/// just the auto-generated stats block plus the placeholder comment.
+/// Used to decide whether to auto-trigger an init analysis turn on startup.
+pub fn understanding_needs_analysis() -> bool {
+    let s = match std::fs::read_to_string(zap_dir().join("understanding.md")) {
+        Ok(s) => s,
+        Err(_) => return true, // file missing
+    };
+    if s.trim().is_empty() { return true; }
+    // Has real analysis if any of these section headers appear after the stats block.
+    let has_analysis = s.contains("## Architecture")
+        || s.contains("## Overview")
+        || (s.contains("## Analysis")
+            && !s.contains("<!-- Run `/init`"));
+    !has_analysis
+}
+
 pub fn save_understanding(content: &str) -> Result<()> {
     std::fs::write(zap_dir().join("understanding.md"), content)?;
     Ok(())
