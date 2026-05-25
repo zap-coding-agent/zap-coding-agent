@@ -230,33 +230,56 @@ This makes it auditable — you can see exactly when the index was used vs. when
 
 The model is instructed to always use `code_map` or `find_definition` before reaching for `read_file` — so it reads only the lines it actually needs, not whole files.
 
-**Code quality report** — the index also powers structural analysis via `/index quality`:
+**How the index powers every LLM turn:**
 
 ```
-  ◎ code quality — 54 files · 1021 symbols
-  ────────────────────────────────────────────────────────────
+You: "refactor the UserStore struct"
 
-  ⚠ god objects  (>15 methods — split recommended)
-    impl Session             62 methods  ████████████  src/session/
-    impl ToolRegistry        16 methods  ███           src/tool_registry.rs
+  zap (tool call)  →  find_definition("UserStore")
+  SQLite index     →  src/db/user_store.rs:42  ← instant, no file scan
+  zap (tool call)  →  read_file("src/db/user_store.rs", offset=40, limit=60)
+  zap (tool call)  →  edit_file(...)            ← precise edit, right lines
 
-  ⚠ large files  (>50 symbols)
-     116 sym  ████████████████████  src/tool_registry.rs
-      68 sym  █████████████         src/session/commands.rs
-
-  ✦ high coupling  (many references — risky to change)
-    handle_user_turn          46×  src/session/mod.rs:500
-    match_skills_scoped        8×  src/skill_manager.rs:477
-
-  ◌ dead code candidates  (pub fn, 0 external refs)
-    export_skill              src/skill_manager.rs:599
-
-  quality score  68/100
-  → impl Session has 62 methods — extract sub-handlers
-  → 3 pub fn never referenced — check if they can be removed
+Without index: grep entire repo → read 3 wrong files → hallucinate location
+With index:    SQLite lookup → read 20 lines → done
 ```
 
-Reference counts are computed in one O(source_size) pass at the end of every `/index` run — no call graph required.
+Every index hit is logged so you can see exactly when the index was used vs. when the agent fell back to search:
+
+```
+[INDEX] hit  · find_definition · 'UserStore'    · 1 result
+[INDEX] hit  · code_map        · 'src/db/'      · 38 symbols
+[INDEX] miss · find_definition · 'legacy_fn'    · grep fallback
+```
+
+**Code quality report** — the same SQLite index powers `/index quality`, a human-readable health report run directly in the TUI:
+
+```
+Code Health  ·  27 files  ·  1043 symbols  ·  ⚡ 74/100
+────────────────────────────────────────────────────────────
+
+File sizes  (lines)
+────────────────────────────────────────────────────────────
+  ⚠ 2382  src/session/commands.rs    ████████████████████  37 sym
+  ⚠ 2266  src/tui/render.rs          ████████████████████  48 sym
+  ⚠ 1789  src/session/mod.rs         █████████████         45 sym
+  ⚡ 1177  src/tui/mod.rs             ████████
+  ·   527  src/tui/app.rs             ███
+  ·   312  src/code_index.rs          ██
+
+  ⚠ >1000 lines   ⚡ 500–1000   · healthy
+
+God objects  (>15 methods — split candidates)
+────────────────────────────────────────────────────────────
+  Session                        45 methods  (mod.rs)
+  ToolRegistry                   18 methods  (tool_registry.rs)
+
+Dead code candidates  (pub fn, ≤1 reference)
+────────────────────────────────────────────────────────────
+  export_skill                   (skill_manager.rs:599)
+```
+
+Line counts are read from disk; symbol counts and coupling metrics come from SQLite. Reference counts are computed in one O(source_size) pass at the end of every `/index` run — no call graph required.
 
 #### Why zap indexes when Claude Code deliberately doesn't
 
