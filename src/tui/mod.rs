@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, GoalState, InitWizardState, InitWizardStep, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, ToolDone, UiBlock, UiMessage, UiToolCall};
+use app::{App, AppState, GoalState, InitWizardState, InitWizardStep, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, ToolDone, UiBlock, UiMessage, UiToolCall};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -79,10 +79,8 @@ pub async fn run_tui(config: &Config) -> Result<()> {
                 language_cursor: cursor,
                 do_index: false,
             });
-            app.show_mode_picker_after_init = true;
         } else {
             // Project has files — auto-init without the wizard popup.
-            app.show_mode_picker_after_init = true;
             let langs = vec![detected];
             app.state = AppState::Thinking;
             terminal.draw(|frame| render::draw(frame, &app))?;
@@ -103,40 +101,10 @@ pub async fn run_tui(config: &Config) -> Result<()> {
                     )],
                 });
                 app.pending_input = Some(prompt);
-                // mode picker shown after LLM analysis completes (post-turn check)
-            } else {
-                // init ran but no LLM turn needed — show mode picker now
-                app.show_mode_picker_after_init = false;
-                app.mode_picker = Some(ModePickerState { cursor: 0 });
             }
-        }
-    } else {
-        // Returning project: check if understanding.md still needs analysis.
-        if crate::project::understanding_needs_analysis() {
-            // Queue a background understanding turn before showing the mode picker.
-            app.show_mode_picker_after_init = true;
-            let langs = vec![crate::session::commands::detect_project_type().to_string()];
-            let (_output, llm_prompt) = tokio::task::block_in_place(|| {
-                // do_index=false (already indexed), do_understand=true
-                session.cmd_init_direct(langs, false, true)
-            });
-            if let Some(prompt) = llm_prompt {
-                app.messages.push(UiMessage {
-                    role: MsgRole::Assistant,
-                    blocks: vec![UiBlock::Text(
-                        "Analysing codebase to build project overview…".to_string()
-                    )],
-                });
-                app.pending_input = Some(prompt);
-                // mode picker shown after analysis completes
-            } else {
-                app.show_mode_picker_after_init = false;
-                app.mode_picker = Some(ModePickerState { cursor: 0 });
-            }
-        } else {
-            app.mode_picker = Some(ModePickerState { cursor: 0 });
         }
     }
+    // Returning projects: no auto-init, no mode picker — user types when ready.
 
     // Queue domain picker only when language is unknown (domain_scope empty = no project.json language).
     if session.domain_scope.is_empty() && !is_new_project {
@@ -550,12 +518,6 @@ async fn tui_loop(
                 app.context_pct = session.context_fill_pct();
                 app.turn = session.turn_count;
 
-                // If this was the post-init codebase analysis turn, show mode picker now.
-                if app.show_mode_picker_after_init {
-                    app.show_mode_picker_after_init = false;
-                    app.mode_picker = Some(ModePickerState { cursor: 0 });
-                }
-
                 // Goal mode: check completion, auto-continue or declare done
                 if app.goal_state.is_some() {
                     let done = goal_response_is_done(app);
@@ -823,7 +785,6 @@ async fn tui_loop(
                             });
                             app.auto_scroll = true;
                             if let Some(prompt) = llm_prompt {
-                                // Codebase analysis will run — mode picker deferred until it completes.
                                 app.messages.push(UiMessage {
                                     role: MsgRole::Assistant,
                                     blocks: vec![UiBlock::Text(
@@ -831,22 +792,10 @@ async fn tui_loop(
                                     )],
                                 });
                                 app.pending_input = Some(prompt);
-                                // show_mode_picker_after_init stays true; mode picker
-                                // will appear once the LLM turn finishes (see post-turn check below).
-                            } else {
-                                // No LLM turn — show mode picker now that init is fully done.
-                                if app.show_mode_picker_after_init {
-                                    app.show_mode_picker_after_init = false;
-                                    app.mode_picker = Some(ModePickerState { cursor: 0 });
-                                }
                             }
                         }
                         InputAction::CancelInit => {
-                            // Wizard was dismissed — show mode picker now if this was a new project.
-                            if app.show_mode_picker_after_init {
-                                app.show_mode_picker_after_init = false;
-                                app.mode_picker = Some(ModePickerState { cursor: 0 });
-                            }
+                            // Wizard dismissed — nothing extra to do.
                         }
                         InputAction::PasteImage => {
                             let tmp = "/tmp/zap_clipboard_paste.png";
