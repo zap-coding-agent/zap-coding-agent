@@ -1167,28 +1167,34 @@ impl Session {
         // ── Optional LLM prompt to fill ZAP.md ───────────────────────────────
         let llm_prompt = if do_understand {
             Some(
-                "I just initialized this project with /init. Your job is to analyse the \
-                 codebase and produce two files.\n\
+                "I just initialized this project with /init. Analyse the codebase and \
+                 write two files. Complete the entire analysis in at most 12 tool calls.\n\
                  \n\
-                 METHODOLOGY — use these tools in order, and mention which ones you used \
-                 at the start of your response so the user can see the analysis is grounded \
-                 in real source:\n\
-                 1. Use the code index (search_symbols / code_map) to get a full symbol map\n\
-                 2. Use grep / glob_read to find entry points, config files, key patterns\n\
-                 3. Read the most important source files in full with read_file\n\
-                 4. Only write after you have seen the actual code — no guessing\n\
+                 STRICT TOOL BUDGET — follow this order, no more:\n\
+                 1. `list_directory '.'` — one call, top-level structure only\n\
+                 2. `code_map` on 2-3 key source directories (e.g. src/, server/, lib/) — \
+                    skip test/, docs/, node_modules/, target/\n\
+                 3. Read manifest files (Cargo.toml / package.json / go.mod / etc.) — \
+                    1-2 read_file calls for tech stack and deps\n\
+                 4. `code_map` or `read_file` on the main entry point file — 1-2 calls\n\
+                 5. `search_code` for 1-2 key patterns if something is unclear\n\
+                 Then write both output files immediately.\n\
                  \n\
-                 OUTPUT:\n\
-                 1. Fill every section of ZAP.md (Overview, Build & Test, Code Style, \
-                 Architecture, Important Files, Do Not Touch) with facts from the source.\n\
-                 2. Create .zap/understanding.md: main modules, entry points, data flows, \
-                 key abstractions, non-obvious constraints, and a one-line summary of each \
-                 top-level file/directory.\n\
+                 FORBIDDEN — these hang on large projects, never do them:\n\
+                 - Do NOT list every file or directory recursively\n\
+                 - Do NOT call list_directory more than 3 times total\n\
+                 - Do NOT use glob_read with broad patterns like '**/*'\n\
+                 - Do NOT read more than 8 files total\n\
+                 - Do NOT try to enumerate all files with their sizes\n\
                  \n\
-                 Use edit_file for both files. Be specific — no generic filler. \
-                 Start your reply with a brief one-line summary of the tools you used \
-                 (e.g. 'Analysed via code index (247 symbols), grep (12 patterns), \
-                 read_file (8 files)')."
+                 OUTPUT — write both with edit_file/write_file:\n\
+                 1. ZAP.md: fill Overview, Build & Test, Code Style, Architecture, \
+                    Important Files (top 5-8 only), Do Not Touch — facts only, no filler.\n\
+                 2. .zap/understanding.md: main modules, entry points, data flows, \
+                    key abstractions, non-obvious constraints. One line per top-level \
+                    file/directory max.\n\
+                 \n\
+                 Start reply with one line: 'Analysed via: [tools used]'."
                 .to_string(),
             )
         } else {
