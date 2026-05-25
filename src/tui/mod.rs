@@ -62,49 +62,26 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let mut app = App::new(&session.model, &branch);
     app.skill_names = session.skills.iter().map(|s| s.name.clone()).collect();
 
+    // New project detection — silent, no popups, no auto-init.
+    // Just detect language and persist project.json so future sessions skip detection.
+    // Indexing and analysis only happen when user explicitly runs /init.
     let is_new_project = crate::project::load_project_meta().is_none();
-
     if is_new_project {
         let detected = crate::session::commands::detect_project_type().to_string();
-        // detected is "" only for a genuinely empty directory with no files at all.
-        // For any project that has files (even docs/markdown/config-only), auto-detect
-        // returns "general" or a real language — skip the wizard and auto-init.
-        if detected.is_empty() {
-            // Truly empty project with unknown type — show the wizard so user can confirm.
-            let cursor = detected.chars().count();
-            app.init_wizard = Some(InitWizardState {
-                step: InitWizardStep::Language,
-                detected_language: detected.clone(),
-                language_input: detected,
-                language_cursor: cursor,
-                do_index: false,
-            });
-        } else {
-            // Project has files — auto-init without the wizard popup.
-            let langs = vec![detected];
-            app.state = AppState::Thinking;
-            terminal.draw(|frame| render::draw(frame, &app))?;
-            let (output, llm_prompt) = tokio::task::block_in_place(|| {
-                session.cmd_init_direct(langs, true, true)
-            });
-            app.state = AppState::Idle;
-            app.messages.push(UiMessage {
-                role: MsgRole::Assistant,
-                blocks: vec![UiBlock::Text(output)],
-            });
-            app.auto_scroll = true;
-            if let Some(prompt) = llm_prompt {
-                app.messages.push(UiMessage {
-                    role: MsgRole::Assistant,
-                    blocks: vec![UiBlock::Text(
-                        "Analysing codebase — this may take a moment…".to_string()
-                    )],
-                });
-                app.pending_input = Some(prompt);
-            }
-        }
+        let language = if detected.is_empty() { vec![] } else { vec![detected] };
+        let name = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default();
+        let meta = crate::project::ProjectMeta {
+            name,
+            language,
+            indexed: false,
+            indexed_at: None,
+            initialized_at: None,
+        };
+        let _ = crate::project::save_project_meta(&meta);
     }
-    // Returning projects: no auto-init, no mode picker — user types when ready.
 
     // Queue domain picker only when language is unknown (domain_scope empty = no project.json language).
     if session.domain_scope.is_empty() && !is_new_project {
@@ -157,6 +134,21 @@ pub async fn run_tui(config: &Config) -> Result<()> {
         app.messages.push(UiMessage {
             role: MsgRole::Assistant,
             blocks: vec![UiBlock::Text(notice)],
+        });
+    }
+
+    // Hint for unindexed projects — shown once, non-blocking.
+    let not_indexed = crate::project::load_project_meta()
+        .map(|m| !m.indexed)
+        .unwrap_or(true);
+    if not_indexed {
+        app.messages.push(UiMessage {
+            role: MsgRole::Assistant,
+            blocks: vec![UiBlock::Text(
+                "Tip: run /init to index this project for faster code navigation. \
+                 Code stays local — nothing is uploaded unless you send it in chat."
+                    .to_string(),
+            )],
         });
     }
 
