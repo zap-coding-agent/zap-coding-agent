@@ -48,6 +48,43 @@ zap sends a **different prompt for different tasks** — the Java skill fires fo
 
 ---
 
+## Context Quality is Supreme
+
+Every design decision in zap follows one principle: **every token in the LLM's context window must earn its place.** Context that doesn't improve output quality is waste — it dilutes attention, burns budget, and produces inconsistent results.
+
+This principle drives everything:
+
+| Mechanism | What it ensures |
+|---|---|
+| **Skill injection** | Only language- and task-specific guidance is sent, not a one-size-fits-all monolith |
+| **AST code index** | The agent knows what exists *before* it decides what to create — no blind writes |
+| **`/init` command** | Auto-generates project-specific context files so every session starts informed |
+| **Context files** | `ZAP.md`, `.zap/understanding.md`, `.zap/context.md`, `.zap/session_log.md` — maintained automatically, loaded on demand |
+| **Casual-turn detection** | Greetings cost ~31 tokens, not 2,000–4,000 |
+| **Lazy MCP** | Server tool schemas stay out of context until the model explicitly connects them |
+| **Token-cost display** | Every turn shows exactly what went into context — skills, message, system, and estimated $ |
+
+### What gets updated and when
+
+zap maintains four project context files, each updated at a specific time to keep the agent current without polluting the context window:
+
+| File | Updated when | What it contains | Loaded when |
+|---|---|---|---|
+| `ZAP.md` | `/init` (manual, once) | Project overview, build commands, architecture, do-not-touch list | Every session (on-demand) |
+| `.zap/understanding.md` | `/init` (manual, once) | Deep technical map: modules, data flows, patterns, constraints | Every session (on-demand) |
+| `.zap/context.md` | End of every session (auto) | Last session: goal, files touched, what's next | Session start (on-demand) |
+| `.zap/session_log.md` | Every session (auto) | History of all past sessions, indexed by date | On request (on-demand) |
+
+These files are never pre-loaded into the context window — the model reads them *only when relevant*, using `read_file`. This means a session about fixing a typo doesn't pay the cost of loading the entire project architecture.
+
+### The result
+
+- **First session:** `/init` analyses your repo and bootstraps all project knowledge in ~30 seconds
+- **Returning sessions:** The agent already knows what you were working on, which files changed, and what was left unfinished
+- **Every turn:** Skills inject only what's relevant, the index tells the agent what exists, and casual messages skip the overhead entirely
+
+---
+
 ## What makes zap different
 
 ### 1. Skill-First Approach — Context That Earns Its Place
@@ -432,6 +469,64 @@ The model can also undo its own edits via the `undo_edit` tool — useful in aut
 
 ---
 
+### 6. `/init` — Zero to Context-Aware in 30 Seconds
+
+Most agents start every session blind. They don't know your project structure, your build commands, your architecture, or what you worked on last time — unless you tell them. And you tell them again. And again.
+
+`/init` fixes this once, permanently.
+
+```
+/init
+```
+
+Here's what happens:
+
+1. **Auto-detects your stack** — identifies the language/framework from your repo (the same mechanism that fires the right skill at startup)
+2. **Indexes the codebase** — builds the AST symbol index so the agent can navigate structurally from turn one
+3. **Creates `ZAP.md`** — asks the LLM to read your source files and fill in: project overview, build/test commands, architecture layout, key files, and a do-not-touch list
+4. **Creates `.zap/understanding.md`** — a deeper technical summary: module map, data flows, non-obvious patterns, constraints
+5. **Writes `.zap/project.json`** — persisted project config (language, index state)
+
+Total time: ~30 seconds. From that point forward, every session starts informed — the agent knows your project.
+
+**What `ZAP.md` looks like after `/init`:**
+
+```markdown
+## Overview
+Order service — handles order lifecycle (create, fulfil, cancel).
+
+## Build & Test
+mvn clean install
+mvn test
+mvn spring-boot:run
+
+## Architecture
+- OrderController  → REST handlers (controller/)
+- OrderService     → business logic, calls OrderRepository
+- OrderRepository  → JPA, Postgres via spring-data
+
+## Important Files
+- OrderService.java     — core domain logic, start here
+- application.yml       — all config including Kafka brokers
+
+## Do Not Touch
+- LegacyOrderMapper.java — deprecated, backwards compat only
+```
+
+**When context files get updated:**
+
+| File | Updated | By |
+|---|---|---|
+| `ZAP.md` | Once, during `/init` | LLM (reads project, fills template) |
+| `.zap/understanding.md` | Once, during `/init` | LLM (deep structural analysis) |
+| `.zap/context.md` | Every session end | Auto (goal, files touched, what's next) |
+| `.zap/session_log.md` | Every session | Auto (date-indexed history) |
+| `.zap/project.json` | `/init` + on index changes | Auto |
+
+The key insight: `/init` is not just a template generator — it's the bridge between "the agent knows nothing about your project" and "the agent starts every session with full structural knowledge." Combined with the skill system and AST index, it means context quality is built in from the very first turn.
+
+---
+
 ## Features at a glance
 
 | | |
@@ -449,6 +544,7 @@ The model can also undo its own edits via the `undo_edit` tool — useful in aut
 | **Skill scope** | `/skill scope` — pin or restrict which domain skills are active for a session without editing files |
 | **Deploy** | `/deploy` — builds and installs zap with live streamed output; no shell timeout |
 | **Context mgmt** | Skill injection, casual-turn optimization (~20 tokens for greetings), sliding history window, tool-result pruning, `/compact` in-place summarisation, Anthropic prompt caching |
+| **Project init** | `/init` — auto-detects stack, indexes codebase, and generates `ZAP.md` + `.zap/understanding.md` filled with project-specific architecture, build commands, and constraints; ~30 seconds to full context awareness |
 | **Project intelligence** | `.zap/context.md` session handoff (last goal, files touched, what's next); `.zap/understanding.md` LLM-maintained project knowledge; `.zap/session_log.md` session history — read on demand, not pre-loaded |
 | **Sessions** | Every conversation persisted; `/sessions` fuzzy picker to resume any |
 | **Branching** | `/branch` forks a conversation like a git branch; `/switch` to move between them |

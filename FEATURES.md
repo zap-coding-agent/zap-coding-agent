@@ -7,6 +7,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Documentation (README.md)
+| Feature | File | Notes |
+|---|---|---|
+| Context quality principle | `README.md` | New "Context Quality is Supreme" section — states the guiding principle, shows what gets updated and when |
+| /init command section | `README.md` | New "6. /init" section in "What makes zap different" — step-by-step flow, example ZAP.md output, update timing table |
+| Features table /init row | `README.md` | New "Project init" row in Features at a Glance table |
+
 ### Task planner (src/task_planner.rs)
 | Feature | File | Notes |
 |---|---|---|
