@@ -670,7 +670,8 @@ fn detect_language(path: &Path) -> &'static str {
         Some("rs")       => "rust",
         Some("py")       => "python",
         Some("js") | Some("jsx")  => "javascript",
-        Some("ts") | Some("tsx")  => "typescript",
+        Some("ts")               => "typescript",
+        Some("tsx")              => "tsx",
         Some("go")       => "go",
         Some("java")     => "java",
         _ => "",
@@ -735,8 +736,9 @@ fn extract_symbols(source: &str, lang: &str, path: &str) -> Vec<Symbol> {
     let raw = match lang {
         "rust"       => extract_rust(source),
         "python"     => extract_python(source),
-        "javascript" => extract_js(source, false),
-        "typescript" => extract_js(source, true),
+        "javascript" => extract_js(source, false, false),
+        "typescript" => extract_js(source, true, false),
+        "tsx"        => extract_js(source, true, true),
         "go"         => extract_go(source),
         "java"       => extract_java(source),
         _            => vec![],
@@ -977,8 +979,10 @@ fn extract_python_node(node: tree_sitter::Node, src: &[u8], out: &mut Vec<RawSym
 
 // ── JavaScript / TypeScript ───────────────────────────────────────────────────
 
-fn extract_js(source: &str, typescript: bool) -> Vec<RawSymbol> {
-    let lang = if typescript {
+fn extract_js(source: &str, typescript: bool, tsx: bool) -> Vec<RawSymbol> {
+    let lang = if tsx {
+        tree_sitter_typescript::language_tsx()
+    } else if typescript {
         tree_sitter_typescript::language_typescript()
     } else {
         tree_sitter_javascript::language()
