@@ -19,7 +19,29 @@ if [ -n "$src_staged" ]; then
     echo "  ✓ clippy passed"
 fi
 
-# ── 2. FEATURES.md gate ───────────────────────────────────────────────────────
+# ── 2. File-size gate ────────────────────────────────────────────────────────
+MAX_LINES=600
+oversized=""
+for f in $(git diff --cached --name-only | grep '\.rs$'); do
+    if [ -f "$f" ]; then
+        lines=$(wc -l < "$f")
+        if [ "$lines" -gt "$MAX_LINES" ]; then
+            oversized="$oversized\n      $f ($lines lines)"
+        fi
+    fi
+done
+
+if [ -n "$oversized" ]; then
+    echo ""
+    echo "  ✗ Files exceed $MAX_LINES lines — split into smaller modules first:"
+    printf "%b\n" "$oversized"
+    echo ""
+    echo "  To skip: git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+# ── 3. FEATURES.md gate ───────────────────────────────────────────────────────
 features_staged=$(git diff --cached --name-only | grep '^FEATURES\.md$')
 
 if [ -n "$src_staged" ] && [ -z "$features_staged" ]; then

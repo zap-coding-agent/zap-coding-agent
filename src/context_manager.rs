@@ -246,17 +246,34 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     Ok(sections.join("\n\n"))
 }
 
-/// Walk from cwd up to $HOME loading ZAP.md at each level (falls back to CLAUDE.md
-/// for projects that haven't migrated yet). Also loads ~/.zap/ZAP.md as a global layer.
+/// Walk from cwd up to the git root (not beyond) loading ZAP.md at each level,
+/// falling back to CLAUDE.md for projects that haven't migrated yet.
+/// Also loads ~/.zap/ZAP.md as a global layer.
 /// Sections ordered most-general → most-specific so project instructions take priority.
 fn load_zap_md() -> Option<String> {
-    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+    let home = home_dir();
     let cwd  = std::env::current_dir().ok()?;
+
+    // Find git root — stop the upward walk there so a parent repo's CLAUDE.md
+    // cannot bleed into a child project (e.g. zap source bleeding into a test app).
+    let git_root: Option<std::path::PathBuf> = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()
+        .ok()
+        .and_then(|o| if o.status.success() {
+            String::from_utf8(o.stdout).ok()
+                .map(|s| std::path::PathBuf::from(s.trim()))
+        } else {
+            None
+        });
 
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let mut cur = cwd.as_path();
     loop {
         dirs.push(cur.to_path_buf());
+        // Stop at the git root — never walk into an unrelated parent project.
+        if git_root.as_deref() == Some(cur) { break; }
         if home.as_deref() == Some(cur) { break; }
         match cur.parent() {
             Some(p) => cur = p,
@@ -293,6 +310,21 @@ fn load_zap_md() -> Option<String> {
     }
 
     if sections.is_empty() { None } else { Some(sections.join("\n\n")) }
+}
+
+/// Return the user's home directory.
+/// Checks $HOME first (Unix), then %USERPROFILE% (Windows), then %HOMEDRIVE%+%HOMEPATH%.
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .or_else(|_| {
+            let drive = std::env::var("HOMEDRIVE").unwrap_or_default();
+            let path  = std::env::var("HOMEPATH").unwrap_or_default();
+            if drive.is_empty() && path.is_empty() { Err(std::env::VarError::NotPresent) }
+            else { Ok(format!("{}{}", drive, path)) }
+        })
+        .ok()
+        .map(std::path::PathBuf::from)
 }
 
 fn git_status_summary() -> Option<String> {

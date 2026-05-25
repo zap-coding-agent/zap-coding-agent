@@ -102,6 +102,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Removed redundant git tools | `src/tools/shell.rs`, `src/tools/mod.rs` | `git_status`, `git_pull`, `git_diff` removed — model uses `shell` directly; saves ~250 tokens per request |
 | Per-turn tool filtering | `src/session/mod.rs:select_tools_for_turn` | For OpenAI-compatible (local) providers, `web_fetch`/`web_search` are omitted unless the user mentions web/url/docs or web tools were already used this session; Anthropic sends all tools (cached) |
 | Windows shell compatibility | `src/shell_runner.rs:run_command` | Uses PowerShell (`-NoProfile -NonInteractive`) on Windows, `sh -c` on Unix/macOS — PowerShell has `ls`/`sleep` aliases, fixing "command not recognised" failures from LLM-generated Unix commands |
+| Windows hook shell compatibility (v0.12.7) | `src/hooks.rs:hook_cmd` | `run_hook` and `run_pre_hook` now use `powershell -NoProfile -NonInteractive -Command` on Windows instead of hardcoded `sh -c`; added `hook_cmd()` helper with `#[cfg(windows)]` / `#[cfg(not(windows))]` |
+| Git-root CLAUDE.md boundary (v0.12.7) | `src/context_manager.rs:load_zap_md` | Walk stops at git root (not $HOME), preventing a parent repo's CLAUDE.md from bleeding into child/sibling projects; `home_dir()` helper checks `$HOME`, `%USERPROFILE%`, `%HOMEDRIVE%+%HOMEPATH%` for Windows compatibility |
 | TUI permission prompt | `src/permission_manager.rs:prompt_batch_tui`, `src/session/mod.rs` | Permission dialog renders inside the TUI at the bottom of the screen (cursor-positioned, raw mode stays active); suspend/resume only called in CLI mode — previously broke out to CLI |
 | PowerShell system prompt guidance | `src/context_manager.rs` | Shell shown as "PowerShell" on Windows (not "sh"); system prompt includes Windows-specific command guidance (PowerShell syntax, background process pattern) |
 | Full request logging in llm.log | `src/llm_client.rs` | Every REQUEST log entry now includes `POST <url>` and `Authorization: <redacted>` so you can see exactly what endpoint and credentials are used |
@@ -251,6 +253,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `SessionEnd` | `src/hooks.rs` | fires before goodbye message |
 | `UserPromptSubmit` | `src/hooks.rs` | fires on every user message; stdout replaces the prompt |
 | Tool matcher | `src/hooks.rs:HookEntry::matches` | `"shell"`, `"*"`, or absent = all tools |
+| File-size pre-commit guard (v0.12.7) | `scripts/pre-commit` | blocks commit if any staged `.rs` file exceeds 600 lines; shows offending files + line counts |
+| File-size PostToolUse warning (v0.12.7) | `scripts/check-file-size.sh`, `.claude/settings.json` | Claude Code hook warns in-editor when an edited `.rs` file exceeds 500 lines |
 | Hook count banner | `src/session.rs:Session::new` | shown at startup if hooks are configured |
 | `/hooks` | `src/session.rs:handle_slash` | lists all configured hooks grouped by event |
 

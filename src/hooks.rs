@@ -182,13 +182,29 @@ impl HookRunner {
 
 // ── Execution helpers ─────────────────────────────────────────────────────────
 
+/// Build a platform-appropriate shell invocation for a hook command string.
+/// Windows: powershell -NoProfile -NonInteractive -Command <cmd>
+/// Unix:    sh -c <cmd>
+fn hook_cmd(command: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+        c
+    }
+    #[cfg(not(windows))]
+    {
+        let mut c = Command::new("sh");
+        c.args(["-c", command]);
+        c
+    }
+}
+
 /// Run a hook, return stdout if successful. Logs warnings on non-zero exit.
 fn run_hook(entry: &HookEntry, payload: &serde_json::Value, silent: bool) -> Option<String> {
     let stdin_bytes = serde_json::to_vec(payload).unwrap_or_default();
 
-    let result = Command::new("sh")
-        .arg("-c")
-        .arg(&entry.command)
+    let result = hook_cmd(&entry.command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -267,9 +283,7 @@ fn run_hook(entry: &HookEntry, payload: &serde_json::Value, silent: bool) -> Opt
 fn run_pre_hook(entry: &HookEntry, payload: &serde_json::Value) -> HookDecision {
     let stdin_bytes = serde_json::to_vec(payload).unwrap_or_default();
 
-    let result = Command::new("sh")
-        .arg("-c")
-        .arg(&entry.command)
+    let result = hook_cmd(&entry.command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
