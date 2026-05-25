@@ -232,7 +232,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Global index singleton | `src/code_index.rs:set_global` | shared across tool calls |
 | Auto-reindex on write/edit | `src/session.rs:handle_user_turn` | fires after `write_file`/`edit_file`/`batch_edit` |
 | `/index [path\|stats]` | `src/session.rs:cmd_index` | manual reindex or stats; appears in / picker and tab-completion |
-| `/index quality` | `src/session/commands.rs:cmd_index`, `src/code_index.rs:quality_report` | structural quality report: god objects (>15 methods), large files (>50 syms), high coupling (ref_count rank), dead code candidates (pub fn with 0 external refs), async density, quality score 0–100 with improvement tips |
+| `/index quality` | `src/tui/commands.rs:index_quality_text`, `src/code_index.rs:quality_report`, `src/code_index.rs:global_file_line_counts` | TUI popup showing: file sizes by actual line count (⚠ >1000, ⚡ 500-1000, · healthy) with bar chart, god objects, high coupling, complex fns, dead code candidates, and 0-100 health score. Also aliased as `/index health`. Line counts read from disk; symbol counts from DB. |
 | `QualityReport` struct | `src/code_index.rs` | god_objects, large_files, high_coupling, dead_candidates, complex_fns, async_files fields; `score()` method returns 0–100 |
 | `compute_reference_counts()` | `src/code_index.rs` | word-frequency HashMap pass O(source_size); updates `ref_count` column for all symbols in one batch transaction after each index run |
 | `ref_count` column | `src/code_index.rs` | added via `ALTER TABLE` migration in `open()`; how many times a symbol name appears in source |

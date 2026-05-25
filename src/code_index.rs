@@ -140,6 +140,29 @@ pub fn global_quality_report() -> Option<QualityReport> {
         .and_then(|g| g.quality_report().ok())
 }
 
+/// Returns (short_path, symbol_count, line_count) for all indexed files, sorted by line_count desc.
+/// line_count is read from disk; files that no longer exist are skipped.
+pub fn global_file_line_counts() -> Vec<(String, usize, usize)> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let files = global_list_indexed_files(500);
+    let mut result: Vec<(String, usize, usize)> = files
+        .into_iter()
+        .filter_map(|(path, sym_count)| {
+            let line_count = std::fs::read_to_string(&path)
+                .map(|s| s.lines().count())
+                .ok()?;
+            let short = path
+                .strip_prefix(cwd.to_str().unwrap_or(""))
+                .unwrap_or(&path)
+                .trim_start_matches('/')
+                .to_string();
+            Some((short, sym_count, line_count))
+        })
+        .collect();
+    result.sort_by(|a, b| b.2.cmp(&a.2));
+    result
+}
+
 pub fn global_compute_reference_counts() -> usize {
     GLOBAL_INDEX
         .get()

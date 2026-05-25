@@ -283,8 +283,84 @@ pub fn handle_inline(
                 Some("⚡ Starting remote server and tunnel… URL will appear in a moment.".to_string())
             }
         }
+        "/index" if arg == "quality" || arg == "health" => Some(index_quality_text()),
         _ => None,
     }
+}
+
+fn index_quality_text() -> String {
+    use std::fmt::Write;
+
+    let report = match crate::code_index::global_quality_report() {
+        Some(r) => r,
+        None => return "Code index not loaded. Run /index first.".to_string(),
+    };
+    let file_stats = crate::code_index::global_file_line_counts();
+
+    let score = report.score();
+    let score_icon = if score >= 80 { "✓" } else if score >= 60 { "⚡" } else { "⚠" };
+
+    let mut s = String::new();
+    let _ = writeln!(s, "Code Health  ·  {} files  ·  {} symbols  ·  {} {}/100",
+        report.total_files, report.total_syms, score_icon, score);
+    let _ = writeln!(s, "{}", "─".repeat(60));
+
+    // ── File sizes ───────────────────────────────────────────────
+    if !file_stats.is_empty() {
+        let max_lines = file_stats.iter().map(|(_, _, l)| *l).max().unwrap_or(1);
+        let _ = writeln!(s, "\nFile sizes  (lines)");
+        let _ = writeln!(s, "{}", "─".repeat(60));
+        for (path, sym_count, line_count) in &file_stats {
+            let icon = if *line_count > 1000 { "⚠" } else if *line_count > 500 { "⚡" } else { "·" };
+            let bar_len = (line_count * 22 / max_lines).max(1);
+            let bar: String = "█".repeat(bar_len);
+            let _ = writeln!(s, "  {} {:>4}  {:<38} {}  {} sym",
+                icon, line_count, path, bar, sym_count);
+        }
+        let _ = writeln!(s, "\n  ⚠ >1000 lines  ⚡ 500-1000  · healthy");
+    }
+
+    // ── God objects ──────────────────────────────────────────────
+    if !report.god_objects.is_empty() {
+        let _ = writeln!(s, "\nGod objects  (>15 methods — split candidates)");
+        let _ = writeln!(s, "{}", "─".repeat(60));
+        for (label, methods, path) in &report.god_objects {
+            let short = path.rsplit('/').next().unwrap_or(path);
+            let _ = writeln!(s, "  {:<30} {:>3} methods  ({})", label, methods, short);
+        }
+    }
+
+    // ── High coupling ────────────────────────────────────────────
+    if !report.high_coupling.is_empty() {
+        let _ = writeln!(s, "\nHigh coupling  (called from many places)");
+        let _ = writeln!(s, "{}", "─".repeat(60));
+        for (name, path, line, refs) in &report.high_coupling {
+            let short = path.rsplit('/').next().unwrap_or(path);
+            let _ = writeln!(s, "  {:<32} {:>2} refs  ({}:{})", name, refs, short, line);
+        }
+    }
+
+    // ── Complex functions ────────────────────────────────────────
+    if !report.complex_fns.is_empty() {
+        let _ = writeln!(s, "\nComplex functions  (long signatures — consider breaking up)");
+        let _ = writeln!(s, "{}", "─".repeat(60));
+        for (name, path, line) in &report.complex_fns {
+            let short = path.rsplit('/').next().unwrap_or(path);
+            let _ = writeln!(s, "  {}  ({}:{})", name, short, line);
+        }
+    }
+
+    // ── Dead code candidates ─────────────────────────────────────
+    if !report.dead_candidates.is_empty() {
+        let _ = writeln!(s, "\nDead code candidates  (pub fn, ≤1 reference)");
+        let _ = writeln!(s, "{}", "─".repeat(60));
+        for (name, path, line) in &report.dead_candidates {
+            let short = path.rsplit('/').next().unwrap_or(path);
+            let _ = writeln!(s, "  {:<32} ({}:{})", name, short, line);
+        }
+    }
+
+    s
 }
 
 fn handle_skill_inline(session: &mut Session, arg: &str) -> String {
