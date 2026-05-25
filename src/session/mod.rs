@@ -1251,6 +1251,15 @@ impl Session {
             self.messages.push(tool_msg);
         }
 
+        // Drain any btw messages that weren't picked up mid-turn (turn ended before next tool call).
+        // Surface them as a new pending turn so the user gets a proper response.
+        let leftover_btw = crate::tui::channel::drain_btw();
+        if !leftover_btw.is_empty() {
+            crate::tui::channel::tui_send(
+                crate::tui::channel::TuiEvent::BtwCarryover(leftover_btw)
+            );
+        }
+
         // Persist conversation after every turn.
         if let Ok(json) = serde_json::to_string(&self.messages) {
             let _ = self.store.save_messages(self.session_id, &json);

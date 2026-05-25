@@ -113,6 +113,9 @@ pub enum TuiEvent {
     ContextUpdate { pct: u8, turn: usize },
     /// Active skill injected this turn — shown in sidebar, cleared at turn end.
     ActiveSkill(String),
+    /// Undelivered btw messages that weren't injected mid-turn (turn ended before next tool call).
+    /// The TUI loop auto-submits these as the next user turn so they get a proper response.
+    BtwCarryover(Vec<String>),
 }
 
 static TUI_TX: OnceLock<mpsc::UnboundedSender<TuiEvent>> = OnceLock::new();

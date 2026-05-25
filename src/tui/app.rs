@@ -419,6 +419,17 @@ impl App {
             TuiEvent::ActiveSkill(label) => {
                 self.active_skill = Some(label);
             }
+            TuiEvent::BtwCarryover(msgs) => {
+                // Turn ended before these btw messages could be injected mid-turn.
+                // Queue them as the next user input so they get a proper response.
+                let combined = msgs.join("\n");
+                self.messages.push(UiMessage {
+                    role: MsgRole::User,
+                    blocks: vec![UiBlock::Text(format!("↳ btw (follow-up): {combined}"))],
+                });
+                self.pending_input = Some(combined);
+                self.auto_scroll = true;
+            }
         }
     }
 
