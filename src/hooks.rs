@@ -194,11 +194,18 @@ fn run_hook(entry: &HookEntry, payload: &serde_json::Value, silent: bool) -> Opt
         .stderr(Stdio::piped())
         .spawn();
 
+    let in_tui = crate::tui::channel::is_tui_mode();
+
     let mut child = match result {
         Ok(c) => c,
         Err(e) => {
             if !silent {
-                println!("  {} hook failed to start `{}`: {}", "⚠".yellow(), entry.command, e);
+                let msg = format!("  ⚠ hook failed to start `{}`: {}", entry.command, e);
+                if in_tui {
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+                } else {
+                    println!("{}", msg.yellow());
+                }
             }
             return None;
         }
@@ -211,7 +218,12 @@ fn run_hook(entry: &HookEntry, payload: &serde_json::Value, silent: bool) -> Opt
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(e) => {
-            println!("  {} hook error `{}`: {}", "⚠".yellow(), entry.command, e);
+            let msg = format!("  ⚠ hook error `{}`: {}", entry.command, e);
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+            } else {
+                println!("{}", msg.yellow());
+            }
             return None;
         }
     };
@@ -222,14 +234,29 @@ fn run_hook(entry: &HookEntry, payload: &serde_json::Value, silent: bool) -> Opt
     if !output.status.success() && !silent {
         let code = output.status.code().unwrap_or(-1);
         if code != 2 {
-            println!("  {} hook `{}` exited {}", "⚠".yellow(), entry.command, code);
+            let msg = format!("  ⚠ hook `{}` exited {}", entry.command, code);
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+            } else {
+                println!("{}", msg.yellow());
+            }
         }
         if !stderr.trim().is_empty() {
-            println!("  {} {}", "┆".truecolor(90, 85, 110), stderr.trim().truecolor(180, 100, 80));
+            let s = format!("  ┆ {}", stderr.trim());
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{s}")));
+            } else {
+                println!("{}", s.truecolor(180, 100, 80));
+            }
         }
     } else if !stdout.trim().is_empty() && !silent {
         for line in stdout.trim().lines() {
-            println!("  {} {}", "┆".truecolor(90, 85, 110), line.truecolor(150, 200, 150));
+            let s = format!("  ┆ {line}");
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{s}")));
+            } else {
+                println!("{}", s.truecolor(150, 200, 150));
+            }
         }
     }
 
@@ -248,10 +275,17 @@ fn run_pre_hook(entry: &HookEntry, payload: &serde_json::Value) -> HookDecision 
         .stderr(Stdio::piped())
         .spawn();
 
+    let in_tui = crate::tui::channel::is_tui_mode();
+
     let mut child = match result {
         Ok(c) => c,
         Err(e) => {
-            println!("  {} hook failed to start `{}`: {}", "⚠".yellow(), entry.command, e);
+            let msg = format!("  ⚠ hook failed to start `{}`: {}", entry.command, e);
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+            } else {
+                println!("{}", msg.yellow());
+            }
             return HookDecision::Allow;
         }
     };
@@ -263,7 +297,12 @@ fn run_pre_hook(entry: &HookEntry, payload: &serde_json::Value) -> HookDecision 
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(e) => {
-            println!("  {} hook error `{}`: {}", "⚠".yellow(), entry.command, e);
+            let msg = format!("  ⚠ hook error `{}`: {}", entry.command, e);
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+            } else {
+                println!("{}", msg.yellow());
+            }
             return HookDecision::Allow;
         }
     };
@@ -275,20 +314,31 @@ fn run_pre_hook(entry: &HookEntry, payload: &serde_json::Value) -> HookDecision 
     if code == 2 {
         let reason = if !stdout.is_empty() { stdout } else { stderr };
         let reason = if reason.is_empty() { "blocked by hook".to_string() } else { reason };
-        println!(
-            "  {} hook blocked tool: {}",
-            "⊘".truecolor(220, 80, 80),
-            reason.truecolor(220, 160, 80),
-        );
+        let msg = format!("  ⊘ hook blocked tool: {reason}");
+        if in_tui {
+            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+        } else {
+            println!("{}", msg.truecolor(220, 80, 80));
+        }
         return HookDecision::Block(reason);
     }
 
     if !output.status.success() {
-        println!("  {} hook `{}` exited {} (tool still runs)", "⚠".yellow(), entry.command, code);
+        let msg = format!("  ⚠ hook `{}` exited {} (tool still runs)", entry.command, code);
+        if in_tui {
+            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+        } else {
+            println!("{}", msg.yellow());
+        }
     }
     if !stdout.is_empty() {
         for line in stdout.lines() {
-            println!("  {} {}", "┆".truecolor(90, 85, 110), line.truecolor(150, 200, 150));
+            let s = format!("  ┆ {line}");
+            if in_tui {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{s}")));
+            } else {
+                println!("{}", s.truecolor(150, 200, 150));
+            }
         }
     }
 

@@ -229,8 +229,13 @@ async fn send_with_retry(
         let remaining = MAX_RETRIES - attempt - 1;
         if remaining > 0 {
             let reason = if status == 429 { "rate limited" } else { "service unavailable" };
-            println!("  ⚠ {reason} (HTTP {status}) — retrying in {}s… ({} attempt(s) left)",
-                delay_ms / 1_000, remaining);
+            let msg = format!("  ⚠ {reason} (HTTP {status}) — retrying in {}s… ({remaining} attempt(s) left)",
+                delay_ms / 1_000);
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::LlmChunk(format!("\n{msg}")));
+            } else {
+                println!("{msg}");
+            }
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         } else {
             last_resp = Some(resp);
