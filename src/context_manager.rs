@@ -53,22 +53,27 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
 
     // ── Code navigation strategy ──────────────────────────────────────────────
     sections.push(
-        "## Code Navigation Strategy (use in this order)\n\
+        "## Code Navigation Strategy\n\
          \n\
-         The agent has a persistent AST-based code index (tree-sitter + SQLite) that \
-         is much faster and more accurate than grep. Always prefer it:\n\
+         Try tools in this order — each is faster than the next:\n\
          \n\
-         1. **`code_map`** — get the structural outline of a file or directory \
-            (functions, structs, classes, line numbers). Use this first to orient yourself.\n\
-         2. **`find_definition`** — jump directly to where a symbol is defined. \
-            Backed by the AST index; returns exact file + line number.\n\
-         3. **`search_code`** — pattern search across the codebase (ripgrep). \
-            Use when the symbol name is unknown or for non-definition searches.\n\
-         4. **`read_file` with `offset`/`limit`** — read only the lines you need \
-            after you know the file and line number from the above tools.\n\
+         1. **`code_map`** — structural outline of a file or directory \
+            (functions, structs, classes, line numbers).\n\
+         2. **`find_definition`** — jump directly to where a symbol is defined.\n\
+         3. **`search_code`** — pattern search (ripgrep). Use when the symbol name \
+            is unknown or for non-definition searches.\n\
+         4. **`list_directory`** — understand project layout before diving into files.\n\
+         5. **`read_file` with `offset`/`limit`** — read only the lines you need.\n\
          \n\
-         Never read an entire large file when `code_map` or `find_definition` \
-         can give you the location first."
+         **If `code_map` or `find_definition` return 0 results or an empty list:**\n\
+         - The project may not be indexed yet — do NOT conclude the project is empty.\n\
+         - Fall back immediately to `list_directory` to explore the structure, \
+           then `search_code` or `read_file` to navigate.\n\
+         - Tell the user they can run `/index` to enable fast symbol lookup.\n\
+         \n\
+         **Never explore these directories** — they contain dependencies/build output, \
+         not source code: `node_modules`, `target`, `dist`, `build`, `bin`, `obj`, \
+         `out`, `.git`, `__pycache__`, `.venv`, `venv`, `coverage`, `.next`."
             .to_string(),
     );
 

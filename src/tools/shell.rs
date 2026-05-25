@@ -209,15 +209,30 @@ fn list_directory_native(path: &str) -> Result<String> {
         anyhow::bail!("list_directory: '{}' is not a directory", path);
     }
 
+    // Directories that are never worth exploring: build output, vendor deps, etc.
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules", "target", "vendor", "dist", "build", "bin", "obj", "out",
+        ".git", ".svn", ".hg", "__pycache__", ".venv", "venv", "site-packages",
+        "coverage", ".next", ".nuxt", "tmp", "temp", "logs", "packages",
+    ];
+
     let mut entries: Vec<std::fs::DirEntry> =
         std::fs::read_dir(dir)
             .map_err(|e| anyhow::anyhow!("list_directory: cannot read '{}': {}", path, e))?
             .flatten()
+            .filter(|e| {
+                let name = e.file_name();
+                let n = name.to_string_lossy();
+                // Always skip hidden entries and known noise dirs.
+                if n.starts_with('.') { return false; }
+                if e.path().is_dir() && SKIP_DIRS.contains(&n.as_ref()) { return false; }
+                true
+            })
             .collect();
     entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
     if entries.is_empty() {
-        return Ok(format!("(directory '{}' is empty)", path));
+        return Ok(format!("(directory '{}' is empty or contains only build/vendor dirs)", path));
     }
 
     let mut out = String::new();
