@@ -50,6 +50,10 @@ pub enum InputAction {
     DiffScrollUp(usize),
     DiffScrollDown(usize),
     DiffSwitchPanel,
+    /// Mid-turn btw input box.
+    BtwOpen,
+    BtwSubmit(String),
+    BtwClose,
 }
 
 /// Returns true when the command picker is active (idle + input starts with '/').
@@ -81,6 +85,68 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Diff viewer takes priority when open.
     if app.diff_viewer.is_some() {
         return handle_diff_viewer_key(app, key);
+    }
+
+    // Btw input box — active during a turn, Ctrl+B to open, Enter to submit, Esc to close.
+    if app.btw_mode {
+        match key.code {
+            KeyCode::Enter => {
+                let text = app.btw_draft.trim().to_string();
+                app.btw_draft.clear();
+                app.btw_cursor = 0;
+                app.btw_mode = false;
+                if !text.is_empty() {
+                    return InputAction::BtwSubmit(text);
+                }
+                return InputAction::BtwClose;
+            }
+            KeyCode::Esc => {
+                app.btw_draft.clear();
+                app.btw_cursor = 0;
+                app.btw_mode = false;
+                return InputAction::BtwClose;
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.btw_draft.insert(app.btw_cursor, c);
+                app.btw_cursor += c.len_utf8();
+                return InputAction::None;
+            }
+            KeyCode::Backspace => {
+                if app.btw_cursor > 0 {
+                    let prev = app.btw_draft[..app.btw_cursor]
+                        .char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                    app.btw_draft.drain(prev..app.btw_cursor);
+                    app.btw_cursor = prev;
+                }
+                return InputAction::None;
+            }
+            KeyCode::Left => {
+                if app.btw_cursor > 0 {
+                    app.btw_cursor = app.btw_draft[..app.btw_cursor]
+                        .char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                }
+                return InputAction::None;
+            }
+            KeyCode::Right => {
+                if app.btw_cursor < app.btw_draft.len() {
+                    let next = app.btw_draft[app.btw_cursor..]
+                        .char_indices().nth(1).map(|(i, _)| app.btw_cursor + i)
+                        .unwrap_or(app.btw_draft.len());
+                    app.btw_cursor = next;
+                }
+                return InputAction::None;
+            }
+            _ => return InputAction::None,
+        }
+    }
+
+    // Ctrl+B: open btw input during an active turn.
+    if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Thinking | AppState::ToolRunning { .. }) {
+            app.btw_mode = true;
+            return InputAction::BtwOpen;
+        }
+        return InputAction::None;
     }
 
     // Secret scanner popup — Y/Enter to send anyway, everything else = deny.

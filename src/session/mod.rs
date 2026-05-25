@@ -1227,7 +1227,28 @@ impl Session {
                 }
             }
 
-            self.messages.push(Message::tool_results(tool_results));
+            // Inject any mid-turn btw messages the user typed via Ctrl+B.
+            let btw_msgs = crate::tui::channel::drain_btw();
+            let mut tool_msg = Message::tool_results(tool_results);
+            if !btw_msgs.is_empty() {
+                let note = btw_msgs
+                    .iter()
+                    .map(|m| format!("↳ User note (added mid-turn): {m}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                // Append as a text block inside the user message so the model sees it
+                // in context without starting a new turn.
+                if let Some(block) = tool_msg.content.last_mut() {
+                    if let ContentBlock::Text { text } = block {
+                        text.push_str(&format!("\n\n{note}"));
+                    } else {
+                        tool_msg.content.push(ContentBlock::Text { text: note });
+                    }
+                } else {
+                    tool_msg.content.push(ContentBlock::Text { text: note });
+                }
+            }
+            self.messages.push(tool_msg);
         }
 
         // Persist conversation after every turn.

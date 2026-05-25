@@ -288,6 +288,13 @@ pub struct App {
     pub files_changed_this_turn: usize,
     /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
     pub active_skill: Option<String>,
+
+    /// Mid-turn btw input — true while the Ctrl+B input box is open.
+    pub btw_mode: bool,
+    /// Draft text inside the btw input box.
+    pub btw_draft: String,
+    /// Cursor position in btw_draft.
+    pub btw_cursor: usize,
 }
 
 impl App {
@@ -337,6 +344,9 @@ impl App {
             secret_popup: None,
             files_changed_this_turn: 0,
             active_skill: None,
+            btw_mode: false,
+            btw_draft: String::new(),
+            btw_cursor: 0,
         }
     }
 

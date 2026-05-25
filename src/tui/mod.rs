@@ -48,6 +48,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     channel::set_tui_sender(tx.clone());
     channel::init_perm_channel();
     channel::init_secret_channel();
+    channel::init_btw_queue();
 
     // 3. Switch to alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -375,7 +376,20 @@ async fn tui_loop(
                                             break; // stop draining — turn is cancelled
                                         }
 
-                                        if app.secret_popup.is_some() {
+                                        if app.btw_mode || (k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL)) {
+                                            match handle_key(app, k) {
+                                                InputAction::BtwSubmit(text) => {
+                                                    // Show in chat immediately with ↳ btw: prefix.
+                                                    app.messages.push(UiMessage {
+                                                        role: MsgRole::User,
+                                                        blocks: vec![UiBlock::Text(format!("↳ btw: {text}"))],
+                                                    });
+                                                    app.auto_scroll = true;
+                                                    channel::push_btw(text);
+                                                }
+                                                _ => {}
+                                            }
+                                        } else if app.secret_popup.is_some() {
                                             // Route Y/N/Esc to the secret scanner popup.
                                             match handle_key(app, k) {
                                                 InputAction::SecretAllow => {
@@ -821,6 +835,10 @@ async fn tui_loop(
                                     dv.diff_scroll = dv.diff_scroll.saturating_add(n);
                                 }
                             }
+                        }
+                        InputAction::BtwOpen | InputAction::BtwClose => {}
+                        InputAction::BtwSubmit(_) => {
+                            // btw only makes sense during an active turn — ignore in idle.
                         }
                         InputAction::None => {}
                     }

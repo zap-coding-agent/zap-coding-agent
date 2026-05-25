@@ -221,6 +221,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.permission_popup.is_some() {
         draw_permission_popup(frame, app, size);
     }
+
+    // Draw btw input box (Ctrl+B mid-turn note).
+    if app.btw_mode {
+        draw_btw_input(frame, app, size);
+    }
 }
 
 // ── Header — 7-line rich brand (border + 5 content rows + border) ────────────
@@ -2212,5 +2217,50 @@ fn draw_permission_popup(frame: &mut Frame, app: &App, area: Rect) {
 
     let para = Paragraph::new(lines)
         .style(Style::default().bg(bg));
+    frame.render_widget(para, inner);
+}
+
+fn draw_btw_input(frame: &mut Frame, app: &App, area: Rect) {
+    let bg = Color::Rgb(15, 22, 30);
+    let border_c = Color::Rgb(80, 160, 220); // cool blue — distinct from amber popups
+
+    // Fixed 3-line popup: border + label+input line + hint line
+    let dialog_h: u16 = 4;
+    let dialog_w = (area.width as f32 * 0.72) as u16;
+    let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
+    let y = area.y + area.height.saturating_sub(dialog_h);
+    let overlay = Rect { x, y, width: dialog_w, height: dialog_h };
+
+    frame.render_widget(Clear, overlay);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .style(Style::default().bg(bg))
+        .title(Span::styled(
+            " ↳ btw — add context to the running turn ",
+            Style::default().fg(Color::Rgb(120, 200, 255)).bold(),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    // Input line: prompt + typed text + blinking cursor
+    let prompt = "  › ";
+    let draft = &app.btw_draft;
+    let cursor_char = "▌";
+
+    let input_line = Line::from(vec![
+        Span::styled(prompt, Style::default().fg(Color::Rgb(80, 160, 220))),
+        Span::styled(draft.clone(), Style::default().fg(Color::White)),
+        Span::styled(cursor_char, Style::default().fg(Color::Rgb(120, 200, 255))),
+    ]);
+    let hint_line = Line::from(Span::styled(
+        "  Enter to send · Esc to cancel",
+        Style::default().fg(Color::Rgb(60, 80, 100)),
+    ));
+
+    let para = Paragraph::new(vec![input_line, hint_line]).style(Style::default().bg(bg));
     frame.render_widget(para, inner);
 }

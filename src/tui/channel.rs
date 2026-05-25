@@ -5,6 +5,33 @@
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
 
+// ── Mid-turn "btw" injection queue ────────────────────────────────────────────
+
+/// Messages the user queued via Ctrl+B while a turn was running.
+/// Drained by `handle_user_turn` between tool-call rounds.
+static BTW_QUEUE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+pub fn init_btw_queue() {
+    BTW_QUEUE.set(Mutex::new(Vec::new())).ok();
+}
+
+/// Push a user btw message into the queue (called from TUI event loop).
+pub fn push_btw(msg: String) {
+    if let Some(mu) = BTW_QUEUE.get() {
+        if let Ok(mut q) = mu.lock() {
+            q.push(msg);
+        }
+    }
+}
+
+/// Drain all pending btw messages (called from session turn loop).
+pub fn drain_btw() -> Vec<String> {
+    BTW_QUEUE.get()
+        .and_then(|mu| mu.lock().ok())
+        .map(|mut q| std::mem::take(&mut *q))
+        .unwrap_or_default()
+}
+
 // ── Permission popup (TUI-native) ─────────────────────────────────────────────
 
 /// Sent from `prompt_batch_tui` to the TUI loop; response comes via `response_tx`.
