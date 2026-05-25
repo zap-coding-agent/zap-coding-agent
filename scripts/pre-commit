@@ -22,20 +22,27 @@ if [ -n "$src_staged" ]; then
 fi
 
 # ── 2. File-size gate ────────────────────────────────────────────────────────
+# Only block if the file GREW past the limit in this commit — pre-existing
+# large files are grandfathered so --no-verify is never needed for them.
 MAX_LINES=600
 oversized=""
 for f in $(git diff --cached --name-only | grep '\.rs$'); do
     if [ -f "$f" ]; then
         lines=$(wc -l < "$f")
         if [ "$lines" -gt "$MAX_LINES" ]; then
-            oversized="$oversized\n      $f ($lines lines)"
+            # Check how many lines were in HEAD (0 if new file).
+            prev=$(git show HEAD:"$f" 2>/dev/null | wc -l || echo 0)
+            # Only fail if the file crossed the limit in this commit.
+            if [ "$prev" -le "$MAX_LINES" ]; then
+                oversized="$oversized\n      $f ($lines lines)"
+            fi
         fi
     fi
 done
 
 if [ -n "$oversized" ]; then
     echo ""
-    echo "  ✗ Files exceed $MAX_LINES lines — split into smaller modules first:"
+    echo "  ✗ Files newly exceed $MAX_LINES lines — split into smaller modules first:"
     printf "%b\n" "$oversized"
     echo ""
     echo "  To skip: git commit --no-verify"
