@@ -429,6 +429,15 @@ impl Session {
                 let l = guard.stats_by_language().ok().unwrap_or_default();
                 Some((f, s, l))
             }).unwrap_or_default();
+            // Warn if index is empty — LLM tools will silently return nothing until /index runs.
+            if files == 0 {
+                let msg = "Code index is empty — run /index to enable find_definition and code_map tools.".to_string();
+                if config.tui_mode {
+                    startup_notices.push(msg);
+                } else {
+                    println!("  {} {}", "◌".dimmed(), msg);
+                }
+            }
             let cwd_name = cwd.file_name().map(|n| n.to_string_lossy().to_string());
             if let Err(e) = crate::project::refresh_understanding_md(cwd_name, files, symbols, &langs) {
                 crate::log::write("WARN ", &format!("could not refresh understanding.md: {e}"));

@@ -175,10 +175,15 @@ pub fn global_reindex_file(path: &Path) {
     if let Some(g) = GLOBAL_INDEX.get() {
         if let Ok(mut guard) = g.lock() {
             match guard.index_file(path) {
-                Ok(n) => crate::log::write(
-                    "INDEX",
-                    &format!("tree-sitter · reindex · {} · {} symbols", path.display(), n),
-                ),
+                Ok(n) => {
+                    crate::log::write(
+                        "INDEX",
+                        &format!("tree-sitter · reindex · {} · {} symbols", path.display(), n),
+                    );
+                    // Keep ref_counts current so quality report and dead-code detection
+                    // reflect the just-written file immediately.
+                    let _ = guard.compute_reference_counts();
+                }
                 Err(e) => crate::log::write(
                     "WARN ",
                     &format!("tree-sitter · reindex failed · {}: {}", path.display(), e),
@@ -472,8 +477,10 @@ impl CodeIndex {
     }
 
     /// Compute reference counts for all symbols by scanning source file text.
-    /// Uses a word-frequency map (O(source_size)) — fast even on large codebases.
-    /// Each symbol's ref_count includes its own definition, so `count - 1` ≈ call sites.
+    ///
+    /// Counts occurrences of `identifier(` patterns only — actual call sites.
+    /// This avoids false positives from field access (`self.name`), variable uses,
+    /// string literals, and comments that plagued the old word-frequency approach.
     pub fn compute_reference_counts(&mut self) -> Result<usize> {
         let files: Vec<String> = self.conn
             .prepare("SELECT path FROM indexed_files")?
@@ -481,19 +488,13 @@ impl CodeIndex {
             .flatten()
             .collect();
 
-        // Single pass: build identifier→frequency map across all source files.
-        let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut call_freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for path in &files {
             if let Ok(content) = std::fs::read_to_string(path) {
-                for word in content.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                    if word.len() >= 2 {
-                        *freq.entry(word.to_string()).or_insert(0) += 1;
-                    }
-                }
+                count_call_sites(&content, &mut call_freq);
             }
         }
 
-        // Update ref_count for every indexed symbol.
         let symbols: Vec<(i64, String)> = self.conn
             .prepare("SELECT id, name FROM symbols")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -503,7 +504,7 @@ impl CodeIndex {
         let tx = self.conn.unchecked_transaction()?;
         let mut updated = 0usize;
         for (id, name) in &symbols {
-            let count = freq.get(name.as_str()).copied().unwrap_or(0) as i64;
+            let count = call_freq.get(name.as_str()).copied().unwrap_or(0) as i64;
             tx.execute("UPDATE symbols SET ref_count=?1 WHERE id=?2", params![count, id])?;
             updated += 1;
         }
@@ -607,6 +608,58 @@ impl CodeIndex {
             }
         }
         Ok(removed)
+    }
+}
+
+// ── Call-site counter ─────────────────────────────────────────────────────────
+
+/// Scan `source` and increment `freq[name]` for each `name(` occurrence.
+///
+/// Skips string literals and line comments so that identifiers inside
+/// `"name("` or `// name(` don't inflate the counts.
+fn count_call_sites(source: &str, freq: &mut std::collections::HashMap<String, usize>) {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut i = 0usize;
+    while i < len {
+        let b = bytes[i];
+        // Skip line comments (`//`)
+        if b == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+            while i < len && bytes[i] != b'\n' { i += 1; }
+            continue;
+        }
+        // Skip block comments (`/* … */`)
+        if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') { i += 1; }
+            i += 2;
+            continue;
+        }
+        // Skip string literals (`"…"` and `'…'`), respecting `\` escapes
+        if b == b'"' || b == b'\'' {
+            let q = b;
+            i += 1;
+            while i < len {
+                if bytes[i] == b'\\' { i += 2; continue; }
+                if bytes[i] == q    { i += 1; break; }
+                i += 1;
+            }
+            continue;
+        }
+        // Identifier start
+        if b.is_ascii_alphabetic() || b == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') { i += 1; }
+            // Only count if immediately followed by `(` — an actual call site
+            if i < len && bytes[i] == b'(' {
+                let ident = &source[start..i];
+                if ident.len() >= 2 {
+                    *freq.entry(ident.to_string()).or_insert(0) += 1;
+                }
+            }
+            continue;
+        }
+        i += 1;
     }
 }
 
