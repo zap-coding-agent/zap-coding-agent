@@ -8,24 +8,15 @@ use crate::config::{Config, OutputFormat, Provider};
 const MAX_TOKENS: u32 = 16_000;
 const MAX_RETRIES: u32 = 5;
 
-/// On deepseek.com, only V4 models (deepseek-v4-pro, deepseek-v4-flash) support vision.
-/// Legacy deepseek-chat / deepseek-reasoner do not.
-fn deepseek_vision_support(url: &str, model: &str) -> bool {
-    if url.contains("deepseek.com") {
-        model.contains("v4")
-    } else {
-        true
-    }
-}
-
-/// Returns false for providers/models known to reject image content blocks.
+/// Returns false for providers known to reject image content blocks.
 /// Used to warn the user at paste/attach time instead of silently at send time.
+/// DeepSeek API (all models) rejects `image_url` content blocks — text only.
 pub fn provider_supports_vision(config: &Config) -> bool {
     match config.provider {
         Provider::Anthropic => true,
         Provider::OpenAi => {
             let url = config.base_url.as_deref().unwrap_or("");
-            deepseek_vision_support(url, &config.model)
+            !url.contains("deepseek.com")
         }
     }
 }
@@ -718,7 +709,7 @@ struct OpenAiClient {
 impl OpenAiClient {
     fn new(api_key: String, model: String, base_url: Option<String>, suppress_stream: bool, disable_stream: bool) -> Self {
         let url = normalize_openai_url(base_url.as_deref());
-        let image_support = deepseek_vision_support(&url, &model);
+        let image_support = !url.contains("deepseek.com");
         Self { http: crate::http::client().clone(), api_key, model, url, suppress_stream, disable_stream, image_support }
     }
 

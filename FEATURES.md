@@ -311,6 +311,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
 | TUI permission event-race fix | `src/tui/channel.rs`, `src/permission_manager.rs`, `src/tui/mod.rs` | `PERM_PROMPT_ACTIVE` AtomicBool: set while `prompt_batch_tui` owns the crossterm queue; TUI tick loop skips its own `event::poll` so Y/N/A keypresses aren't stolen — fixes MCP/shell dialogs hanging silently |
+| DeepSeek vision block | `src/llm_client.rs:provider_supports_vision`, `OpenAiClient::new` | all deepseek.com models reject `image_url` content blocks (text-only API); /paste and /attach warn immediately; history drops are silent |
 | Deploy skill | `src/default_skills/deploy.md` | triggers on: deploy, release, ship, publish; nohup background pattern (`nohup bash scripts/deploy.sh > /tmp/zap-deploy.log 2>&1 &`) avoids the 60s shell timeout |
 | `/deploy [--check]` | `src/session/commands.rs:cmd_deploy`, `src/session/mod.rs:handle_slash` | streams live output from `bash scripts/deploy.sh` with no timeout; `--check` just shows installed versions; bypasses the LLM entirely — build output arrives line-by-line via tokio async read |
 | TUI scrollbar | `src/tui/render.rs:draw_messages` | `Scrollbar`/`ScrollbarState` overlay on the messages area; only shown when content overflows the viewport height |
