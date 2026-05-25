@@ -55,24 +55,31 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     sections.push(
         "## Code Navigation Strategy\n\
          \n\
-         Try tools in this order — each is faster than the next:\n\
+         **Strict tool order — do not skip steps:**\n\
          \n\
-         1. **`code_map`** — structural outline of a file or directory \
-            (functions, structs, classes, line numbers).\n\
-         2. **`find_definition`** — jump directly to where a symbol is defined.\n\
-         3. **`search_code`** — pattern search (ripgrep). Use when the symbol name \
-            is unknown or for non-definition searches.\n\
-         4. **`list_directory`** — understand project layout before diving into files.\n\
-         5. **`read_file` with `offset`/`limit`** — read only the lines you need.\n\
+         1. **`code_map`** — ALWAYS call this first on any file or directory before \
+            reading it. Returns functions, structs, classes, and line numbers so you \
+            know exactly which lines to read. Do NOT call `read_file` on a file you \
+            have not yet `code_map`ped.\n\
+         2. **`find_definition`** — when you know a symbol name, jump directly to its \
+            definition. Saves a `search_code` + `read_file` round-trip.\n\
+         3. **`search_code`** — pattern/regex search (ripgrep). Use only when the \
+            symbol name is unknown or you need non-definition matches.\n\
+         4. **`list_directory`** — understand project layout. Use before diving into files.\n\
+         5. **`read_file` with `offset`/`limit`** — last resort, targeted. After \
+            `code_map` tells you the line range, read only those lines.\n\
          \n\
-         **If `code_map` or `find_definition` return 0 results or an empty list:**\n\
-         - The project may not be indexed yet — do NOT conclude the project is empty.\n\
-         - Fall back immediately to `list_directory` to explore the structure, \
-           then `search_code` or `read_file` to navigate.\n\
+         **The index is your primary tool.** `code_map` + `find_definition` cover \
+         90% of navigation tasks. Reaching for `read_file` or `search_code` first \
+         wastes tool calls and context — always check the index first.\n\
+         \n\
+         **If `code_map` or `find_definition` return 0 results:**\n\
+         - The project may not be indexed — do NOT conclude it is empty.\n\
+         - Fall back to `list_directory` → `search_code` → `read_file`.\n\
          - Tell the user they can run `/index` to enable fast symbol lookup.\n\
          \n\
-         **Never explore these directories** — they contain dependencies/build output, \
-         not source code: `node_modules`, `target`, `dist`, `build`, `bin`, `obj`, \
+         **Never explore these directories** — dependencies/build output only: \
+         `node_modules`, `target`, `dist`, `build`, `bin`, `obj`, \
          `out`, `.git`, `__pycache__`, `.venv`, `venv`, `coverage`, `.next`."
             .to_string(),
     );
@@ -123,8 +130,10 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
            Never run a long-lived process in the foreground — it will time out.\n\
          \n\
          **Search:**\n\
-         - Use `find_definition` or `code_map` (AST index) before `search_code`.\n\
-         - Use `list_directory` to understand project layout before diving into files."
+         - Always try `find_definition` or `code_map` before `search_code` or `read_file`.\n\
+         - If you know the symbol name: `find_definition` → done.\n\
+         - If you know the file: `code_map` → read only the relevant lines.\n\
+         - `search_code` is for unknown symbol names or cross-file pattern matching only."
             .to_string(),
     );
 
