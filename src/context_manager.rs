@@ -219,23 +219,22 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         sections.push(format!("## Project Context\n{}", zap_md));
     }
     // understanding.md — always inlined (capped at 4 kchars ≈ 1k tokens).
-    // The auto-stats block is always useful context; the Analysis section is
-    // included when /init has run. Without inlining, the model answers summary
-    // questions from guesswork instead of real project data.
+    // Used as technical reference when writing code, reviewing architecture,
+    // or navigating the codebase — not as a script to read out to the user.
     if let Some(understanding) = crate::project::load_understanding(4000) {
         let has_real_analysis = !understanding.contains("Run `/init`")
             && (understanding.contains("## Analysis")
                 || understanding.contains("## Architecture")
                 || understanding.contains("## Overview"));
-        let overview_note = "**For project summary, overview, or architecture questions: \
-            answer directly from this section — do not call tools to re-discover it.**";
+        let overview_note = "**Use this as technical background when writing code or navigating \
+            the codebase. Do NOT recite it verbatim for user-facing questions — for general \
+            queries (\"what is this?\", \"summarize\", \"overview\") answer in plain, \
+            end-user-friendly language: what the product does and who it's for.**";
         if has_real_analysis {
-            sections.push(format!("## Project Overview\n{}\n{}", understanding, overview_note));
+            sections.push(format!("## Project Reference\n{}\n{}", understanding, overview_note));
         } else {
-            // Stats only — no deep analysis yet. Still inline so the model
-            // knows file/symbol counts, languages, and top-level modules.
             sections.push(format!(
-                "## Project Overview\n{}\n{}\n\
+                "## Project Reference\n{}\n{}\n\
                  *For a deeper analysis run `/init`.*",
                 understanding, overview_note
             ));
