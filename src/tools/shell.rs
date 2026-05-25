@@ -239,26 +239,50 @@ fn list_directory_native(path: &str) -> Result<String> {
         "coverage", ".next", ".nuxt", "tmp", "temp", "logs", "packages",
     ];
 
-    let mut entries: Vec<std::fs::DirEntry> =
+    let all_entries: Vec<std::fs::DirEntry> =
         std::fs::read_dir(dir)
             .map_err(|e| anyhow::anyhow!("list_directory: cannot read '{}': {}", path, e))?
             .flatten()
-            .filter(|e| {
-                let name = e.file_name();
-                let n = name.to_string_lossy();
-                // Always skip hidden entries and known noise dirs.
-                if n.starts_with('.') { return false; }
-                if e.path().is_dir() && SKIP_DIRS.contains(&n.as_ref()) { return false; }
-                true
-            })
             .collect();
+
+    let mut hidden_count = 0usize;
+    let mut skipped_noise: Vec<String> = Vec::new();
+    let mut entries: Vec<&std::fs::DirEntry> = Vec::new();
+
+    for e in &all_entries {
+        let name = e.file_name();
+        let n = name.to_string_lossy();
+        if n.starts_with('.') {
+            hidden_count += 1;
+        } else if e.path().is_dir() && SKIP_DIRS.contains(&n.as_ref()) {
+            skipped_noise.push(n.to_string());
+        } else {
+            entries.push(e);
+        }
+    }
     entries.sort_by_key(|e| e.file_name());
 
-    if entries.is_empty() {
-        return Ok(format!("(directory '{}' is empty or contains only build/vendor dirs)", path));
+    let mut out = String::new();
+
+    // Always tell the LLM what was filtered so it doesn't think the dir is empty.
+    if hidden_count > 0 || !skipped_noise.is_empty() {
+        let mut note = format!("# Note: {} hidden (dot) entries omitted", hidden_count);
+        if !skipped_noise.is_empty() {
+            note.push_str(&format!("; build/vendor dirs skipped: {}", skipped_noise.join(", ")));
+        }
+        note.push_str(" — use read_file or shell to access them directly if needed");
+        writeln!(out, "{}", note).ok();
     }
 
-    let mut out = String::new();
+    if entries.is_empty() {
+        if hidden_count > 0 || !skipped_noise.is_empty() {
+            writeln!(out, "total 0  (all visible entries were filtered — see note above)").ok();
+        } else {
+            writeln!(out, "(directory '{}' is empty)", path).ok();
+        }
+        return Ok(out);
+    }
+
     writeln!(out, "total {}", entries.len()).ok();
 
     for entry in &entries {
@@ -426,6 +450,24 @@ mod tests {
         }
         let out = list_directory_native(tmp.to_str().unwrap()).unwrap();
         assert!(out.contains("empty"), "empty dir should say so explicitly");
+        let _ = std::fs::remove_dir(&tmp);
+    }
+
+    #[test]
+    fn note_shown_when_hidden_entries_filtered() {
+        let cwd = std::env::current_dir().unwrap();
+        let tmp = cwd.join("zap_test_hidden_subdir");
+        let _ = std::fs::create_dir_all(&tmp);
+        // Create a hidden file and a visible file.
+        let _ = std::fs::write(tmp.join(".hidden_file"), "x");
+        let _ = std::fs::write(tmp.join("visible.txt"), "y");
+        let out = list_directory_native(tmp.to_str().unwrap()).unwrap();
+        assert!(out.contains("# Note:"), "should prepend a Note line when hidden entries exist");
+        assert!(out.contains("hidden (dot) entries omitted"), "note should mention hidden entries");
+        assert!(out.contains("visible.txt"), "visible file should still appear");
+        // Cleanup
+        let _ = std::fs::remove_file(tmp.join(".hidden_file"));
+        let _ = std::fs::remove_file(tmp.join("visible.txt"));
         let _ = std::fs::remove_dir(&tmp);
     }
 }
