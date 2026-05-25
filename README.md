@@ -21,6 +21,33 @@
 
 ---
 
+## The Problem Every AI Coding Agent Has
+
+Open any popular AI coding agent and inspect the raw request it sends to the LLM. You'll find hundreds — sometimes thousands — of lines of system prompt sent on **every single turn**, regardless of what you're actually doing.
+
+We measured this. Here's what Gemini CLI and OpenCode send when you ask them to write a Spring Boot service vs. a React component — two completely different languages, frameworks, and conventions:
+
+| | Gemini CLI | OpenCode | zap |
+|---|---|---|---|
+| Spring Boot request | **4,096 tokens** | **2,003 tokens** | 1,889 tokens |
+| React request | **4,096 tokens** | **2,003 tokens** | 1,661 tokens |
+| Prompts identical? | ✅ Yes — same bytes | ✅ Yes — same bytes | ❌ No — different skill injected |
+| Java conventions in prompt? | ❌ None | ❌ None | ✅ 650 tokens |
+| React conventions in prompt? | ❌ None | ❌ None | ✅ 422 tokens |
+
+**Gemini CLI sends the same 4,096-token prompt for both.** The word "java" does not appear anywhere in its 68,410-character prompt file. Neither does "react", "kotlin", or any other language. The LLM writing your Spring Boot service and the LLM writing your React component receive identical instructions. ([source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/prompts/snippets.ts))
+
+**OpenCode uses a single static string constant** — `baseAnthropicCoderPrompt` — sent verbatim on every turn, every task type. Zero mentions of Java, TypeScript, Rust, Python, React, or any specific language. ([source](https://github.com/opencode-ai/opencode/blob/main/internal/llm/prompt/coder.go))
+
+This isn't just waste. It's why these agents give inconsistent output — the model has no language-specific guidance, so it invents its own conventions turn by turn.
+
+zap sends a **different prompt for different tasks** — the Java skill fires for Spring Boot, the React skill fires for components — and a greeting costs 12 tokens, not 2,000–4,000.
+
+> Full methodology, raw token counts, and source links: [`content/evidence/system-prompt-comparison.md`](content/evidence/system-prompt-comparison.md)
+> Medium series: [Introducing ZAP — The Open-Source AI Coding Agent That Doesn't Bloat Your LLM Context](content/overview/medium.md)
+
+---
+
 ## What makes zap different
 
 ### 1. Skill-First Approach — Context That Earns Its Place
@@ -110,9 +137,49 @@ On first launch zap writes all built-in skills to `~/.zap/skills/` automatically
 
 Most agents navigate code the same way a shell script does — grep for a string, hope the result is what you meant. zap builds a real **AST symbol index** at startup using tree-sitter + SQLite, giving the model genuine structural understanding of your codebase.
 
+#### The problem: agents that write without looking
+
+Ask most coding agents to "add all the API layers for user management" in an existing project and you'll see a predictable set of mistakes:
+
+- **Duplicate files created** — `src/user_repository.rs` already exists, but the agent creates `src/repositories/user_repo.rs` alongside it because it never checked
+- **Existing patterns ignored** — the project uses a `Repository<T>` trait with a specific error type; the agent invents its own DB access style from scratch
+- **Scaffolding over existing code** — `src/routes/`, `src/models/`, `src/db/` already exist with boilerplate; the agent recreates them
+- **Missed abstractions** — a `BaseRepository` or shared `AppError` type already exists; the agent writes a duplicate
+
+These aren't model failures — they're context failures. The agent is writing blind because its context window never contained the files it needed to check.
+
+#### How the index fixes it
+
+When you ask zap the same question, before writing a single line it queries the index:
+
+```sql
+-- Does a user repository already exist?
+SELECT path, line, kind FROM symbols WHERE name LIKE '%UserRepo%' OR name LIKE '%UserStore%';
+
+-- What repository pattern does this project use?
+SELECT name, path, line, signature FROM symbols WHERE kind = 'trait' AND name LIKE '%Repository%';
+
+-- What's already in the db/ directory?
+SELECT name, kind, line FROM symbols WHERE path LIKE '%/db/%' ORDER BY path, line;
+```
+
+This runs in milliseconds against the local SQLite index — no file reads, no grep, no context stuffing. The model knows what exists before it decides what to create. It adds to `src/user_repository.rs` instead of creating a new one. It implements the existing `Repository<T>` trait instead of inventing a new pattern.
+
 When you ask zap to "refactor the `UserStore` struct", it doesn't search for the string `"UserStore"` — it looks up the symbol in the index, finds the exact file and line number, reads only that section, and makes a precise edit. No false matches, no reading entire files to find one function.
 
 The index is **incremental** — on subsequent runs, only files that changed since the last session are re-parsed. A background indexer runs every 120s during interactive sessions so the index stays fresh as you edit. Cold-indexing a 50k-line repo takes a few seconds; warm starts are near-instant.
+
+**Always current during edits** — every time zap writes a file, it immediately reindexes that file before the next LLM turn. The model never queries a stale index for files it just changed.
+
+**Index usage is logged per turn** — every time a tool call is answered by the index (rather than falling back to grep), zap logs it to `~/.zap/zap.log` and `~/.zap/audit.jsonl`:
+
+```
+[INDEX] hit · find_definition · 'UserRepository' · 3 result(s)
+[INDEX] hit · code_map · 'src/db/' · 42 symbol(s)
+[INDEX] miss · find_definition · 'legacy_fn' · grep fallback
+```
+
+This makes it auditable — you can see exactly when the index was used vs. when the agent had to fall back to text search.
 
 **Supported languages:** Rust, Python, TypeScript, JavaScript, Go, Java
 
@@ -153,6 +220,30 @@ The model is instructed to always use `code_map` or `find_definition` before rea
 ```
 
 Reference counts are computed in one O(source_size) pass at the end of every `/index` run — no call graph required.
+
+#### Why zap indexes when Claude Code deliberately doesn't
+
+Claude Code (Anthropic's own CLI) has **no built-in code indexing**. No tree-sitter, no SQLite, no ctags. It uses pure agentic search — grep + glob + read, chosen at runtime by the model. This was a deliberate, tested decision.
+
+Boris Cherny (Claude Code's creator) confirmed publicly that Anthropic built and benchmarked a RAG/vector-index approach early on and dropped it because agentic search won "by a lot." The reasons:
+
+- Grep finds exact matches; embeddings introduce false positives
+- No index to build or maintain
+- Index drift — code changes constantly during editing sessions
+- Simpler architecture with fewer failure modes
+
+> Sources: [Claude Code Doesn't Index Your Codebase — vadim.blog](https://vadim.blog/claude-code-no-indexing) · [Building Claude Code with Boris Cherny — Pragmatic Engineer](https://newsletter.pragmaticengineer.com/p/building-claude-code-with-boris-cherny) · [Official Claude Code docs](https://docs.anthropic.com/en/docs/claude-code/overview)
+
+The community has noticed the gap — multiple open-source MCP servers exist to bolt indexing onto Claude Code:
+- [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) — tree-sitter + SQLite FTS5
+- [cocoindex-io/cocoindex-code](https://github.com/cocoindex-io/cocoindex-code) — AST-based search
+- [zilliztech/claude-context](https://github.com/zilliztech/claude-context) — vector search MCP
+
+And open feature requests asking Anthropic to add this natively: [#4556](https://github.com/anthropics/claude-code/issues/4556) · [#9277](https://github.com/anthropics/claude-code/issues/9277)
+
+**zap makes the opposite bet.** Agentic search solves semantic questions well ("find code related to payment processing"). A persistent AST index solves structural questions better — "what already exists in this module?", "which files implement this pattern?", "is there already a `UserRepository`?" These are exactly the questions that matter when an agent is about to *write* new code. Without an index, the agent can only search for what it knows to look for. With an index, it knows what exists before it decides what to create.
+
+The two approaches solve different failure modes. Agentic search avoids index drift. AST indexing avoids blind writes into a codebase the agent hasn't fully read.
 
 ---
 
@@ -284,29 +375,60 @@ Both install automatically on first connect via `npx -y` / `uvx` — no manual `
 
 zap handles your source code, credentials, and shell — so it treats security as a core feature, not an afterthought.
 
-**Secret scanner**
-Before any content is sent to a cloud LLM, zap scans it for secrets — API keys, tokens, private keys, passwords, connection strings. Matching content is blocked and you're warned, not silently forwarded.
+#### The agent cannot execute anything destructive without your explicit approval
 
-**Explicit permission model**
-Three modes, your choice:
+In the default `ask` mode, every write operation and shell command is blocked until you approve it. Read-only tools — `read_file`, `search_code`, `code_map`, `find_definition`, `git_status` — are never gated and run freely. Only the tools that can cause damage require your sign-off:
 
-| Mode | What happens |
+| Tool class | Ask mode | Auto mode | Deny mode |
+|---|---|---|---|
+| `read_file`, `search_code`, `code_map`, `git_status` | ✓ always allowed | ✓ | ✗ blocked |
+| `edit_file`, `write_file`, `batch_edit` | prompt | ✓ | ✗ |
+| `shell` | prompt | ✓ | ✗ |
+| `spawn_agent` | prompt | ✓ | ✗ |
+
+When the model wants to run multiple tools in one turn, zap shows **one grouped prompt** covering all of them — you approve or deny the batch, not each individually.
+
+**"Always" grants** — type `always` once at a prompt and that tool class is auto-approved for the rest of the session. Granting `edit_file` also grants `write_file` and `batch_edit` — semantically identical operations share a grant class so you're not re-prompted for the same action with a different tool name.
+
+**Three modes, your choice:**
+
+| Mode | When to use |
 |---|---|
-| `ask` *(default)* | Every write and shell command requires your approval. Type "always" once to trust a specific tool for the session. |
-| `auto` | Approves everything — for sandboxed CI or scripts where you control the environment. |
-| `deny` | Completely read-only. The agent can read and reason but cannot write files or run commands. |
+| `ask` *(default)* | Any interactive session — you stay in control |
+| `auto` | Sandboxed CI, scripts, or headless runs where you control the environment |
+| `deny` | Completely read-only — the agent can read and reason but cannot write a single byte or run any command |
 
-**Full audit trail**
-Every tool call — file reads, edits, shell commands, web fetches — is appended to `agent_audit.jsonl` with a timestamp. You have a complete record of everything the agent did.
+Switch at any time: `/permissions ask`, `/permissions auto`, `/permissions deny`.
 
-**Undo for every edit**
-Before modifying any file, zap snapshots the previous content in memory. Mistakes are reversible:
+#### Secret scanner — 25+ patterns, blocks before sending
+
+Before any content is sent to a cloud LLM, zap scans it for secrets. It checks for:
+
+- **API keys**: Anthropic (`sk-ant-`), OpenAI (`sk-proj-`), Stripe live and test keys
+- **VCS tokens**: GitHub personal access tokens (`ghp_`, `ghs_`, `github_pat_`), GitLab tokens (`glpat-`)
+- **Cloud credentials**: AWS access keys (`AKIA`), AWS secret key fields, GCP service account JSON
+- **Cryptographic material**: PEM private key blocks (`-----BEGIN`), JWT tokens (base64 header prefix)
+- **Generic credential fields**: `password=`, `api_key=`, `secret=`, `access_token=` in config files
+
+Matches are blocked and you're warned with the line number and a redacted preview — content is never silently forwarded.
+
+#### Full audit trail
+
+Every tool call is appended to `~/.zap/audit.jsonl` as a structured JSON record with a timestamp, tool name, and outcome. You have a complete, machine-readable record of everything the agent did — useful for debugging, compliance, or just reviewing what changed.
+
+```bash
+/audit 20       # show last 20 audit entries in the TUI
+```
+
+#### Undo for every edit
+
+Before modifying any file, zap snapshots the previous content in memory. If the agent makes a wrong edit, you can restore it instantly:
 
 ```
-/undo src/main.rs      # restore last snapshot
+/undo src/main.rs      # restore file to its pre-edit state
 ```
 
-The model can also undo its own edits using the `undo_edit` tool.
+The model can also undo its own edits via the `undo_edit` tool — useful in autonomous `/goal` runs where the agent detects it made a mistake mid-task.
 
 ---
 
@@ -319,10 +441,12 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
 | **Languages** | AST index: Rust, Python, TypeScript, JavaScript, Go, Java |
 | **Code quality** | `/index quality` — god objects, coupling, dead code candidates, quality score (0–100); reference counts computed in one O(source-size) pass |
-| **Permission modes** | `ask` (prompt per op), `auto` (approve all), `deny` (read-only) |
+| **Index usage logging** | Every tool call answered by the AST index is logged to `~/.zap/zap.log` and `audit.jsonl` — hit/miss per turn, auditable |
+| **Permission modes** | `ask` (grouped prompt per destructive op), `auto` (approve all), `deny` (fully read-only); "always" grant auto-approves a tool class for the session |
 | **Skills** | 23 built-in; always-on + keyword-triggered; user skills in `~/.zap/skills/` or `.zap/skills/`; SKILL.md standard compatible with Claude Code and Cursor |
 | **Skill trace** | `/skill log` — see which skills fired (or why they didn't) for every turn this session |
 | **Skill capture** | `/skill capture <name>` — extract session rules into a reusable skill file |
+| **Skill scope** | `/skill scope` — pin or restrict which domain skills are active for a session without editing files |
 | **Deploy** | `/deploy` — builds and installs zap with live streamed output; no shell timeout |
 | **Context mgmt** | Skill injection, casual-turn optimization (~20 tokens for greetings), sliding history window, tool-result pruning, `/compact` in-place summarisation, Anthropic prompt caching |
 | **Project intelligence** | `.zap/context.md` session handoff (last goal, files touched, what's next); `.zap/understanding.md` LLM-maintained project knowledge; `.zap/session_log.md` session history — read on demand, not pre-loaded |
@@ -337,7 +461,7 @@ The model can also undo its own edits using the `undo_edit` tool.
 | **Remote control** | `/remote` starts a local HTTP server + public tunnel; drive the session from any browser or phone |
 | **Images** | `/attach <path>` or `/paste` clipboard — multimodal on supported models |
 | **Audit log** | Every tool call written to `~/.zap/audit.jsonl` |
-| **Secret scanner** | Blocks API keys, tokens, and passwords from being sent to cloud LLMs |
+| **Secret scanner** | 25+ patterns — Anthropic/OpenAI/Stripe keys, GitHub/GitLab tokens, AWS/GCP credentials, private keys, JWTs, generic password/api_key/secret fields — blocked before sending to any cloud LLM |
 | **Cost display** | Token breakdown per turn — skills, message, context, estimated $ |
 
 ---
@@ -508,10 +632,13 @@ zap --sdk                                  # JSON-lines remote control (stdin/st
 | `/init` | Create a `CLAUDE.md` for this project (auto-filled by the agent) |
 | `/run <workflow>` | Run a `.zap/workflows/<name>.yaml` pipeline |
 | `/workflow new <name>` | Scaffold a new workflow file |
+| `/tasks` | Browse and execute structured task sessions from `.zap/tasks/` |
 | `/attach <path>` | Stage an image for the next message |
 | `/paste` | Paste an image from the clipboard |
 | `/memory list\|get\|set\|del` | Manage persistent key-value memory |
 | `/skill list\|show\|create\|log` | Manage skills; `log` shows which skills fired per turn |
+| `/skill scope` | Show or change which domain skills are active for this session |
+| `/hooks` | List all configured hooks and their trigger events |
 | `/branch <name>` | Fork the current conversation |
 | `/branches` | List all conversation branches |
 | `/switch <name>` | Switch to a different branch |
@@ -707,6 +834,10 @@ If you delete a file or want to reset a skill to its default, re-export it:
 /skill list                      list all skills (grouped: always-on / triggered)
 /skill show <name>               preview content, description, license
 /skill log                       show which skills fired (or why they didn't) per turn this session
+/skill scope                     show which domain skills are active this session
+/skill scope add <name>          add a skill to the active scope
+/skill scope remove <name>       remove a skill from the active scope
+/skill scope reset               restore default scope
 /skill export <name>             re-export a built-in to ~/.zap/skills/
 /skill export --all              re-export every built-in skill
 /skill create <name>             scaffold a new skill in .zap/skills/
@@ -748,43 +879,15 @@ steps:
 
 ## Code Index
 
-An incremental AST symbol index is built at startup using tree-sitter + SQLite. Only files changed since the last run are re-parsed. A background indexer refreshes every 120s during interactive sessions. Supports **Rust, Python, TypeScript, JavaScript, Go, Java**.
+See [AST Code Index — Understands Your Code, Not Just Text](#2-ast-code-index--understands-your-code-not-just-text) above for the full explanation, including the blind-writes problem, SQL query examples, per-write reindex guarantee, index usage logging, and the comparison with Claude Code's agentic search approach.
 
-Powers `code_map`, `find_definition`, and `find_references`.
+**Quick reference:**
 
 | Command | What it shows |
 |---|---|
 | `/index` | Reindex manually |
 | `/index stats` | File count, symbol count by kind, top files by density |
 | `/index quality` | God objects, large files, high coupling, dead code candidates, quality score |
-
-**Quality report** — reference counts are computed in a single O(source-size) pass after every index run. No call graph required; the heuristic correctly surfaces the functions most dangerous to change.
-
-Run `/index quality` to see a breakdown like:
-
-```
-◎ code quality — 54 files · 1021 symbols
-────────────────────────────────────────────────────────────
-
-⚠ god objects  (>15 methods — split recommended)
-  impl Session             62 methods  ████████████  src/session/
-  impl ToolRegistry        16 methods  ███           src/tool_registry.rs
-
-⚠ large files  (>50 symbols)
-   116 sym  ████████████████████  src/tool_registry.rs
-    68 sym  █████████████         src/session/commands.rs
-
-✦ high coupling  (many references — risky to change)
-  handle_user_turn          46×  src/session/mod.rs:500
-  match_skills_scoped        8×  src/skill_manager.rs:477
-
-◌ dead code candidates  (pub fn, 0 external refs)
-  export_skill              src/skill_manager.rs:599
-
-quality score  68/100
-→ impl Session has 62 methods — extract sub-handlers
-→ 3 pub fn never referenced — check if they can be removed
-```
 
 ---
 
@@ -800,80 +903,282 @@ When `agent_depth > 0` (default: 3), the model can call `spawn_agent` to delegat
 
 ---
 
-## Developer Journey — zap as your coding agent
+## Developer Journeys
 
-Here is how a typical day looks when you use zap as your primary coding agent.
+Real scenarios — what actually happens at each stage.
 
-**Morning — pick up where you left off**
+---
 
-```
-zap                                    # cold start in <1s
-```
+### Journey 1 — First time opening a project
 
-zap reads `.zap/context.md` (last session's goal, files touched, what's next) and `.zap/session_log.md` (history of past sessions). The LLM's first response already knows what you were working on.
+**Scenario:** You've just cloned a Java microservice you've never seen before. Twelve services, Spring Boot, Maven, no docs.
 
-**Starting a new task**
-
-Just describe what you want in plain English. The skill system silently injects the right context — you never write prompt boilerplate:
-
-```
-"refactor the UserStore to use an async trait"
-→ rust skill fires (async, trait keywords matched)
-→ code_map fetches UserStore struct automatically
-→ find_definition locates every impl block
-→ surgical edits — only the affected lines, nothing else
+```bash
+cd order-service
+zap
 ```
 
-**Understanding unfamiliar code**
+zap starts in under a second. But the agent has no knowledge of this project yet — it's a blank slate. The right move is `/init`.
 
 ```
-"explain what cmd_deploy does and how it streams output"
-→ find_definition jumps to cmd_deploy in commands.rs
-→ reads the function, not the whole file
-→ gives you a concise structural explanation
+/init
 ```
 
-**Debugging a failure**
+Here's what happens step by step:
 
 ```
-"cargo test is failing with 'thread panicked at src/code_index.rs:312'"
+◌ Detected project type: java
+Language(s) for this project: java        ← confirm or correct
+
+◌ Indexing lets zap find symbols instantly without reading every file.
+Index this project now? (recommended, ~10s)  Y
+
+  Indexing src/ ...
+  ✓ tree-sitter · java · 847 symbols across 63 files
+
+✓ .zap/project.json written.
+✓ Created ZAP.md for java project.
+⚡ Asking the agent to analyse the repo and fill in ZAP.md…
+```
+
+The agent now reads the source files and fills in `ZAP.md` — a persistent project knowledge file loaded into every future session:
+
+```markdown
+## Overview
+Order service — handles order lifecycle (create, fulfil, cancel).
+Publishes events to Kafka on state transitions.
+
+## Build & Test
+mvn clean install        # full build
+mvn test                 # unit tests only
+mvn spring-boot:run      # local dev server on :8080
+
+## Architecture
+- OrderController  → REST handlers (src/main/java/.../controller/)
+- OrderService     → business logic, calls OrderRepository
+- OrderRepository  → JPA, Postgres via spring-data
+- KafkaProducer    → publishes OrderCreated / OrderFulfilled events
+
+## Important Files
+- OrderService.java     — core domain logic, start here
+- application.yml       — all config including Kafka brokers
+- schema.sql            — DB schema
+
+## Do Not Touch
+- LegacyOrderMapper.java — deprecated, kept for backwards compat, do not edit
+```
+
+At the same time, it writes `.zap/understanding.md` — a deeper technical summary covering entry points, data flows, non-obvious patterns, and constraints. This file is loaded silently into every future session so the agent always starts with structural knowledge of the project.
+
+**Total time: ~30 seconds.** From zero to a fully context-aware agent.
+
+---
+
+### Journey 2 — Returning to a project
+
+**Scenario:** You worked on the order service last week. You open zap today to continue.
+
+```bash
+cd order-service
+zap
+```
+
+Cold start. But zap is not starting blind. Before your first message, it has already loaded:
+
+| File | What it contains |
+|---|---|
+| `ZAP.md` | Project overview, build commands, architecture, do-not-touch list |
+| `.zap/understanding.md` | Module map, data flows, patterns, constraints |
+| `.zap/context.md` | Last session: goal, files touched, what's next |
+| `.zap/session_log.md` | History of all previous sessions |
+
+The agent's first response reflects all of this — it already knows what you were working on, which files changed, and what was left unfinished. You don't re-explain the project. You just continue:
+
+```
+you:  "what were we working on last time?"
+
+zap:  Last session you were adding pagination to GET /orders.
+      You updated OrderController.java and OrderService.java.
+      The service method was done but the controller test was still failing
+      — that was left as the next step.
+```
+
+No re-reading files. No re-explaining the stack. The session handoff is automatic.
+
+---
+
+### Journey 3 — Understanding unfamiliar code
+
+**Scenario:** A colleague wrote the `FulfilmentService` six months ago. You need to understand it before touching it.
+
+```
+"explain how FulfilmentService works — what it does, what it calls, what could go wrong"
+```
+
+```
+→ java skill fires (class keyword matched)
+→ find_definition looks up FulfilmentService in the index — found at
+  src/main/java/.../service/FulfilmentService.java:34
+→ code_map outlines all methods: fulfil(), rollback(), notifyWarehouse()
+→ reads only the relevant sections, not the whole file
+→ traces the call chain: fulfil() → OrderRepository.save() → KafkaProducer.publish()
+→ flags: rollback() has no test coverage, notifyWarehouse() blocks on HTTP with no timeout
+```
+
+You get a structural explanation in seconds — including the non-obvious risks — without reading 400 lines of Java yourself.
+
+**Drill deeper:**
+
+```
+"show me every place FulfilmentService.fulfil() is called"
+→ find_references scans the index
+→ 3 call sites: OrderController.java:88, OrderSaga.java:142, FulfilmentTest.java:67
+```
+
+```
+"what does the data flow look like from the REST call to Kafka publish?"
+→ traces: POST /fulfil → FulfilmentController → FulfilmentService.fulfil()
+         → OrderRepository.save() (Postgres) → KafkaProducer.publish() (Kafka)
+→ notes: the Kafka publish happens inside the DB transaction — risky if Kafka is down
+```
+
+---
+
+### Journey 4 — Adding a feature to an existing codebase
+
+**Scenario:** You need to add a `GET /orders/{id}/history` endpoint to the existing order service.
+
+Without zap (what most agents do): the agent creates `src/main/java/.../controller/HistoryController.java`, `src/main/java/.../service/HistoryService.java`, `src/main/java/.../repository/HistoryRepository.java` — duplicating the structure that already exists, ignoring the patterns already in use.
+
+With zap:
+
+```
+"add a GET /orders/{id}/history endpoint that returns the state change log"
+```
+
+```
+→ java skill fires
+→ index query: WHERE name LIKE '%Order%' AND kind = 'class'
+  finds: OrderController, OrderService, OrderRepository, OrderHistory (entity — already exists!)
+→ index query: WHERE name LIKE '%Repository%' AND kind = 'interface'
+  finds: OrderRepository extends JpaRepository<Order, Long> — this is the pattern to follow
+→ index query: WHERE path LIKE '%controller%' ORDER BY line
+  finds: all existing controllers — sees they all extend BaseController, use @RestController
+
+zap:  OrderHistory entity already exists at OrderHistory.java:12.
+      I'll add a findByOrderId() method to OrderRepository, a getHistory() method
+      to OrderService, and a new endpoint to OrderController — no new files needed.
+      Shall I proceed?
+```
+
+One file touched in `OrderController`, one method added to `OrderRepository`, one to `OrderService`. No duplicate classes. Follows the existing `JpaRepository` pattern. Uses `BaseController` like every other controller.
+
+**This is the core difference.** The agent knew what existed before it decided what to create.
+
+---
+
+### Journey 5 — Fixing a bug
+
+**Scenario:** Orders are occasionally being marked as fulfilled even when the warehouse notification fails.
+
+```
+"orders are being fulfilled even when notifyWarehouse() throws — trace why"
+```
+
+```
 → debugging skill fires
-→ zap reads the failing line, checks callers, traces the data flow
-→ proposes a minimal fix
+→ find_definition locates fulfil() at FulfilmentService.java:67
+→ reads the method — sees notifyWarehouse() is called AFTER OrderRepository.save()
+→ the save() commits to DB before the warehouse call — if warehouse throws, order
+  is already marked fulfilled in the DB with no rollback
+→ finds: @Transactional annotation is present but notifyWarehouse() is an HTTP call
+  outside the transaction boundary — @Transactional won't roll it back
+
+zap:  Root cause: the DB commit happens before the warehouse HTTP call.
+      @Transactional covers the DB write but not the external HTTP call.
+      Fix: move notifyWarehouse() before the save(), or wrap it in a try/catch
+      that explicitly rolls back via OrderRepository.updateStatus().
+      Which approach do you prefer?
 ```
 
-**Checking code health**
+You pick the approach, zap makes the surgical edit, shows you the diff, asks for approval before writing.
+
+---
+
+### Journey 6 — Checking and improving code quality
+
+**Scenario:** The team suspects the service is getting harder to change. You want data before the next sprint planning.
 
 ```
 /index quality
 ```
 
-Instantly see which files are becoming too large, which functions are referenced too many places to safely change, and which public functions have zero callers. Score trends downward — you know it's time to refactor before the code becomes painful.
+```
+◎ code quality — 63 files · 847 symbols                          score: 61/100
+────────────────────────────────────────────────────────────────────────────
 
-**Debugging why a skill didn't fire**
+⚠ god objects  (impl with >15 methods — split recommended)
+  OrderService          34 methods  ██████████████  src/.../service/OrderService.java
+  FulfilmentService     18 methods  ███████         src/.../service/FulfilmentService.java
+
+⚠ large files  (>50 symbols)
+    91 sym  ████████████████████  OrderService.java
+    67 sym  ██████████████        OrderController.java
+
+✦ high coupling  (referenced in many places — risky to change)
+  OrderService.fulfil()     29×   FulfilmentService.java:67
+  OrderRepository.save()    24×   (multiple callers)
+
+◌ dead code candidates  (public method, 0 external references)
+  LegacyOrderMapper.toDto()    LegacyOrderMapper.java:44
+  OrderUtils.formatId()        OrderUtils.java:18
+
+→ OrderService has 34 methods — consider splitting into OrderLifecycleService + OrderQueryService
+→ 2 public methods never referenced — confirm they can be removed
+```
+
+Now you have concrete data for the sprint discussion. `OrderService` is the riskiest file to change — 29 places call `fulfil()`. The two dead methods are candidates for deletion. Score is 61 — room to improve before it becomes painful.
 
 ```
-/skill log
+"which methods in OrderService are safe to extract to a new OrderQueryService?"
+→ queries index for all methods in OrderService with kind=method
+→ cross-references call sites — methods only called from read endpoints are safe to extract
+→ lists: findById(), findByStatus(), findByDateRange(), getOrderSummary() — all query-only, no writes
 ```
 
-Review every turn: which skills fired, which didn't, and why. If a skill you wrote isn't triggering, the log pinpoints the turn and you can update the `trigger:` keywords in the markdown file.
+---
 
-**Building and deploying**
+### Journey 7 — Wrapping up and handing off
 
-```
-/deploy                                # live-streamed build, no timeout
-/deploy --check                        # just show installed versions
-```
-
-No hanging terminal. Build output streams line by line; exit code is reported when done.
-
-**Wrapping up**
+At the end of any session:
 
 ```
-"update .zap/context.md with what we did today and what's next"
+"we added pagination to GET /orders and fixed the fulfilment race condition —
+ update context.md with what we did and what's still left"
 ```
 
-zap writes a clean handoff file. Tomorrow's cold start is already primed.
+zap writes `.zap/context.md`:
+
+```markdown
+## Last updated
+2026-05-25 — Session #42
+
+## What was being worked on
+Added cursor-based pagination to GET /orders endpoint.
+Fixed race condition in FulfilmentService where DB commit preceded warehouse HTTP call.
+
+## Files touched
+- OrderController.java
+- OrderService.java
+- FulfilmentService.java
+- OrderControllerTest.java
+
+## What's next
+- Pagination test for edge case: empty cursor on last page
+- Consider splitting OrderService (34 methods — see /index quality output)
+```
+
+Tomorrow's session picks this up automatically. No re-explaining. No lost context.
 
 ---
 

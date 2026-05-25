@@ -222,6 +222,8 @@ async fn search_with_rg_or_grep(
 async fn find_symbol_definition(symbol: &str, path: &str, lang_hint: &str) -> Result<String> {
     let index_hits = crate::code_index::global_find_definition(symbol);
     if !index_hits.is_empty() {
+        crate::log::write("INDEX", &format!("hit · find_definition · '{}' · {} result(s)", symbol, index_hits.len()));
+        let _ = crate::audit::record(&format!("index_hit op=find_definition symbol={} results={}", symbol, index_hits.len()));
         let mut lines = vec![format!("Definition(s) of '{}' [AST index]:", symbol)];
         for sym in &index_hits {
             let ctx = if sym.context.is_empty() { String::new() } else { format!(" [{}]", sym.context) };
@@ -232,6 +234,7 @@ async fn find_symbol_definition(symbol: &str, path: &str, lang_hint: &str) -> Re
         }
         return Ok(lines.join("\n"));
     }
+    crate::log::write("INDEX", &format!("miss · find_definition · '{}' · grep fallback", symbol));
 
     let patterns: Vec<(String, Option<&str>)> = match lang_hint {
         "rust" => vec![
@@ -291,6 +294,8 @@ async fn build_code_map(path: &str, max_depth: usize, file_type: Option<&str>) -
     let index_syms = crate::code_index::global_symbols_in_path(&canonical.to_string_lossy());
 
     if !index_syms.is_empty() {
+        crate::log::write("INDEX", &format!("hit · code_map · '{}' · {} symbol(s)", path, index_syms.len()));
+        let _ = crate::audit::record(&format!("index_hit op=code_map path={} symbols={}", path, index_syms.len()));
         let filtered: Vec<_> = index_syms.iter().filter(|s| {
             if let Some(ft) = file_type {
                 match ft {
