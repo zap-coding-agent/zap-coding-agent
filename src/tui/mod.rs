@@ -47,6 +47,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
     channel::set_tui_sender(tx.clone());
     channel::init_perm_channel();
+    channel::init_secret_channel();
 
     // 3. Switch to alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -333,7 +334,15 @@ async fn tui_loop(
                                     });
                                 }
 
-                                // Always draw — permission popup renders as a TUI overlay.
+                                // Pick up any incoming secret-scanner request.
+                                if let Some(req) = channel::take_secret_request() {
+                                    app.secret_popup = Some(app::SecretPopup {
+                                        hits: req.hits,
+                                        response_tx: Some(req.response_tx),
+                                    });
+                                }
+
+                                // Always draw — popups render as TUI overlays.
                                 terminal.draw(|frame| render::draw(frame, app))?;
 
                                 // Drain all pending key events per tick so we never miss
@@ -343,7 +352,28 @@ async fn tui_loop(
                                         use crossterm::event::KeyEventKind;
                                         if k.kind == KeyEventKind::Release { continue; }
 
-                                        if app.permission_popup.is_some() {
+                                        if app.secret_popup.is_some() {
+                                            // Route Y/N/Esc to the secret scanner popup.
+                                            match handle_key(app, k) {
+                                                InputAction::SecretAllow => {
+                                                    if let Some(ref mut popup) = app.secret_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(true);
+                                                        }
+                                                    }
+                                                    app.secret_popup = None;
+                                                }
+                                                InputAction::SecretDeny => {
+                                                    if let Some(ref mut popup) = app.secret_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(false);
+                                                        }
+                                                    }
+                                                    app.secret_popup = None;
+                                                }
+                                                _ => {}
+                                            }
+                                        } else if app.permission_popup.is_some() {
                                             // Route Y/N/A to the permission popup.
                                             match handle_key(app, k) {
                                                 InputAction::PermitAllow => {
@@ -689,6 +719,22 @@ async fn tui_loop(
                         }
                         InputAction::CloseCommandPopup => {
                             app.command_popup = None;
+                        }
+                        InputAction::SecretAllow => {
+                            if let Some(ref mut popup) = app.secret_popup {
+                                if let Some(tx) = popup.response_tx.take() {
+                                    let _ = tx.send(true);
+                                }
+                            }
+                            app.secret_popup = None;
+                        }
+                        InputAction::SecretDeny => {
+                            if let Some(ref mut popup) = app.secret_popup {
+                                if let Some(tx) = popup.response_tx.take() {
+                                    let _ = tx.send(false);
+                                }
+                            }
+                            app.secret_popup = None;
                         }
                         InputAction::PermitAllow => {
                             if let Some(ref mut popup) = app.permission_popup {

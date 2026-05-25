@@ -1169,16 +1169,40 @@ impl Session {
                     if let ContentBlock::ToolResult { content, .. } = result {
                         let hits = crate::secret_scanner::scan(content);
                         if !hits.is_empty() {
-                            crate::tui::channel::suspend_for_prompt();
-                            println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
-                            for h in &hits { println!("    {}", h.to_string().yellow()); }
-                            print!("  send anyway? [y/N] ");
-                            let _ = std::io::Write::flush(&mut std::io::stdout());
-                            let mut ans = String::new();
-                            std::io::stdin().read_line(&mut ans).ok();
-                            crate::tui::channel::resume_from_prompt();
-                            if !ans.trim().eq_ignore_ascii_case("y") {
-                                println!("  {} aborted by user — secrets not sent", "✗".red());
+                            let send_anyway = if crate::tui::channel::is_tui_mode() {
+                                // TUI-native path: post request, wait for response from popup.
+                                let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                                crate::tui::channel::set_secret_request(
+                                    crate::tui::channel::SecretScannerRequest {
+                                        hits: hits.iter().map(|h| h.to_string()).collect(),
+                                        response_tx: tx,
+                                    },
+                                );
+                                rx.recv().unwrap_or(false)
+                            } else {
+                                // CLI path: suspend terminal, prompt, resume.
+                                crate::tui::channel::suspend_for_prompt();
+                                println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
+                                for h in &hits { println!("    {}", h.to_string().yellow()); }
+                                print!("  send anyway? [y/N] ");
+                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                                let mut ans = String::new();
+                                std::io::stdin().read_line(&mut ans).ok();
+                                let send = ans.trim().eq_ignore_ascii_case("y");
+                                if !send {
+                                    println!("  {} aborted by user — secrets not sent", "✗".red());
+                                }
+                                crate::tui::channel::resume_from_prompt();
+                                send
+                            };
+                            if !send_anyway {
+                                if crate::tui::channel::is_tui_mode() {
+                                    crate::tui::channel::tui_send(
+                                        crate::tui::channel::TuiEvent::LlmChunk(
+                                            "\n⚠ Secrets detected in tool output — turn cancelled.".to_string(),
+                                        ),
+                                    );
+                                }
                                 return Ok(());
                             }
                         }

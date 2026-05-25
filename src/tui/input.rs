@@ -41,6 +41,9 @@ pub enum InputAction {
     PermitAllow,
     PermitDeny,
     PermitAlways,
+    /// Secret scanner popup responses.
+    SecretAllow,
+    SecretDeny,
     /// Diff viewer navigation.
     DiffNavUp,
     DiffNavDown,
@@ -78,6 +81,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Diff viewer takes priority when open.
     if app.diff_viewer.is_some() {
         return handle_diff_viewer_key(app, key);
+    }
+
+    // Secret scanner popup — Y/Enter to send anyway, everything else = deny.
+    if app.secret_popup.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return InputAction::SecretAllow,
+            _ => return InputAction::SecretDeny,
+        }
     }
 
     // Permission popup — Y/N/A/Esc to respond, everything else ignored.
