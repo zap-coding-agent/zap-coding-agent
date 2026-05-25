@@ -284,10 +284,18 @@ async fn tui_loop(
                     if !should_exit {
                         use std::io::Write;
                         println!();
-                        print!("  \x1b[2m── Press Enter to return to zap ──\x1b[0m ");
+                        print!("  \x1b[2m── Press any key to return to zap ──\x1b[0m ");
                         std::io::stdout().flush().ok();
-                        let mut buf = String::new();
-                        std::io::stdin().read_line(&mut buf).ok();
+                        // Raw mode so Ctrl+C arrives as a key event instead of SIGINT
+                        // (which tokio intercepts with SA_RESTART, making read_line hang forever).
+                        crossterm::terminal::enable_raw_mode().ok();
+                        loop {
+                            match crossterm::event::read() {
+                                Ok(crossterm::event::Event::Key(_)) => break,
+                                _ => continue,
+                            }
+                        }
+                        crossterm::terminal::disable_raw_mode().ok();
                     }
                     resume_tui(terminal)?;
                     // Sync model/branch in case /provider or /model changed them.
