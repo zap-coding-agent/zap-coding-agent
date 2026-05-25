@@ -230,24 +230,48 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     // understanding.md — always inlined (capped at 4 kchars ≈ 1k tokens).
     // Used as technical reference when writing code, reviewing architecture,
     // or navigating the codebase — not as a script to read out to the user.
-    if let Some(understanding) = crate::project::load_understanding(4000) {
-        let has_real_analysis = !understanding.contains("Run `/init`")
-            && (understanding.contains("## Analysis")
-                || understanding.contains("## Architecture")
-                || understanding.contains("## Overview"));
-        let overview_note = "**Use this as technical background when writing code or navigating \
+    let understanding = crate::project::load_understanding(4000);
+    let has_real_analysis = understanding.as_deref().map(|u| {
+        !u.contains("Run `/init`")
+            && (u.contains("## Analysis")
+                || u.contains("## Architecture")
+                || u.contains("## Overview"))
+    }).unwrap_or(false);
+
+    if has_real_analysis {
+        let note = "**Use this as technical background when writing code or navigating \
             the codebase. Do NOT recite it verbatim for user-facing questions — for general \
             queries (\"what is this?\", \"summarize\", \"overview\") answer in plain, \
             end-user-friendly language: what the product does and who it's for.**";
-        if has_real_analysis {
-            sections.push(format!("## Project Reference\n{}\n{}", understanding, overview_note));
-        } else {
-            sections.push(format!(
-                "## Project Reference\n{}\n{}\n\
-                 *For a deeper analysis run `/init`.*",
-                understanding, overview_note
-            ));
-        }
+        sections.push(format!("## Project Reference\n{}\n{}", understanding.unwrap(), note));
+    } else {
+        // No /init analysis yet — give the LLM an active self-orientation routine
+        // so it can produce high-quality answers through its own exploration.
+        let stats_note = understanding
+            .map(|u| format!("\n{}", u))
+            .unwrap_or_default();
+        sections.push(format!(
+            "## Project Orientation{stats_note}\n\
+             \n\
+             No pre-computed analysis exists for this project yet. \
+             **Before answering any question that requires project knowledge, \
+             orient yourself by exploring:**\n\
+             1. `list_directory` at the project root — see top-level structure\n\
+             2. `code_map` on key source directories and entry-point files \
+                (e.g. `src/`, `server/`, `lib/`, `app/`, `main.*`, `index.*`)\n\
+             3. Read manifest files (`Cargo.toml`, `package.json`, `go.mod`, \
+                `pyproject.toml`, etc.) for the tech stack and dependencies\n\
+             4. `code_map` or `read_file` on the main entry point to understand \
+                the top-level flow\n\
+             \n\
+             Answer from what you concretely discover — do not guess or fabricate \
+             project details. Distinguish clearly between what you read from source \
+             vs what you inferred from naming conventions.\n\
+             \n\
+             For general user queries (\"summarize\", \"what is this?\", \"overview\") \
+             give a plain end-user-friendly description of what the product does and \
+             who it's for — not a dump of internal implementation details."
+        ));
     }
     // On-demand knowledge files — context.md and session_log.md are session-
     // specific and change every turn, so keep them as lazy hints.
