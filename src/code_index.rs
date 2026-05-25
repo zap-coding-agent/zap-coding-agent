@@ -534,9 +534,13 @@ impl CodeIndex {
         })?.flatten().collect();
         drop(stmt);
 
+        // High coupling: unique functions only (COUNT=1 excludes trait methods that share
+        // a name across many impls), minimum name length 5 filters generic words like
+        // "name"/"path"/"id" whose word-frequency counts are meaningless.
         let mut stmt = self.conn.prepare(
-            "SELECT name, path, line, ref_count FROM symbols \
-             WHERE kind='fn' AND ref_count > 5 \
+            "SELECT name, MIN(path) as path, MIN(line) as line, ref_count \
+             FROM symbols WHERE kind='fn' AND ref_count > 5 AND LENGTH(name) >= 5 \
+             GROUP BY name HAVING COUNT(*) = 1 \
              ORDER BY ref_count DESC LIMIT 10"
         )?;
         let high_coupling: Vec<(String, String, usize, usize)> = stmt.query_map([], |r| {

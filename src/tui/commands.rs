@@ -24,7 +24,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/tasks",             "browse & execute task sessions"),
     ("/think",             "toggle extended thinking (on/off/N tokens)"),
     ("/goal",              "run autonomously until condition met"),
-    ("/index",             "reindex AST code symbols"),
+    ("/index [quality]",   "reindex AST symbols · /index quality = health report"),
     ("/undo",              "undo last file edit"),
     ("/init",              "set up project (ZAP.md, index, project.json)"),
     ("/run",               "run a workflow"),
