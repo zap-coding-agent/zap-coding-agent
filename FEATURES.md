@@ -274,8 +274,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | 29 patterns: API keys, VCS tokens, AWS, GCP, JWT, cert blocks, credential fields |
 | Path traversal guard | `src/tools/file.rs:guard_path` | normalizes `..`, blocks `~/.ssh`, `~/.aws`, `~/.kube`, certs, `/etc/shadow`, `~/.agent.toml` |
-| list_directory project boundary | `src/tools/shell.rs:list_directory_native` | `canonicalize()` + `starts_with(cwd)` — rejects any path outside the current project; prevents LLM from listing `/` or home dir |
+| list_directory project boundary | `src/tools/shell.rs:list_directory_native` | Both sides canonicalized before `starts_with` — fixes Windows `\\?\` long-path prefix mismatch that caused every call to fail with "outside project" |
 | glob_read symlink-safe walker | `src/tools/file.rs:glob_walk_safe` | Replaces `glob::glob()` (no cycle detection) with a custom walker that skips symlinks; prevents `.kiro/skills/.kiro/…` infinite loops while still walking real hidden dirs (`.kiro`, `.claude`) |
+| Recursive shell listing blocked | `src/tools/shell.rs:BLOCKED_PATTERNS` | `dir /s`, `ls -R`, `ls --recursive` added to blocked patterns — they hang forever on symlink cycles; model directed to use `list_directory`/`glob_read` instead |
+| Shell: no file listing rule | `src/context_manager.rs` | System prompt explicitly forbids using `shell` for directory listing/file discovery |
+| Project Overview answers summary in-place | `src/context_manager.rs` | `understanding.md` inlined section now instructs model to answer summary/overview/architecture questions directly from it without calling tools |
 | walk_dir_for_map symlink guard | `src/tools/search.rs:walk_dir_for_map` | `!path.is_symlink()` guard before `is_dir()` / `is_file()` — defense-in-depth against symlink cycles |
 | Orphaned tool_use repair | `src/session/mod.rs:handle_user_turn` | At start of every turn, inject synthetic `ToolResult` blocks for any orphaned `ToolUse` from an interrupted turn (Ctrl+C, secrets abort) — prevents HTTP 400 "tool_use ids without tool_result blocks" loop |
 | ~/.agent.toml permissions | `src/config.rs:Config::save` | chmod 0600 on save (Unix) |

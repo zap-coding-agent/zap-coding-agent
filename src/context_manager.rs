@@ -103,6 +103,9 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          Always include a `description` in the shell call so the user knows what runs.\n\
          \n\
          **Shell commands:**\n\
+         - **Never use `shell` for directory listing or file discovery.** \
+           Use `list_directory`, `glob_read`, or `code_map` instead — they are \
+           faster, safer, and cannot hang on symlink loops.\n\
          - Prefer targeted tools (`search_code`, `code_map`, `find_definition`) \
            over `shell` for code navigation.\n\
          - Always provide a `description` when calling `shell` so the user \
@@ -224,15 +227,17 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             && (understanding.contains("## Analysis")
                 || understanding.contains("## Architecture")
                 || understanding.contains("## Overview"));
+        let overview_note = "**For project summary, overview, or architecture questions: \
+            answer directly from this section — do not call tools to re-discover it.**";
         if has_real_analysis {
-            sections.push(format!("## Project Overview\n{}", understanding));
+            sections.push(format!("## Project Overview\n{}\n{}", understanding, overview_note));
         } else {
             // Stats only — no deep analysis yet. Still inline so the model
             // knows file/symbol counts, languages, and top-level modules.
             sections.push(format!(
-                "## Project Overview\n{}\n\
-                 *For a detailed technical analysis run `/init`.*",
-                understanding
+                "## Project Overview\n{}\n{}\n\
+                 *For a deeper analysis run `/init`.*",
+                understanding, overview_note
             ));
         }
     }

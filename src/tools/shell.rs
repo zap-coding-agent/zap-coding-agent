@@ -68,6 +68,14 @@ const BLOCKED_PATTERNS: &[&str] = &[
     "export histfile=/dev/null",
     "export histsize=0",
     "export histfilesize=0",
+
+    // Recursive directory listing — hangs forever on symlink cycles
+    // (.kiro/skills/.kiro/… etc.). Use list_directory or glob_read instead.
+    "dir /s",                  // Windows recursive dir
+    "ls -r ",  "ls -r\n",     // Unix recursive ls (short flag)
+    "ls -lr",  "ls -rl",      // recursive + long
+    "ls -ar",  "ls -ra",      // recursive + all
+    "ls --recursive",          // GNU long flag
 ];
 
 // ── Destructive patterns — require explicit confirmation even in auto mode ─────
@@ -211,11 +219,12 @@ fn list_directory_native(path: &str) -> Result<String> {
     }
 
     // Confine to cwd — reject any path that resolves outside the project root.
+    // Canonicalize BOTH sides so Windows \\?\ long-path prefixes match correctly.
     let cwd = std::env::current_dir()
         .map_err(|e| anyhow::anyhow!("list_directory: cannot determine cwd: {}", e))?;
-    let canonical = dir.canonicalize()
-        .unwrap_or_else(|_| dir.to_path_buf());
-    if !canonical.starts_with(&cwd) {
+    let cwd_canonical = cwd.canonicalize().unwrap_or(cwd.clone());
+    let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if !canonical.starts_with(&cwd_canonical) {
         anyhow::bail!(
             "list_directory: '{}' is outside the current project directory ('{}') — \
              only paths within the project are allowed.",
