@@ -1167,34 +1167,46 @@ impl Session {
         // ── Optional LLM prompt to fill ZAP.md ───────────────────────────────
         let llm_prompt = if do_understand {
             Some(
-                "I just initialized this project with /init. Analyse the codebase and \
-                 write two files. Complete the entire analysis in at most 12 tool calls.\n\
+                "I just ran /init on this project. Your job is to build a NAVIGATION MAP \
+                 so future turns can go straight to the right file — zero guesswork.\n\
                  \n\
-                 STRICT TOOL BUDGET — follow this order, no more:\n\
-                 1. `list_directory '.'` — one call, top-level structure only\n\
-                 2. `code_map` on 2-3 key source directories (e.g. src/, server/, lib/) — \
-                    skip test/, docs/, node_modules/, target/\n\
-                 3. Read manifest files (Cargo.toml / package.json / go.mod / etc.) — \
-                    1-2 read_file calls for tech stack and deps\n\
-                 4. `code_map` or `read_file` on the main entry point file — 1-2 calls\n\
-                 5. `search_code` for 1-2 key patterns if something is unclear\n\
-                 Then write both output files immediately.\n\
+                 GOAL: produce a lookup table, not a code review. The question to answer \
+                 is 'where do I go for X?' — not 'how does X work internally?'.\n\
                  \n\
-                 FORBIDDEN — these hang on large projects, never do them:\n\
-                 - Do NOT list every file or directory recursively\n\
-                 - Do NOT call list_directory more than 3 times total\n\
-                 - Do NOT use glob_read with broad patterns like '**/*'\n\
-                 - Do NOT read more than 8 files total\n\
-                 - Do NOT try to enumerate all files with their sizes\n\
+                 TOOLS TO USE (in order):\n\
+                 1. `list_directory '.'` — one call, see top-level layout\n\
+                 2. `code_map` on each key source directory (src/, server/, lib/, app/, etc.) \
+                    — this gives you all symbols with file paths and line numbers in one call. \
+                    This IS the map. Use it instead of reading files.\n\
+                 3. `read_file` on manifest only (Cargo.toml / package.json / go.mod) — \
+                    1 call, for tech stack and build commands\n\
+                 4. `read_file` on entry point only if code_map didn't make it clear — \
+                    1 call max\n\
+                 Then write both files. Do not read more files than this.\n\
                  \n\
-                 OUTPUT — write both with edit_file/write_file:\n\
-                 1. ZAP.md: fill Overview, Build & Test, Code Style, Architecture, \
-                    Important Files (top 5-8 only), Do Not Touch — facts only, no filler.\n\
-                 2. .zap/understanding.md: main modules, entry points, data flows, \
-                    key abstractions, non-obvious constraints. One line per top-level \
-                    file/directory max.\n\
+                 DO NOT:\n\
+                 - Read every file (that is code review, not navigation)\n\
+                 - Use glob_read **/* or list_directory recursively\n\
+                 - Enumerate files with sizes\n\
+                 - Write narrative descriptions of how things work internally\n\
                  \n\
-                 Start reply with one line: 'Analysed via: [tools used]'."
+                 OUTPUT 1 — .zap/understanding.md, structured as:\n\
+                 ## Entry Points\n\
+                 (where does the app start, where do HTTP requests arrive, CLI main, etc.)\n\
+                 ## Module Map\n\
+                 (table: Module | Directory | Owns — one row per top-level source dir)\n\
+                 ## Where To Find X\n\
+                 (lookup: 'adding a route → X', 'DB schema → Y', 'auth logic → Z', etc.)\n\
+                 ## Non-Obvious Constraints\n\
+                 (things that would surprise a new dev: naming conventions, banned patterns, \
+                 architectural rules not visible from file names)\n\
+                 \n\
+                 OUTPUT 2 — ZAP.md:\n\
+                 Fill Overview, Build & Test (exact commands), Code Style, Architecture \
+                 (reference the Module Map), Important Files (5-8 max with one-line reason \
+                 each), Do Not Touch. Facts only.\n\
+                 \n\
+                 Start reply: 'Analysed via: [tools used]'."
                 .to_string(),
             )
         } else {
