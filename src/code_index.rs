@@ -77,6 +77,10 @@ pub fn set_global(index: Arc<Mutex<CodeIndex>>) {
     let _ = GLOBAL_INDEX.set(index);
 }
 
+pub fn global_index() -> Option<Arc<Mutex<CodeIndex>>> {
+    GLOBAL_INDEX.get().cloned()
+}
+
 pub fn global_find_definition(name: &str) -> Vec<Symbol> {
     GLOBAL_INDEX
         .get()
@@ -592,6 +596,14 @@ impl CodeIndex {
     }
 
     /// Remove entries for files that no longer exist.
+    /// Wipe all indexed data so the next `/index` starts completely fresh.
+    /// Checkpoints the WAL first so no stale data lingers in the journal.
+    pub fn clear(&mut self) -> Result<()> {
+        self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.conn.execute_batch("DELETE FROM symbols; DELETE FROM indexed_files;")?;
+        Ok(())
+    }
+
     pub fn prune_deleted(&mut self) -> Result<usize> {
         let paths: Vec<String> = self.conn
             .prepare("SELECT path FROM indexed_files")?
@@ -688,7 +700,20 @@ fn walkdir_filtered(dir: &Path, exts: &[&str]) -> Vec<PathBuf> {
             if p.is_dir() {
                 // Skip hidden dirs and common non-code dirs.
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if name.starts_with('.') || matches!(name, "node_modules" | "target" | "vendor" | "__pycache__" | "dist" | "build") {
+                if name.starts_with('.') || matches!(name,
+                    // JS/TS ecosystems
+                    "node_modules" | "dist" | "build" | "coverage" | ".next" | ".nuxt" |
+                    // Rust
+                    "target" |
+                    // Python
+                    "vendor" | "__pycache__" | ".venv" | "venv" | "site-packages" |
+                    // .NET / C#
+                    "bin" | "obj" |
+                    // Java
+                    "out" | ".gradle" | ".mvn" |
+                    // General
+                    "tmp" | "temp" | "logs"
+                ) {
                     continue;
                 }
                 out.extend(walkdir_filtered(&p, exts));

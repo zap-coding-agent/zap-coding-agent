@@ -47,6 +47,7 @@ impl Session {
             ("code", &[
                 ("/tasks",                   "browse & execute task sessions (.zap/tasks/)"),
                 ("/index [path|stats]",      "reindex AST code symbols"),
+                ("/index clear",             "wipe index and rebuild from scratch"),
                 ("/index quality",           "code quality report: god objects, coupling, dead code"),
                 ("/undo [file]",             "undo last file edit"),
                 ("/init",                    "set up this project (ZAP.md, index, project.json)"),
@@ -294,6 +295,76 @@ impl Session {
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
+/// Truncate a string to at most `max` characters, adding "…" if shortened.
+/// Uses char-aware slicing to avoid panicking on multi-byte boundaries.
+fn truncate_preview(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
+fn print_conversation(messages: &[Message]) {
+    if messages.is_empty() { return; }
+    println!();
+    println!("  {}", "── Conversation ──".bold());
+    for msg in messages {
+        let role_label = match msg.role.as_str() {
+            "user" => format!("  {} ", "[You]".green().bold()),
+            "assistant" => format!("  {} ", "[Zap]".cyan().bold()),
+            _ => format!("  {} ", format!("[{}]", msg.role).dimmed()),
+        };
+        let mut first = true;
+        for block in &msg.content {
+            match block {
+                ContentBlock::Text { text } => {
+                    let prefix = format!("  {} ", "│".dimmed());
+                    for line in text.lines() {
+                        if first {
+                            // First line gets the role label as prefix
+                            println!("{}{}", role_label, line.dimmed());
+                            first = false;
+                        } else if line.is_empty() {
+                            println!("{}", prefix);
+                        } else {
+                            println!("{}{}", prefix, line.dimmed());
+                        }
+                    }
+                }
+                ContentBlock::ToolUse { name, input, .. } => {
+                    let input_str = serde_json::to_string(input)
+                        .unwrap_or_else(|_| "[serialization error]".to_string());
+                    let preview = truncate_preview(&input_str, 77);
+                    println!("  {} {} {}", "▸".yellow(), name.yellow(), preview.dimmed());
+                    first = false;
+                }
+                ContentBlock::ToolResult { content, .. } => {
+                    let preview = truncate_preview(content, 117);
+                    println!("  {} {}", "◂".blue(), preview.dimmed());
+                    first = false;
+                }
+                ContentBlock::Image { media_type, .. } => {
+                    println!("  {} [image: {}]", "🖼".dimmed(), media_type.dimmed());
+                    first = false;
+                }
+                ContentBlock::Thinking { thinking, .. } => {
+                    let preview = truncate_preview(thinking, 77);
+                    println!("  {} {}", "💭".dimmed(), preview.dimmed());
+                    first = false;
+                }
+                ContentBlock::Reasoning { content } => {
+                    let preview = truncate_preview(content, 77);
+                    println!("  {} {}", "🧠".dimmed(), preview.dimmed());
+                    first = false;
+                }
+            }
+        }
+    }
+    println!("  {}", "──────────────────".dimmed());
+    println!();
+}
+
 impl Session {
     pub fn cmd_sessions(&mut self, _arg: &str) {
         let rows = match self.store.recent_sessions(20) {
@@ -342,6 +413,7 @@ impl Session {
                         if !files_info.is_empty() {
                             println!("{}", files_info);
                         }
+                        print_conversation(&self.messages);
                     }
                     Err(e) => println!("  {} Could not parse messages: {}", "✗".red(), e),
                 },
@@ -1201,6 +1273,20 @@ impl Session {
     pub fn cmd_index(&mut self, arg: &str) {
         let cwd    = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let target = if arg.is_empty() { cwd.clone() } else { std::path::PathBuf::from(arg) };
+
+        if arg == "clear" || arg == "reset" {
+            match crate::code_index::global_index() {
+                None => println!("  {} index not initialised", "✗".red()),
+                Some(arc) => match arc.lock() {
+                    Ok(mut idx) => match idx.clear() {
+                        Ok(_) => println!("  {} Index cleared — run {} to rebuild.", "✓".green(), "/index".cyan()),
+                        Err(e) => println!("  {} clear failed: {}", "✗".red(), e),
+                    },
+                    Err(_) => println!("  {} index lock busy", "✗".red()),
+                },
+            }
+            return;
+        }
 
         if arg == "stats" || arg == "status" {
             let (files, syms) = crate::code_index::global_stats();
