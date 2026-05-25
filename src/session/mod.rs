@@ -693,6 +693,7 @@ impl Session {
 
             // Reactive overflow compaction: if the API rejects the request because the
             // prompt is too long, compact history and retry transparently.
+            // Also retry on SSE stream errors (connection dropped mid-stream by the server).
             let response = match result {
                 Ok(r) => r,
                 Err(e) => {
@@ -701,9 +702,25 @@ impl Session {
                         || msg.contains("context_length_exceeded")
                         || msg.contains("maximum context length")
                         || (msg.contains("prompt") && msg.contains("long"));
+                    let is_stream_drop = msg.contains("sse stream error")
+                        || msg.contains("connection reset")
+                        || msg.contains("connection closed")
+                        || msg.contains("broken pipe")
+                        || msg.contains("incomplete message");
                     if is_overflow && !disable_compact && self.compact_failures < 3 {
                         crate::zap_warn!("Prompt too long — compacting and retrying…");
                         if self.cmd_compact().await { continue; }
+                    } else if is_stream_drop {
+                        let notice = "⚠ Stream dropped by server — retrying in 3s…";
+                        if crate::tui::channel::is_tui_mode() {
+                            crate::tui::channel::tui_send(
+                                crate::tui::channel::TuiEvent::LlmChunk(format!("\n{notice}"))
+                            );
+                        } else {
+                            crate::zap_warn!("{}", notice);
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        continue;
                     }
                     return Err(e);
                 }
