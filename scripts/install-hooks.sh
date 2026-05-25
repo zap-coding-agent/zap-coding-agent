@@ -8,4 +8,4 @@ HOOKS_DIR="$REPO_ROOT/.git/hooks"
 cp "$REPO_ROOT/scripts/pre-commit" "$HOOKS_DIR/pre-commit"
 chmod +x "$HOOKS_DIR/pre-commit"
 
-echo "✓ pre-commit hook installed — FEATURES.md will be required on src/ changes"
+echo "✓ pre-commit hook installed — clippy, file-size, FEATURES.md, and version bump enforced on src/ changes"

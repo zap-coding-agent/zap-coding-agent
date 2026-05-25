@@ -1,7 +1,9 @@
 #!/bin/sh
 # Pre-commit checks:
 #   1. cargo clippy — no warnings allowed
-#   2. FEATURES.md must be staged whenever src/ files change
+#   2. File-size gate — no .rs file > 600 lines
+#   3. FEATURES.md must be staged whenever src/ files change
+#   4. Cargo.toml version must be bumped whenever src/ files change
 #
 # Install: scripts/install-hooks.sh
 
@@ -41,7 +43,7 @@ if [ -n "$oversized" ]; then
     exit 1
 fi
 
-# ── 3. FEATURES.md gate ───────────────────────────────────────────────────────
+# ── 3. FEATURES.md gate ──────────────────────────────────────────────────────
 features_staged=$(git diff --cached --name-only | grep '^FEATURES\.md$')
 
 if [ -n "$src_staged" ] && [ -z "$features_staged" ]; then
@@ -53,6 +55,22 @@ if [ -n "$src_staged" ] && [ -z "$features_staged" ]; then
     echo "    git add FEATURES.md"
     echo ""
     echo "  To skip this check: git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+# ── 4. Version bump gate ─────────────────────────────────────────────────────
+cargo_staged=$(git diff --cached --name-only | grep '^Cargo\.toml$')
+
+if [ -n "$src_staged" ] && [ -z "$cargo_staged" ]; then
+    current=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    echo ""
+    echo "  ✗ Cargo.toml not staged — bump the version when src/ changes."
+    echo "  Current: $current"
+    echo "  Edit Cargo.toml (patch for fixes, minor for new features), then:"
+    echo "    git add Cargo.toml"
+    echo ""
+    echo "  To skip: git commit --no-verify"
     echo ""
     exit 1
 fi

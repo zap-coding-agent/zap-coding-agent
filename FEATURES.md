@@ -274,6 +274,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `Tool::affected_path()` | `src/tools/mod.rs` | trait method — tools declare what file they write; drives reindex |
 | Secret scanner | `src/secret_scanner.rs` | 29 patterns: API keys, VCS tokens, AWS, GCP, JWT, cert blocks, credential fields |
 | Path traversal guard | `src/tools/file.rs:guard_path` | normalizes `..`, blocks `~/.ssh`, `~/.aws`, `~/.kube`, certs, `/etc/shadow`, `~/.agent.toml` |
+| list_directory project boundary | `src/tools/shell.rs:list_directory_native` | `canonicalize()` + `starts_with(cwd)` — rejects any path outside the current project; prevents LLM from listing `/` or home dir |
+| glob_read symlink-safe walker | `src/tools/file.rs:glob_walk_safe` | Replaces `glob::glob()` (no cycle detection) with a custom walker that skips symlinks; prevents `.kiro/skills/.kiro/…` infinite loops while still walking real hidden dirs (`.kiro`, `.claude`) |
+| walk_dir_for_map symlink guard | `src/tools/search.rs:walk_dir_for_map` | `!path.is_symlink()` guard before `is_dir()` / `is_file()` — defense-in-depth against symlink cycles |
+| Orphaned tool_use repair | `src/session/mod.rs:handle_user_turn` | At start of every turn, inject synthetic `ToolResult` blocks for any orphaned `ToolUse` from an interrupted turn (Ctrl+C, secrets abort) — prevents HTTP 400 "tool_use ids without tool_result blocks" loop |
 | ~/.agent.toml permissions | `src/config.rs:Config::save` | chmod 0600 on save (Unix) |
 | Mutex poison recovery | `src/snapshot.rs` | `unwrap_or_else(|e| e.into_inner())` — no panic on poisoned lock |
 | Pre-edit snapshots | `src/snapshot.rs` | `/undo <file>` or `undo_edit` tool |
@@ -303,7 +307,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Language-agnostic identity | `src/context_manager.rs` | reads language from `.zap/project.json`; identity line is e.g. "AI coding agent (rust)" or generic "AI coding agent" when unknown |
 | Casual system prompt | `src/context_manager.rs:build_casual_system_prompt` | ~50-token minimal prompt for greeting/casual turns; skips code-nav, tool-policy, security, CLAUDE.md, git status |
 | ZAP.md loading | `src/context_manager.rs:load_claude_md` | walks cwd → $HOME, global `~/.claude/CLAUDE.md` |
-| On-demand .zap knowledge hints | `src/context_manager.rs` | `understanding.md`, `context.md`, `session_log.md` listed as read-on-demand hints (not pre-loaded); model reads them via `read_file` only when the query warrants it — project summary, resume, history questions |
+| understanding.md inlined in system prompt | `src/context_manager.rs` | Always included (capped 4k chars): auto-stats block always present; full LLM Analysis section shown when `/init` has run. Previously a lazy hint the model routinely skipped — now the model always has real project data for summary questions. `context.md` and `session_log.md` remain lazy hints (session-specific, not always needed). |
 | understanding.md auto-refresh | `src/project.rs:refresh_understanding_md`, `src/session/mod.rs:Session::new` | At every session start, rewrites the `<!-- zap:auto-stats:begin/end -->` block with deterministic facts: version (Cargo.toml/package.json), file+symbol counts, language stats, source module list, built-in skill count. LLM-written `/init` content below the block is preserved. No LLM call — zero latency. |
 | Git status in prompt | `src/context_manager.rs:git_status_summary` | 2s timeout |
 | Agent memory in prompt | `src/context_manager.rs` | from SQLite store |
