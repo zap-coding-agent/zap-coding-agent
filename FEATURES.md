@@ -45,6 +45,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `files_changed` via trait | `src/agent_core.rs:run_subagent` | uses `Tool::affected_path()` instead of hardcoded tool name list |
 | Parallel tool execution | `src/session/mod.rs:handle_user_turn` | `join_all` after permission phase |
 | Ctrl+C cancellation | `src/session/mod.rs` | `tokio::select!` around turn loop |
+| Ctrl+C cancels through popups | `src/tui/mod.rs` | Ctrl+C now checked before popup routing — dismisses permission/secret popup (sends Deny/false) then cancels turn; previously fell through to `_ => {}` when any popup was active |
 | Turn counter + ctx% in prompt | `src/agent_core.rs` | `[N:branch\|42%] ❯`; % colour-coded at 70/85% |
 | Session branching | `src/session/commands.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |
 | Context bar in turn footer | `src/session/mod.rs:ctx_bar` | `[████████░░] 42%` after every LLM response |

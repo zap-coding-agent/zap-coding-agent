@@ -352,6 +352,29 @@ async fn tui_loop(
                                         use crossterm::event::KeyEventKind;
                                         if k.kind == KeyEventKind::Release { continue; }
 
+                                        // Ctrl+C always cancels — even when a popup is open.
+                                        if k.code == KeyCode::Char('c')
+                                            && k.modifiers.contains(KeyModifiers::CONTROL)
+                                        {
+                                            // Dismiss any blocking popup so its channel unblocks.
+                                            if let Some(ref mut popup) = app.secret_popup {
+                                                if let Some(tx) = popup.response_tx.take() {
+                                                    let _ = tx.send(false);
+                                                }
+                                            }
+                                            app.secret_popup = None;
+                                            if let Some(ref mut popup) = app.permission_popup {
+                                                if let Some(tx) = popup.response_tx.take() {
+                                                    let _ = tx.send(channel::PermissionDecision::Deny);
+                                                }
+                                            }
+                                            app.permission_popup = None;
+                                            done = true;
+                                            cancelled = true;
+                                            app.goal_state = None;
+                                            break; // stop draining — turn is cancelled
+                                        }
+
                                         if app.secret_popup.is_some() {
                                             // Route Y/N/Esc to the secret scanner popup.
                                             match handle_key(app, k) {
@@ -402,13 +425,6 @@ async fn tui_loop(
                                                 }
                                                 _ => {}
                                             }
-                                        } else if k.code == KeyCode::Char('c')
-                                            && k.modifiers.contains(KeyModifiers::CONTROL)
-                                        {
-                                            done = true;
-                                            cancelled = true;
-                                            app.goal_state = None;
-                                            break; // stop draining — turn is cancelled
                                         }
                                     }
                                 }
