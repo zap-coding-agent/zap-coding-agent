@@ -198,6 +198,7 @@ impl Tool for ListDirectoryTool {
 
 /// Cross-platform directory listing using std::fs — no `ls` subprocess needed.
 /// Produces output similar to `ls -la`: type, size, modified time, name.
+/// Always confined to the current working directory tree.
 fn list_directory_native(path: &str) -> Result<String> {
     use std::fmt::Write as _;
 
@@ -207,6 +208,19 @@ fn list_directory_native(path: &str) -> Result<String> {
     }
     if !dir.is_dir() {
         anyhow::bail!("list_directory: '{}' is not a directory", path);
+    }
+
+    // Confine to cwd — reject any path that resolves outside the project root.
+    let cwd = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("list_directory: cannot determine cwd: {}", e))?;
+    let canonical = dir.canonicalize()
+        .unwrap_or_else(|_| dir.to_path_buf());
+    if !canonical.starts_with(&cwd) {
+        anyhow::bail!(
+            "list_directory: '{}' is outside the current project directory ('{}') — \
+             only paths within the project are allowed.",
+            path, cwd.display()
+        );
     }
 
     // Directories that are never worth exploring: build output, vendor deps, etc.
@@ -382,8 +396,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_path_outside_cwd() {
+        let tmp = std::env::temp_dir().join("zap_test_outside");
+        let _ = std::fs::create_dir_all(&tmp);
+        let err = list_directory_native(tmp.to_str().unwrap());
+        assert!(err.is_err(), "path outside cwd should be rejected");
+        assert!(err.unwrap_err().to_string().contains("outside the current project"));
+        let _ = std::fs::remove_dir(&tmp);
+    }
+
+    #[test]
     fn empty_dir_returns_explicit_message() {
-        let tmp = std::env::temp_dir().join("zap_test_empty_dir");
+        // Use a subdirectory inside cwd so the boundary check passes.
+        let cwd = std::env::current_dir().unwrap();
+        let tmp = cwd.join("zap_test_empty_subdir");
         let _ = std::fs::create_dir_all(&tmp);
         // Remove any leftover files from a previous run
         for f in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
