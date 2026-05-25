@@ -215,13 +215,31 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     if let Some(zap_md) = load_zap_md() {
         sections.push(format!("## Project Context\n{}", zap_md));
     }
-    // Project knowledge files — read on demand via read_file, not pre-loaded.
-    // Tell the model they exist so it knows when to fetch them.
+    // understanding.md — always inlined (capped at 4 kchars ≈ 1k tokens).
+    // The auto-stats block is always useful context; the Analysis section is
+    // included when /init has run. Without inlining, the model answers summary
+    // questions from guesswork instead of real project data.
+    if let Some(understanding) = crate::project::load_understanding(4000) {
+        let has_real_analysis = !understanding.contains("Run `/init`")
+            && (understanding.contains("## Analysis")
+                || understanding.contains("## Architecture")
+                || understanding.contains("## Overview"));
+        if has_real_analysis {
+            sections.push(format!("## Project Overview\n{}", understanding));
+        } else {
+            // Stats only — no deep analysis yet. Still inline so the model
+            // knows file/symbol counts, languages, and top-level modules.
+            sections.push(format!(
+                "## Project Overview\n{}\n\
+                 *For a detailed technical analysis run `/init`.*",
+                understanding
+            ));
+        }
+    }
+    // On-demand knowledge files — context.md and session_log.md are session-
+    // specific and change every turn, so keep them as lazy hints.
     {
         let mut hints: Vec<&str> = Vec::new();
-        if std::path::Path::new(".zap/understanding.md").exists() {
-            hints.push("- `.zap/understanding.md` — project overview, architecture, modules (read for any project summary, overview, architecture, or \"what does this project do\" question)");
-        }
         if std::path::Path::new(".zap/context.md").exists() {
             hints.push("- `.zap/context.md` — last session: goal, files touched, what's next (read when asked to resume, \"where were we\", or what to work on next)");
         }
@@ -230,7 +248,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         }
         if !hints.is_empty() {
             sections.push(format!(
-                "## Project Knowledge Files\nRead these with `read_file` only when relevant — do not pre-load:\n{}",
+                "## Session History Files\nRead these with `read_file` only when relevant:\n{}",
                 hints.join("\n")
             ));
         }
