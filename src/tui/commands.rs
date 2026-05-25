@@ -398,11 +398,18 @@ fn help_text() -> String {
             ("/think [on|off|N]",         "extended thinking (Anthropic only)"),
         ]),
         ("code", &[
+            ("/goal <condition>",         "run autonomously until condition met (max 20 turns)"),
+            ("/goal stop",               "cancel an active goal"),
             ("/tasks",                    "browse & execute task sessions"),
             ("/index [path|stats]",       "reindex AST code symbols"),
+            ("/index quality",            "code quality: god objects, coupling, dead code, score"),
+            ("/deploy [--check]",         "build & install zap with live output, no timeout"),
             ("/undo [file]",              "undo last file edit"),
             ("/init",                     "set up project (ZAP.md, index, project.json)"),
             ("/run <workflow>",           "run a workflow"),
+            ("/diff",                     "show git diff in TUI viewer"),
+            ("/attach <path>",            "stage an image for the next message"),
+            ("/paste",                    "paste image from clipboard"),
         ]),
         ("memory & skills", &[
             ("/memory list",              "list memory entries"),
@@ -412,15 +419,20 @@ fn help_text() -> String {
             ("/skill use <name>",        "pin a skill — injected every turn"),
             ("/skill unuse <name>",      "unpin a skill"),
             ("/skill show <name>",       "preview a skill's content"),
+            ("/skill log",               "show which skills fired (or didn't) per turn"),
             ("/audit [N]",               "show last N audit log lines"),
             ("/hooks",                   "list configured hooks"),
             ("/mcp [list|edit|path]",    "view/edit MCP server configs"),
         ]),
-        ("git", &[
+        ("git & branches", &[
             ("/branch <name>",           "create a new branch"),
             ("/branches",                "list branches"),
             ("/switch <name>",           "switch branch"),
             ("/merge <name>",            "merge branch"),
+        ]),
+        ("remote", &[
+            ("/remote [port]",           "start remote control server + tunnel"),
+            ("/remote stop",             "stop remote control"),
         ]),
     ];
 

@@ -323,7 +323,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Slash command picker | `src/ui.rs:show_command_picker` | `/` on empty line opens inquire picker |
 | Image attach | `src/session.rs:cmd_attach` | staged until next message |
 | Clipboard paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
-| `/help` | `src/session.rs:cmd_help` | grouped command reference |
+| `/help` | `src/tui/commands.rs:help_text` | grouped command reference; includes goal, deploy, index quality, diff, attach, paste, skill log, remote |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
 | MCP (lazy-loaded) | `src/mcp.rs` + `src/tools/mod.rs` | stdio JSON-RPC 2.0; servers stay in `pending_mcp` at startup — zero process overhead; a synthetic `mcp_connect` tool is injected into every turn's tool list with per-server `description` + `toolsHint` lines so the LLM knows when to connect without paying for actual tool defs; on `mcp_connect(server)` call the process spawns, handshake runs, real tools are registered, and `tool_defs` is rebuilt for the next turn; servers from `~/.zap/mcp.json` (global) + `.mcp.json` (project); respects `disabled: true`; SSE/HTTP entries skipped with warning; `autoApprove`/`disabledTools`/`toolsHint` fields supported |
