@@ -46,6 +46,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Parallel tool execution | `src/session/mod.rs:handle_user_turn` | `join_all` after permission phase |
 | Ctrl+C cancellation | `src/session/mod.rs` | `tokio::select!` around turn loop |
 | Ctrl+C cancels through popups | `src/tui/mod.rs` | Ctrl+C now checked before popup routing — dismisses permission/secret popup (sends Deny/false) then cancels turn; previously fell through to `_ => {}` when any popup was active |
+| Non-blocking permission + secret prompts | `src/permission_manager.rs`, `src/session/mod.rs`, `src/tui/channel.rs`, `src/tui/app.rs` | Replaced `std::sync::mpsc::SyncSender` + blocking `rx.recv()` with `tokio::sync::oneshot` + async `.await` — TUI tick loop stays unblocked during permission/secret popups so Ctrl+C always works |
 | Mid-turn btw injection (Ctrl+B) | `src/tui/channel.rs`, `src/tui/app.rs`, `src/tui/input.rs`, `src/tui/mod.rs`, `src/tui/render.rs`, `src/session/mod.rs` | Ctrl+B during an active turn opens a blue input box; user types a note, Enter queues it via `BTW_QUEUE`; session drains the queue between tool-call rounds and appends as "↳ User note (added mid-turn): …" to the tool-results message so the model sees it next iteration; displayed in chat with `↳ btw:` prefix |
 | Turn counter + ctx% in prompt | `src/agent_core.rs` | `[N:branch\|42%] ❯`; % colour-coded at 70/85% |
 | Session branching | `src/session/commands.rs:cmd_branch/switch/merge` | SQLite-backed; `/branch`, `/switch`, `/merge` |

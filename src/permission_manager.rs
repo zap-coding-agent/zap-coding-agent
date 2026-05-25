@@ -57,7 +57,7 @@ impl PermissionManager {
     ///
     /// `pending` is a slice of `(id, tool_name, context_string)`.
     /// Returns a parallel `Vec<bool>` — `true` = approved, `false` = denied.
-    pub fn prompt_batch(
+    pub async fn prompt_batch(
         &mut self,
         pending: &[(String, String, String)],
     ) -> Result<Vec<bool>> {
@@ -65,7 +65,7 @@ impl PermissionManager {
 
         // In TUI mode, use a native TUI dialog instead of breaking out to CLI
         if crate::tui::channel::is_tui_mode() {
-            return self.prompt_batch_tui(pending);
+            return self.prompt_batch_tui(pending).await;
         }
 
         // CLI mode: use the existing prompt
@@ -125,15 +125,15 @@ impl PermissionManager {
         Ok(vec![allowed; pending.len()])
     }
 
-    /// TUI-native permission prompt — posts the prompt to the TUI loop and blocks
-    /// on a response channel instead of writing raw text to stdout.
-    fn prompt_batch_tui(
+    /// TUI-native permission prompt — posts the prompt to the TUI loop and async-awaits
+    /// the response so the tokio runtime stays unblocked (tick loop keeps firing).
+    async fn prompt_batch_tui(
         &mut self,
         pending: &[(String, String, String)],
     ) -> Result<Vec<bool>> {
         use crate::tui::channel::{self, PermissionDecision, PermissionPromptRequest};
 
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let req = PermissionPromptRequest {
             pending: pending.to_vec(),
             response_tx: tx,
@@ -144,8 +144,8 @@ impl PermissionManager {
             anyhow::bail!("permission prompt already pending");
         }
 
-        // Block until the TUI loop sends back a decision.
-        let decision = rx.recv().unwrap_or(PermissionDecision::Deny);
+        // Async-await the TUI response — tokio can schedule the tick while we wait.
+        let decision = rx.await.unwrap_or(PermissionDecision::Deny);
 
         let allowed = matches!(decision, PermissionDecision::Allow | PermissionDecision::Always);
 

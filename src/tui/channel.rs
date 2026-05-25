@@ -37,7 +37,7 @@ pub fn drain_btw() -> Vec<String> {
 /// Sent from `prompt_batch_tui` to the TUI loop; response comes via `response_tx`.
 pub struct PermissionPromptRequest {
     pub pending: Vec<(String, String, String)>,
-    pub response_tx: std::sync::mpsc::SyncSender<PermissionDecision>,
+    pub response_tx: tokio::sync::oneshot::Sender<PermissionDecision>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +59,7 @@ pub fn init_perm_channel() {
 /// Response channel carries `true` = send anyway, `false` = abort turn.
 pub struct SecretScannerRequest {
     pub hits: Vec<String>,
-    pub response_tx: std::sync::mpsc::SyncSender<bool>,
+    pub response_tx: tokio::sync::oneshot::Sender<bool>,
 }
 
 static SECRET_REQUEST: OnceLock<Mutex<Option<SecretScannerRequest>>> = OnceLock::new();

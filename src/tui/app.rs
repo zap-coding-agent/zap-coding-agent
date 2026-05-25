@@ -172,7 +172,7 @@ pub struct CommandPopup {
 /// Secret-scanner overlay — shown when secrets are detected in tool output before cloud send.
 pub struct SecretPopup {
     pub hits: Vec<String>,
-    pub response_tx: Option<std::sync::mpsc::SyncSender<bool>>,
+    pub response_tx: Option<tokio::sync::oneshot::Sender<bool>>,
 }
 
 /// Permission prompt overlay — rendered as a TUI-native popup at the bottom.
@@ -180,8 +180,7 @@ pub struct PermissionPopup {
     /// Tool entries to display: (id, name, context).
     pub pending: Vec<(String, String, String)>,
     /// Send the decision back through this channel.
-    #[allow(clippy::type_complexity)]
-    pub response_tx: Option<std::sync::mpsc::SyncSender<super::channel::PermissionDecision>>,
+    pub response_tx: Option<tokio::sync::oneshot::Sender<super::channel::PermissionDecision>>,
 }
 
 // ── App ────────────────────────────────────────────────────────────────────────

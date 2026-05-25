@@ -929,7 +929,7 @@ impl Session {
                 let batch: Vec<(String, String, String)> = needs_prompt.iter()
                     .map(|(id, name, ctx, _)| (id.clone(), name.clone(), ctx.clone()))
                     .collect();
-                let decisions = self.permissions.prompt_batch(&batch)?;
+                let decisions = self.permissions.prompt_batch(&batch).await?;
                 if !in_tui { crate::tui::channel::resume_from_prompt(); }
                 for (i, (id, name, ctx, input)) in needs_prompt.into_iter().enumerate() {
                     if decisions[i] {
@@ -1187,15 +1187,15 @@ impl Session {
                         let hits = crate::secret_scanner::scan(content);
                         if !hits.is_empty() {
                             let send_anyway = if crate::tui::channel::is_tui_mode() {
-                                // TUI-native path: post request, wait for response from popup.
-                                let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                                // TUI-native path: async-await so the tick loop stays alive.
+                                let (tx, rx) = tokio::sync::oneshot::channel();
                                 crate::tui::channel::set_secret_request(
                                     crate::tui::channel::SecretScannerRequest {
                                         hits: hits.iter().map(|h| h.to_string()).collect(),
                                         response_tx: tx,
                                     },
                                 );
-                                rx.recv().unwrap_or(false)
+                                rx.await.unwrap_or(false)
                             } else {
                                 // CLI path: suspend terminal, prompt, resume.
                                 crate::tui::channel::suspend_for_prompt();
