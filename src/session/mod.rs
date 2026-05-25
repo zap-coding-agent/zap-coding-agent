@@ -621,6 +621,29 @@ impl Session {
 
         let msg_tokens_estimate = input.len() / 4;
 
+        // Repair orphaned tool_use blocks from an interrupted previous turn.
+        // If the last message is an assistant message that still has ToolUse blocks,
+        // the corresponding tool_results were never sent (Ctrl+C, secrets abort, etc.).
+        // Add synthetic results so the API doesn't reject the next request with HTTP 400.
+        if let Some(last) = self.messages.last() {
+            if last.role == "assistant" {
+                let orphaned: Vec<String> = last.content.iter()
+                    .filter_map(|b| {
+                        if let ContentBlock::ToolUse { id, .. } = b { Some(id.clone()) } else { None }
+                    })
+                    .collect();
+                if !orphaned.is_empty() {
+                    let synthetic: Vec<ContentBlock> = orphaned.into_iter()
+                        .map(|id| ContentBlock::ToolResult {
+                            tool_use_id: id,
+                            content: "Turn cancelled — result unavailable.".to_string(),
+                        })
+                        .collect();
+                    self.messages.push(Message::tool_results(synthetic));
+                }
+            }
+        }
+
         let user_msg = if self.staged_images.is_empty() {
             Message::user_text(input)
         } else {

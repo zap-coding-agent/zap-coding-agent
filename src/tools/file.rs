@@ -406,6 +406,57 @@ impl Tool for UndoEditTool {
     }
 }
 
+// ── glob_walk_safe ─────────────────────────────────────────────────────────────
+
+/// Symlink-safe recursive directory walker for glob_read.
+///
+/// Unlike glob::glob(), this never follows symlinks, so directory cycles like
+/// `.kiro/skills/.kiro → .kiro` terminate cleanly. Real hidden directories
+/// (`.kiro`, `.claude`, etc.) are walked normally — only symlinks are skipped.
+fn glob_walk_safe(
+    dir:     &std::path::Path,
+    base:    &std::path::Path,
+    pattern: &glob::Pattern,
+    opts:    glob::MatchOptions,
+    results: &mut Vec<std::path::PathBuf>,
+    max:     usize,
+    depth:   usize,
+) {
+    const MAX_DEPTH: usize = 30;
+    if results.len() >= max || depth > MAX_DEPTH { return; }
+
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        if results.len() >= max { return; }
+        let path = entry.path();
+
+        // Skip all symlinks — they are the only source of directory cycles.
+        // A real .kiro/ or .claude/ directory is NOT a symlink and will be walked.
+        if path.is_symlink() { continue; }
+
+        if path.is_dir() {
+            // Skip build / vendor noise that is never useful to glob.
+            let name = entry.file_name();
+            let n = name.to_string_lossy();
+            if matches!(n.as_ref(),
+                "target" | "node_modules" | "vendor" | "dist" | "build"
+                | "bin" | "obj" | "out" | "__pycache__" | ".git" | ".svn" | ".hg"
+                | ".venv" | "venv" | "site-packages" | "coverage" | ".next" | ".nuxt"
+            ) { continue; }
+            glob_walk_safe(&path, base, pattern, opts, results, max, depth + 1);
+        } else if path.is_file() {
+            if let Ok(rel) = path.strip_prefix(base) {
+                if pattern.matches_path_with(rel, opts) {
+                    results.push(path);
+                }
+            }
+        }
+    }
+}
+
 // ── glob_read ─────────────────────────────────────────────────────────────────
 
 pub(super) struct GlobReadTool;
@@ -437,12 +488,17 @@ impl Tool for GlobReadTool {
         let preview   = input["preview_lines"].as_u64().unwrap_or(0) as usize;
         let max_files = input["max_files"].as_u64().unwrap_or(30) as usize;
 
-        let mut paths: Vec<std::path::PathBuf> = glob::glob(pattern)
-            .with_context(|| format!("glob_read: invalid pattern '{}'", pattern))?
-            .flatten()
-            .filter(|p| p.is_file())
-            .take(max_files)
-            .collect();
+        // Use a symlink-safe custom walker instead of glob::glob().
+        // glob::glob() has no cycle detection: if a symlink creates a loop
+        // (e.g. .kiro/skills/.kiro → .kiro) the iterator spins forever and
+        // take(max_files) never fires because results are never yielded.
+        // Real hidden directories (.kiro, .claude, etc.) are still walked normally.
+        let pat = glob::Pattern::new(pattern)
+            .with_context(|| format!("glob_read: invalid pattern '{}'", pattern))?;
+        let opts = glob::MatchOptions::new(); // default: dots matched, case-sensitive
+        let cwd = std::env::current_dir()?;
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        glob_walk_safe(&cwd, &cwd, &pat, opts, &mut paths, max_files, 0);
         paths.sort();
 
         if paths.is_empty() {

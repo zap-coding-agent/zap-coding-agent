@@ -369,9 +369,10 @@ fn walk_dir_for_map(
             continue;
         }
 
-        if path.is_dir() {
+        // Never follow symlinks — they can form cycles (e.g. .kiro/skills/.kiro/…).
+        if !path.is_symlink() && path.is_dir() {
             walk_dir_for_map(&path, depth + 1, max_depth, file_type, output)?;
-        } else if path.is_file() {
+        } else if !path.is_symlink() && path.is_file() {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if let Some(ft) = file_type {
                 let ext_matches = match ft {
