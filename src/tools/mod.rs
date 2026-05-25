@@ -46,6 +46,10 @@ pub struct ToolRegistry {
     mcp_tool_names: std::collections::HashSet<String>,
 }
 
+impl Default for ToolRegistry {
+    fn default() -> Self { Self::new() }
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, UndoEditTool, WriteFileTool};

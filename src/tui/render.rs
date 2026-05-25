@@ -4,7 +4,7 @@ use ratatui::{
     widgets::*,
 };
 
-use super::app::{App, AppState, CommandPopup, DiffFile, DiffPanel, DiffViewerState, InitWizardState, InitWizardStep, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
+use super::app::{App, AppState, DiffFile, DiffPanel, DiffViewerState, InitWizardStep, MsgRole, StreamingBlock, UiBlock, UiMessage, UiToolCall};
 use std::collections::HashSet;
 use ratatui::style::Modifier;
 use super::commands::filter_commands;
@@ -110,9 +110,9 @@ fn input_height(app: &App, available_width: u16) -> Constraint {
     let border_w = 2u16;  // left + right border
     let content_w = available_width.saturating_sub(prefix_len + border_w).max(1);
     let chars = app.input.chars().count().max(1) as u16;
-    let lines = (chars + content_w - 1) / content_w; // ceil division
-    let lines = lines.min(6).max(1);
-    Constraint::Length(lines as u16 + 2) // +2 for top/bottom border
+    let lines = chars.div_ceil(content_w);
+    let lines = lines.clamp(1, 6);
+    Constraint::Length(lines + 2) // +2 for top/bottom border
 }
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -436,7 +436,7 @@ fn draw_picker_overlay(frame: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(Color::Rgb(255, 200, 50)).bg(sel_bg).bold(),
                     ),
                     Span::styled(
-                        format!("{}", desc_s),
+                        desc_s,
                         Style::default().fg(Color::Rgb(170, 165, 195)).bg(sel_bg),
                     ),
                     Span::styled(" ".repeat(inner.width as usize), Style::default().bg(sel_bg)),
@@ -470,7 +470,7 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 
     let model_short: String = if app.model.chars().count() > 17 {
         let mut s: String = app.model.chars().take(14).collect();
-        s.push_str("…");
+        s.push('…');
         s
     } else {
         app.model.clone()
@@ -505,13 +505,14 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         ])
     };
 
-    let mut rows: Vec<Line<'static>> = Vec::new();
-    rows.push(Line::from(Span::styled(" session", Style::default().fg(head_c).bold())));
-    rows.push(Line::from(""));
-    rows.push(kv("model", model_short, value_c));
-    rows.push(kv("branch", app.branch.clone(), Color::Rgb(100, 200, 100)));
-    rows.push(kv("turn", app.turn.to_string(), value_c));
-    rows.push(kv("cost", cost_str, Color::Rgb(200, 180, 80)));
+    let mut rows: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(" session", Style::default().fg(head_c).bold())),
+        Line::from(""),
+        kv("model", model_short, value_c),
+        kv("branch", app.branch.clone(), Color::Rgb(100, 200, 100)),
+        kv("turn", app.turn.to_string(), value_c),
+        kv("cost", cost_str, Color::Rgb(200, 180, 80)),
+    ];
     // Token breakdown — only shown once we have real data
     if app.tokens_input > 0 || app.tokens_output > 0 {
         let fmt_k = |n: u32| -> String {
@@ -905,9 +906,8 @@ fn wrap_markdown_line(line: Line<'static>, max_w: usize, indent: &str) -> Vec<Li
         if current_len > 0 && current_len + sep + tok_len > available {
             // Flush current line and start a new one.
             let mut ls = vec![Span::raw(indent.to_string())];
-            ls.extend(current_spans.drain(..));
+            ls.append(&mut current_spans);
             result_lines.push(Line::from(ls));
-            current_len = 0;
             current_spans.push(Span::styled(text, style));
             current_len = tok_len;
         } else {
@@ -1038,9 +1038,8 @@ fn expand_tabs_and_truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
-// Helper: repeat a char N times as an iterator-like chain without external deps.
-fn itertools_like_repeat(c: char, n: usize) -> std::iter::Take<std::iter::Repeat<char>> {
-    std::iter::repeat(c).take(n)
+fn itertools_like_repeat(c: char, n: usize) -> impl Iterator<Item=char> {
+    std::iter::repeat_n(c, n)
 }
 
 pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<'static>> {

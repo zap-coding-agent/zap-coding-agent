@@ -7,8 +7,8 @@
 /// Three categories control when a skill is active:
 ///   - Core     — injected into every session's system prompt (no trigger needed)
 ///   - Practice — always a trigger candidate; useful across any stack (git, debugging…)
-///   - Domain   — session-scoped; only trigger-matchable after being activated at startup
-///               (auto-detected from manifests, or selected via the startup prompt)
+///   - Domain   — session-scoped; only trigger-matchable after startup.
+///     Auto-detected from manifests, or selected via the startup prompt.
 ///
 /// Frontmatter format:
 /// ```markdown
@@ -231,7 +231,7 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
         if let Some(end_idx) = content_after_fence.find("\n---") {
             let fm       = parse_frontmatter(&content_after_fence[..end_idx]);
             let body     = content_after_fence[end_idx + 4..].trim_start().to_string();
-            let category = fm.category.unwrap_or_else(|| {
+            let category = fm.category.unwrap_or({
                 // Backwards compat: no triggers → Core; triggers present → Practice
                 if fm.triggers.is_empty() { SkillCategory::Core } else { SkillCategory::Practice }
             });
@@ -349,9 +349,9 @@ fn bundled_skills() -> Vec<Skill> {
             if let Some(end_idx) = after_fence.find("\n---") {
                 let fm       = parse_frontmatter(&after_fence[..end_idx]);
                 let body     = after_fence[end_idx + 4..].trim_start().to_string();
-                let category = fm.category.unwrap_or_else(|| {
+                let category = fm.category.unwrap_or(
                     if fm.triggers.is_empty() { SkillCategory::Core } else { SkillCategory::Practice }
-                });
+                );
                 return Some(Skill {
                     name:           name.to_string(),
                     description:    fm.description,
@@ -406,8 +406,8 @@ pub fn detect_domain_scope(skills: &[Skill]) -> Vec<String> {
     }
 
     // C# — check for any .csproj file
-    if std::fs::read_dir(&cwd).map_or(false, |mut e| {
-        e.any(|en| en.map_or(false, |en| en.path().extension().is_some_and(|x| x == "csproj")))
+    if std::fs::read_dir(&cwd).is_ok_and(|mut e| {
+        e.any(|en| en.is_ok_and(|en| en.path().extension().is_some_and(|x| x == "csproj")))
     }) && skills.iter().any(|s| s.name == "csharp" && s.category == SkillCategory::Domain) {
         found.push("csharp".to_string());
     }
@@ -467,7 +467,7 @@ pub fn detect_from_extensions(skills: &[Skill]) -> Vec<String> {
 }
 
 /// Backwards-compatible: returns skill refs for the startup banner.
-pub fn detect_stack_skills<'a>(skills: &'a [Skill]) -> Vec<&'a Skill> {
+pub fn detect_stack_skills(skills: &[Skill]) -> Vec<&Skill> {
     let names = detect_domain_scope(skills);
     skills.iter().filter(|s| names.contains(&s.name)).collect()
 }

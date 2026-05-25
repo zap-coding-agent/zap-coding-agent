@@ -299,7 +299,7 @@ impl CodeIndex {
         let symbols = if lang.is_empty() {
             vec![]
         } else {
-            extract_symbols(&source, &lang, &path_str)
+            extract_symbols(&source, lang, &path_str)
         };
 
         // Delete old symbols and re-insert.

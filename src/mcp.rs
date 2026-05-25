@@ -50,9 +50,11 @@ struct RawServerEntry {
     pub disabled: bool,
     /// Claude Code / Roo Code — list of auto-approved tools (ignored by zap for now).
     #[serde(rename = "autoApprove", default)]
+    #[allow(dead_code)]
     pub auto_approve: Vec<String>,
     /// Figma MCP / others — list of disabled tools (ignored by zap for now).
     #[serde(rename = "disabledTools", default)]
+    #[allow(dead_code)]
     pub disabled_tools: Vec<String>,
 }
 

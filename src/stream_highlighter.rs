@@ -23,6 +23,10 @@ pub struct StreamHighlighter {
     pub suppress_print: bool,
 }
 
+impl Default for StreamHighlighter {
+    fn default() -> Self { Self::new() }
+}
+
 impl StreamHighlighter {
     pub fn new() -> Self {
         Self {

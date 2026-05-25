@@ -109,6 +109,10 @@ pub struct ThinkingSpinner {
     thread:  Option<std::thread::JoinHandle<()>>,
 }
 
+impl Default for ThinkingSpinner {
+    fn default() -> Self { Self::new() }
+}
+
 impl ThinkingSpinner {
     pub fn new() -> Self {
         let pb = ProgressBar::new_spinner();
@@ -144,7 +148,7 @@ impl ThinkingSpinner {
                 pb_clone.tick();
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 ticks += 1;
-                if ticks % 25 == 0 {
+                if ticks.is_multiple_of(25) {
                     i += 1;
                     if !stop_clone.load(Ordering::Acquire) {
                         pb_clone.set_message(THINKING_PHRASES[i % THINKING_PHRASES.len()]);

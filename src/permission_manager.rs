@@ -313,7 +313,7 @@ mod tests {
         // description is present. This \n would break the TUI dialog box if not
         // stripped before display. Verify the raw string has it so we don't
         // accidentally "fix" the source and forget to remove the sanitization.
-        let ctx = format!("install deps\n         $ npm install");
+        let ctx = "install deps\n         $ npm install";
         assert!(ctx.contains('\n'), "shell ctx with description must contain \\n");
         let flat = ctx.replace('\n', " ").replace('\r', "");
         assert!(!flat.contains('\n'));
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn destructive_ctx_contains_newline_that_must_be_stripped() {
         // destructive_ctx is always "[DESTRUCTIVE: {reason}]\n         {ctx}"
-        let ctx = format!("[DESTRUCTIVE: recursive forced deletion]\n         $ rm -rf build/");
+        let ctx = "[DESTRUCTIVE: recursive forced deletion]\n         $ rm -rf build/";
         assert!(ctx.contains('\n'));
         let flat = ctx.replace('\n', " ").replace('\r', "");
         assert!(!flat.contains('\n'));

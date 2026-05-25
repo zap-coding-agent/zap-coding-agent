@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use app::{App, AppState, GoalState, InitWizardState, InitWizardStep, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, UiBlock, UiMessage};
+use app::{App, AppState, GoalState, InitWizardState, InitWizardStep, ModePickerState, MsgRole, SessionEntry, SessionPickerState, StreamingBlock, ToolDone, UiBlock, UiMessage, UiToolCall};
 use channel::TuiEvent;
 use input::{handle_key, InputAction};
 
@@ -385,17 +385,14 @@ async fn tui_loop(
                                         }
 
                                         if app.btw_mode || (k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL)) {
-                                            match handle_key(app, k) {
-                                                InputAction::BtwSubmit(text) => {
-                                                    // Show in chat immediately with ↳ btw: prefix.
-                                                    app.messages.push(UiMessage {
-                                                        role: MsgRole::User,
-                                                        blocks: vec![UiBlock::Text(format!("↳ btw: {text}"))],
-                                                    });
-                                                    app.auto_scroll = true;
-                                                    channel::push_btw(text);
-                                                }
-                                                _ => {}
+                                            if let InputAction::BtwSubmit(text) = handle_key(app, k) {
+                                                // Show in chat immediately with ↳ btw: prefix.
+                                                app.messages.push(UiMessage {
+                                                    role: MsgRole::User,
+                                                    blocks: vec![UiBlock::Text(format!("↳ btw: {text}"))],
+                                                });
+                                                app.auto_scroll = true;
+                                                channel::push_btw(text);
                                             }
                                         } else if app.secret_popup.is_some() {
                                             // Route Y/N/Esc to the secret scanner popup.
@@ -495,6 +492,12 @@ async fn tui_loop(
                 // Update context % from session (safe now that turn_fut is dropped)
                 app.context_pct = session.context_fill_pct();
                 app.turn = session.turn_count;
+
+                // If this was the post-init codebase analysis turn, show mode picker now.
+                if app.show_mode_picker_after_init {
+                    app.show_mode_picker_after_init = false;
+                    app.mode_picker = Some(ModePickerState { cursor: 0 });
+                }
 
                 // Goal mode: check completion, auto-continue or declare done
                 if app.goal_state.is_some() {
@@ -642,6 +645,64 @@ async fn tui_loop(
                                         Ok(msgs) => {
                                             let count = msgs.len();
                                             let turns = msgs.iter().filter(|m| m.role == "user").count();
+                                            // Build tool-result lookup: tool_use_id → content
+                                            use std::collections::HashMap;
+                                            let tool_results: HashMap<&str, &str> = msgs.iter()
+                                                .flat_map(|m| m.content.iter())
+                                                .filter_map(|b| match b {
+                                                    crate::llm_client::ContentBlock::ToolResult { tool_use_id, content } =>
+                                                        Some((tool_use_id.as_str(), content.as_str())),
+                                                    _ => None,
+                                                })
+                                                .collect();
+                                            // Push conversation into TUI view
+                                            for msg in &msgs {
+                                                // Skip tool-result messages — results are shown inline on the tool call
+                                                if msg.content.iter().any(|b| matches!(b, crate::llm_client::ContentBlock::ToolResult { .. })) {
+                                                    continue;
+                                                }
+                                                let role = match msg.role.as_str() {
+                                                    "user" => MsgRole::User,
+                                                    _ => MsgRole::Assistant,
+                                                };
+                                                let blocks: Vec<UiBlock> = msg.content.iter().filter_map(|b| match b {
+                                                    crate::llm_client::ContentBlock::Text { text } => {
+                                                        Some(UiBlock::Text(text.clone()))
+                                                    }
+                                                    crate::llm_client::ContentBlock::ToolUse { id, name, input } => {
+                                                        let input_str = serde_json::to_string(input).unwrap_or_default();
+                                                        let label = if input_str.chars().count() > 100 {
+                                                            format!("{}…", input_str.chars().take(97).collect::<String>())
+                                                        } else {
+                                                            input_str
+                                                        };
+                                                        let result = tool_results.get(id.as_str()).map(|content| {
+                                                            let preview = if content.chars().count() > 200 {
+                                                                format!("{}…", content.chars().take(197).collect::<String>())
+                                                            } else {
+                                                                (*content).to_string()
+                                                            };
+                                                            ToolDone { elapsed_ms: 0, success: true, preview }
+                                                        });
+                                                        Some(UiBlock::Tool(UiToolCall {
+                                                            id: id.clone(),
+                                                            name: name.clone(),
+                                                            label,
+                                                            result,
+                                                        }))
+                                                    }
+                                                    crate::llm_client::ContentBlock::Thinking { thinking, .. } => {
+                                                        Some(UiBlock::Thinking { char_count: thinking.chars().count() })
+                                                    }
+                                                    crate::llm_client::ContentBlock::Reasoning { content } => {
+                                                        Some(UiBlock::Text(format!("[Reasoning]\n{}", content)))
+                                                    }
+                                                    _ => None,
+                                                }).collect();
+                                                if !blocks.is_empty() {
+                                                    app.messages.push(UiMessage { role, blocks });
+                                                }
+                                            }
                                             session.messages   = msgs;
                                             session.turn_count = turns;
                                             session.session_id = sid;
@@ -705,10 +766,31 @@ async fn tui_loop(
                             });
                             app.auto_scroll = true;
                             if let Some(prompt) = llm_prompt {
+                                // Codebase analysis will run — mode picker deferred until it completes.
+                                app.messages.push(UiMessage {
+                                    role: MsgRole::Assistant,
+                                    blocks: vec![UiBlock::Text(
+                                        "Analysing codebase to fill ZAP.md — this may take a minute…".to_string()
+                                    )],
+                                });
                                 app.pending_input = Some(prompt);
+                                // show_mode_picker_after_init stays true; mode picker
+                                // will appear once the LLM turn finishes (see post-turn check below).
+                            } else {
+                                // No LLM turn — show mode picker now that init is fully done.
+                                if app.show_mode_picker_after_init {
+                                    app.show_mode_picker_after_init = false;
+                                    app.mode_picker = Some(ModePickerState { cursor: 0 });
+                                }
                             }
                         }
-                        InputAction::CancelInit => {}
+                        InputAction::CancelInit => {
+                            // Wizard was dismissed — show mode picker now if this was a new project.
+                            if app.show_mode_picker_after_init {
+                                app.show_mode_picker_after_init = false;
+                                app.mode_picker = Some(ModePickerState { cursor: 0 });
+                            }
+                        }
                         InputAction::PasteImage => {
                             let tmp = "/tmp/zap_clipboard_paste.png";
                             let ok = crate::session::commands::paste_clipboard_image(tmp);
@@ -892,7 +974,7 @@ fn git_status() -> (bool, usize, usize) {
         .and_then(|o| {
             if o.status.success() {
                 let output = String::from_utf8(o.stdout).ok()?;
-                let parts: Vec<&str> = output.trim().split_whitespace().collect();
+                let parts: Vec<&str> = output.split_whitespace().collect();
                 if parts.len() == 2 {
                     let ahead = parts[0].parse().ok()?;
                     let behind = parts[1].parse().ok()?;

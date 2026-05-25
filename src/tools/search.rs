@@ -384,10 +384,8 @@ fn walk_dir_for_map(
                     _ => ext == ft,
                 };
                 if !ext_matches { continue; }
-            } else {
-                if !matches!(ext, "rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h" | "rb" | "swift") {
-                    continue;
-                }
+            } else if !matches!(ext, "rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h" | "rb" | "swift") {
+                continue;
             }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
@@ -430,10 +428,10 @@ fn extract_rust_symbol(line: &str) -> Option<String> {
                     "pub trait ", "trait ", "pub type ", "type ",
                     "pub const ", "const ", "pub static ", "static ",
                     "impl "] {
-        if line.starts_with(prefix) {
-            let rest = line[prefix.len()..].split(|c: char| !c.is_alphanumeric() && c != '_').next()?;
+        if let Some(after) = line.strip_prefix(prefix) {
+            let rest = after.split(|c: char| !c.is_alphanumeric() && c != '_').next()?;
             if !rest.is_empty() {
-                return Some(format!("{}{}", prefix.trim(), if !rest.is_empty() { format!(" {}", rest) } else { String::new() }));
+                return Some(format!("{} {}", prefix.trim(), rest));
             }
         }
     }
@@ -441,13 +439,12 @@ fn extract_rust_symbol(line: &str) -> Option<String> {
 }
 
 fn extract_python_symbol(line: &str) -> Option<String> {
-    if line.starts_with("def ") || line.starts_with("async def ") {
-        let rest = if line.starts_with("async def ") { &line[10..] } else { &line[4..] };
+    if let Some(rest) = line.strip_prefix("async def ").or_else(|| line.strip_prefix("def ")) {
         let name = rest.split('(').next()?.trim();
         return Some(format!("def {}", name));
     }
-    if line.starts_with("class ") {
-        let name = line[6..].split(|c: char| c == '(' || c == ':').next()?.trim();
+    if let Some(after) = line.strip_prefix("class ") {
+        let name = after.split(['(', ':']).next()?.trim();
         return Some(format!("class {}", name));
     }
     None
@@ -457,8 +454,8 @@ fn extract_ts_symbol(line: &str) -> Option<String> {
     for prefix in &["export function ", "function ", "export class ", "class ",
                     "export interface ", "interface ", "export type ", "type ",
                     "export const ", "const ", "export let ", "let ", "export enum ", "enum "] {
-        if line.starts_with(prefix) {
-            let rest: &str = line[prefix.len()..].split(|c: char| c == '(' || c == '<' || c == ' ' || c == '=').next()?;
+        if let Some(after) = line.strip_prefix(prefix) {
+            let rest: &str = after.split(['(', '<', ' ', '=']).next()?;
             if !rest.is_empty() {
                 return Some(format!("{}{}", prefix.trim_start_matches("export "), rest));
             }
@@ -468,12 +465,12 @@ fn extract_ts_symbol(line: &str) -> Option<String> {
 }
 
 fn extract_go_symbol(line: &str) -> Option<String> {
-    if line.starts_with("func ") {
-        let rest: &str = line[5..].split(|c: char| c == '(' || c == ' ').next()?;
+    if let Some(after) = line.strip_prefix("func ") {
+        let rest: &str = after.split(['(', ' ']).next()?;
         return Some(format!("func {}", rest));
     }
-    if line.starts_with("type ") {
-        let name: &str = line[5..].split_whitespace().next()?;
+    if let Some(after) = line.strip_prefix("type ") {
+        let name: &str = after.split_whitespace().next()?;
         return Some(format!("type {}", name));
     }
     None
@@ -483,9 +480,9 @@ fn extract_java_symbol(line: &str) -> Option<String> {
     for kw in &["class ", "interface ", "enum ", "record "] {
         if line.contains(kw) {
             let after = line.split(kw).nth(1)?;
-            let name: &str = after.split(|c: char| c == ' ' || c == '{' || c == '(' || c == '<').next()?;
+            let name: &str = after.split([' ', '{', '(', '<']).next()?;
             if !name.is_empty() {
-                return Some(format!("{}{}", kw.trim(), " ".to_string() + name));
+                return Some(format!("{} {}", kw.trim(), name));
             }
         }
     }

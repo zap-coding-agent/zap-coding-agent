@@ -117,7 +117,7 @@ impl Tool for WebSearchTool {
 
         if let Some(arr) = json["RelatedTopics"].as_array() {
             for item in arr.iter() {
-                if results.len() >= max + 1 { break; }
+                if results.len() > max { break; }
                 if item["Topics"].is_array() { continue; }
                 let text = item["Text"].as_str().unwrap_or("?");
                 let url  = item["FirstURL"].as_str().unwrap_or("");

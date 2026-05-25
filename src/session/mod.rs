@@ -47,8 +47,8 @@ pub fn model_context_limit(model: &str) -> usize {
     let m = model.to_lowercase();
     if m.contains("claude")                                    { 200_000 }
     else if m.contains("gemini-1.5") || m.contains("gemini-2") { 1_000_000 }
-    else if m.contains("gemini")                               { 128_000 }
-    else if m.contains("gpt-4o") || m.contains("gpt-4-turbo")
+    else if m.contains("gemini")
+         || m.contains("gpt-4o") || m.contains("gpt-4-turbo")
          || m.contains("o3") || m.contains("o4")               { 128_000 }
     else if m.contains("gpt-3.5")                              { 16_385 }
     else if m.contains("deepseek")                             { 64_000 }
@@ -1247,12 +1247,8 @@ impl Session {
                     .join("\n");
                 // Append as a text block inside the user message so the model sees it
                 // in context without starting a new turn.
-                if let Some(block) = tool_msg.content.last_mut() {
-                    if let ContentBlock::Text { text } = block {
-                        text.push_str(&format!("\n\n{note}"));
-                    } else {
-                        tool_msg.content.push(ContentBlock::Text { text: note });
-                    }
+                if let Some(ContentBlock::Text { text }) = tool_msg.content.last_mut() {
+                    text.push_str(&format!("\n\n{note}"));
                 } else {
                     tool_msg.content.push(ContentBlock::Text { text: note });
                 }
@@ -1526,7 +1522,7 @@ fn windowed_history(messages: &[Message]) -> Vec<Message> {
             m.role == "user"
                 && m.content
                     .first()
-                    .map_or(false, |b| matches!(b, ContentBlock::Text { .. }))
+                    .is_some_and(|b| matches!(b, ContentBlock::Text { .. }))
         })
         .map(|(i, _)| i)
         .collect();

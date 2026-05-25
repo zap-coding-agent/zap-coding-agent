@@ -173,7 +173,7 @@ impl Session {
     }
 
     pub fn cmd_audit(&self, arg: &str) {
-        let n: usize = arg.trim().parse().unwrap_or(20).max(1).min(500);
+        let n: usize = arg.trim().parse().unwrap_or(20).clamp(1, 500);
         match std::fs::read_to_string(audit::audit_log_path()) {
             Ok(content) => {
                 let lines: Vec<&str> = content.lines().collect();
@@ -476,7 +476,7 @@ impl Session {
 
         let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
         let chosen = match Select::new("Switch provider:", label_refs)
-            .with_render_config(cfg.clone())
+            .with_render_config(cfg)
             .with_help_message("↑↓ navigate   Enter select   Esc cancel")
             .with_page_size(14)
             .prompt_skippable()
@@ -526,7 +526,7 @@ impl Session {
                 format!("API key (blank = keep existing {}…{}):", &existing_key[..4.min(existing_key.len())], &existing_key[existing_key.len().saturating_sub(4)..])
             };
             match Text::new(&prompt)
-                .with_render_config(cfg.clone())
+                .with_render_config(cfg)
                 .with_help_message("Saved to ~/.agent.toml")
                 .prompt_skippable()
             {
@@ -539,18 +539,21 @@ impl Session {
 
         let model_input = {
             match Select::new("Model:", def.models.to_vec())
-                .with_render_config(cfg.clone())
+                .with_render_config(cfg)
                 .with_help_message("↑↓ navigate   Enter select   Esc = keep current")
                 .with_page_size(10)
                 .prompt_skippable()
             {
-                Ok(Some(m)) if m == "Other…" => {
-                    match Text::new("Enter model name:").with_render_config(cfg).prompt_skippable() {
-                        Ok(Some(m)) if !m.trim().is_empty() => m.trim().to_string(),
-                        _ => def.models[0].to_string(),
+                Ok(Some(m)) => {
+                    if m == "Other…" {
+                        match Text::new("Enter model name:").with_render_config(cfg).prompt_skippable() {
+                            Ok(Some(n)) if !n.trim().is_empty() => n.trim().to_string(),
+                            _ => def.models[0].to_string(),
+                        }
+                    } else {
+                        m.to_string()
                     }
                 }
-                Ok(Some(m)) => m.to_string(),
                 _ => def.models[0].to_string(),
             }
         };
@@ -719,10 +722,10 @@ impl Session {
                         } else {
                             "connected".truecolor(100, 200, 100)
                         };
-                        println!("    {} {} {}  {}",
+                        println!("    {} {} [{}]  {}",
                             "◆".truecolor(255, 210, 50),
                             name.truecolor(100, 210, 255).bold(),
-                            format!("[{}]", status),
+                            status,
                             cfg.command.truecolor(100, 95, 130),
                         );
                         if let Some(ref desc) = cfg.description {
@@ -880,6 +883,7 @@ impl Session {
 
 /// Try every available method to write the clipboard image to `dest`.
 /// Returns true if the file was written successfully.
+#[allow(clippy::needless_return)]
 pub fn paste_clipboard_image(dest: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -1187,8 +1191,6 @@ impl Session {
                  read_file (8 files)')."
                 .to_string(),
             )
-        } else if created_zap_md {
-            None
         } else {
             None
         };
@@ -1601,7 +1603,7 @@ impl Session {
         }).collect();
 
         let chosen_folder = match Select::new("Task session:", folder_labels.iter().map(|s| s.as_str()).collect())
-            .with_render_config(cfg.clone())
+            .with_render_config(cfg)
             .with_help_message("↑↓ navigate   Enter select   Esc cancel")
             .with_page_size(10)
             .prompt_skippable()
@@ -1638,7 +1640,7 @@ impl Session {
                 icon,
                 t.number,
                 t.title,
-                skill.truecolor(100,95,130).to_string(),
+                skill.truecolor(100,95,130),
                 done_steps, total_steps,
             )
         }).collect();
@@ -1995,7 +1997,7 @@ impl Session {
                     self.skill_trace.len());
                 println!("  {}", "─".repeat(58).truecolor(60, 55, 80));
                 for (turn, preview, skills, reason) in &self.skill_trace {
-                    let turn_label = format!("#{:<3}", turn).truecolor(100, 95, 130 as u8);
+                    let turn_label = format!("#{:<3}", turn).truecolor(100, 95, 130);
                     let preview_str = if preview.chars().count() >= 60 {
                         format!("{}…", preview)
                     } else {
@@ -2172,30 +2174,27 @@ impl Session {
             println!("  {}", line);
         };
 
-        match (stdout, stderr) {
-            (Some(mut out), Some(mut err)) => {
-                let mut out_lines = out.lines();
-                let mut err_lines = err.lines();
-                loop {
-                    tokio::select! {
-                        line = out_lines.next_line() => match line {
-                            Ok(Some(l)) => print_line(&l),
-                            Ok(None) => break,
-                            Err(_) => break,
-                        },
-                        line = err_lines.next_line() => match line {
-                            Ok(Some(l)) => print_line(&l),
-                            Ok(None) => {},
-                            Err(_) => {},
-                        },
-                    }
-                }
-                // Drain remaining stderr
-                while let Ok(Some(l)) = err_lines.next_line().await {
-                    print_line(&l);
+        if let (Some(out), Some(err)) = (stdout, stderr) {
+            let mut out_lines = out.lines();
+            let mut err_lines = err.lines();
+            loop {
+                tokio::select! {
+                    line = out_lines.next_line() => match line {
+                        Ok(Some(l)) => print_line(&l),
+                        Ok(None) => break,
+                        Err(_) => break,
+                    },
+                    line = err_lines.next_line() => match line {
+                        Ok(Some(l)) => print_line(&l),
+                        Ok(None) => {},
+                        Err(_) => {},
+                    },
                 }
             }
-            _ => {}
+            // Drain remaining stderr
+            while let Ok(Some(l)) = err_lines.next_line().await {
+                print_line(&l);
+            }
         }
 
         match child.wait().await {

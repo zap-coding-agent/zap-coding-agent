@@ -34,7 +34,7 @@ pub fn init(config: &Config) {
 /// Return a reference to the global client.
 /// Falls back to a defaults-only client if `init` was never called (e.g. in tests).
 pub fn client() -> &'static reqwest::Client {
-    CLIENT.get_or_init(|| build_defaults())
+    CLIENT.get_or_init(build_defaults)
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────

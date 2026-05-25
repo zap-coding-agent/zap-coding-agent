@@ -1,7 +1,7 @@
 /// Keyboard input handling for the TUI.
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::{App, AppState, DiffPanel, InitWizardState, InitWizardStep, ModePickerState};
+use super::app::{App, AppState, DiffPanel, InitWizardStep};
 use super::commands::filter_commands;
 
 pub enum InputAction {
@@ -405,7 +405,6 @@ fn handle_init_wizard_key(app: &mut App, key: KeyEvent) -> InputAction {
         InitWizardStep::Language => match key.code {
             KeyCode::Esc => {
                 app.init_wizard = None;
-                maybe_show_mode_picker(app);
                 InputAction::CancelInit
             }
             KeyCode::Enter => {
@@ -470,25 +469,16 @@ fn handle_init_wizard_key(app: &mut App, key: KeyEvent) -> InputAction {
                 let lang    = app.init_wizard.as_ref().unwrap().language_input.clone();
                 let do_idx  = app.init_wizard.as_ref().unwrap().do_index;
                 app.init_wizard = None;
-                maybe_show_mode_picker(app);
                 InputAction::ConfirmInit { language: lang, do_index: do_idx, do_understand: true }
             }
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 let lang    = app.init_wizard.as_ref().unwrap().language_input.clone();
                 let do_idx  = app.init_wizard.as_ref().unwrap().do_index;
                 app.init_wizard = None;
-                maybe_show_mode_picker(app);
                 InputAction::ConfirmInit { language: lang, do_index: do_idx, do_understand: false }
             }
             _ => InputAction::None,
         },
-    }
-}
-
-fn maybe_show_mode_picker(app: &mut App) {
-    if app.show_mode_picker_after_init {
-        app.show_mode_picker_after_init = false;
-        app.mode_picker = Some(ModePickerState { cursor: 0 });
     }
 }
 

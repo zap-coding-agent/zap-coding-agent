@@ -323,15 +323,12 @@ async fn localhost_run_tunnel(port: u16) -> Result<String> {
     });
 
     while tokio::time::Instant::now() < deadline {
-        match tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
-            Ok(Some(line)) => {
-                // localhost.run prints something like:
-                //   tunneled with tls termination, https://abc123.lhr.life
-                if let Some(url) = extract_https_url(&line) {
-                    return Ok(url);
-                }
+        if let Ok(Some(line)) = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await {
+            // localhost.run prints something like:
+            //   tunneled with tls termination, https://abc123.lhr.life
+            if let Some(url) = extract_https_url(&line) {
+                return Ok(url);
             }
-            _ => {}
         }
     }
 

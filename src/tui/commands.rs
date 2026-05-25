@@ -52,8 +52,7 @@ pub fn filter_commands(input: &str, skill_names: &[String]) -> Vec<(String, Stri
 
     // /skill use|show|unuse <name> → dynamic skill-name completions
     for prefix in &["/skill use ", "/skill show ", "/skill unuse "] {
-        if lower.starts_with(prefix) {
-            let typed = &lower[prefix.len()..];
+        if let Some(typed) = lower.strip_prefix(prefix) {
             return skill_names
                 .iter()
                 .filter(|n| n.to_lowercase().starts_with(typed))
@@ -63,8 +62,7 @@ pub fn filter_commands(input: &str, skill_names: &[String]) -> Vec<(String, Stri
     }
 
     // /skill<space> → sub-command completions
-    if lower.starts_with("/skill ") {
-        let typed = &lower[7..]; // after "/skill "
+    if let Some(typed) = lower.strip_prefix("/skill ") {
         return [
             ("list",  "list all skills (built-in, global, project)"),
             ("use",   "pin skill — injected every turn"),
@@ -84,72 +82,6 @@ pub fn filter_commands(input: &str, skill_names: &[String]) -> Vec<(String, Stri
         .filter(|(cmd, _)| cmd.starts_with(lower.as_str()))
         .map(|(cmd, desc)| (cmd.to_string(), desc.to_string()))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn filter_top_level_commands_by_prefix() {
-        let cmds = filter_commands("/he", &[]);
-        assert!(cmds.iter().any(|(c, _)| c == "/help"));
-        assert!(cmds.iter().all(|(c, _)| c.starts_with("/he")));
-    }
-
-    #[test]
-    fn slash_alone_returns_all_commands() {
-        let cmds = filter_commands("/", &[]);
-        assert_eq!(cmds.len(), SLASH_COMMANDS.len());
-    }
-
-    #[test]
-    fn skill_space_shows_subcommands() {
-        let cmds = filter_commands("/skill ", &[]);
-        let names: Vec<&str> = cmds.iter().map(|(c, _)| c.as_str()).collect();
-        assert!(names.contains(&"/skill list"));
-        assert!(names.contains(&"/skill use"));
-        assert!(names.contains(&"/skill show"));
-        assert!(names.contains(&"/skill unuse"));
-        assert!(names.contains(&"/skill scope"));
-    }
-
-    #[test]
-    fn skill_use_space_shows_skill_names() {
-        let skills = vec!["rust-expert".to_string(), "python-helper".to_string()];
-        let cmds = filter_commands("/skill use ", &skills);
-        let names: Vec<&str> = cmds.iter().map(|(c, _)| c.as_str()).collect();
-        assert!(names.contains(&"/skill use rust-expert"));
-        assert!(names.contains(&"/skill use python-helper"));
-    }
-
-    #[test]
-    fn skill_use_filters_by_typed_prefix() {
-        let skills = vec!["rust-expert".to_string(), "python-helper".to_string()];
-        let cmds = filter_commands("/skill use ru", &skills);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].0, "/skill use rust-expert");
-    }
-
-    #[test]
-    fn skill_show_and_unuse_also_complete_names() {
-        let skills = vec!["myskill".to_string()];
-        assert_eq!(filter_commands("/skill show ", &skills)[0].0, "/skill show myskill");
-        assert_eq!(filter_commands("/skill unuse ", &skills)[0].0, "/skill unuse myskill");
-    }
-
-    #[test]
-    fn filter_commands_no_skill_names_empty_completions() {
-        let cmds = filter_commands("/skill use ", &[]);
-        assert!(cmds.is_empty());
-    }
-
-    #[test]
-    fn skill_subcommand_prefix_filtering() {
-        let cmds = filter_commands("/skill l", &[]);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0].0, "/skill list");
-    }
 }
 
 pub fn handle_inline(
@@ -583,4 +515,70 @@ fn cost_text(session: &Session) -> String {
     }
     s.push_str(&"─".repeat(44));
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_top_level_commands_by_prefix() {
+        let cmds = filter_commands("/he", &[]);
+        assert!(cmds.iter().any(|(c, _)| c == "/help"));
+        assert!(cmds.iter().all(|(c, _)| c.starts_with("/he")));
+    }
+
+    #[test]
+    fn slash_alone_returns_all_commands() {
+        let cmds = filter_commands("/", &[]);
+        assert_eq!(cmds.len(), SLASH_COMMANDS.len());
+    }
+
+    #[test]
+    fn skill_space_shows_subcommands() {
+        let cmds = filter_commands("/skill ", &[]);
+        let names: Vec<&str> = cmds.iter().map(|(c, _)| c.as_str()).collect();
+        assert!(names.contains(&"/skill list"));
+        assert!(names.contains(&"/skill use"));
+        assert!(names.contains(&"/skill show"));
+        assert!(names.contains(&"/skill unuse"));
+        assert!(names.contains(&"/skill scope"));
+    }
+
+    #[test]
+    fn skill_use_space_shows_skill_names() {
+        let skills = vec!["rust-expert".to_string(), "python-helper".to_string()];
+        let cmds = filter_commands("/skill use ", &skills);
+        let names: Vec<&str> = cmds.iter().map(|(c, _)| c.as_str()).collect();
+        assert!(names.contains(&"/skill use rust-expert"));
+        assert!(names.contains(&"/skill use python-helper"));
+    }
+
+    #[test]
+    fn skill_use_filters_by_typed_prefix() {
+        let skills = vec!["rust-expert".to_string(), "python-helper".to_string()];
+        let cmds = filter_commands("/skill use ru", &skills);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].0, "/skill use rust-expert");
+    }
+
+    #[test]
+    fn skill_show_and_unuse_also_complete_names() {
+        let skills = vec!["myskill".to_string()];
+        assert_eq!(filter_commands("/skill show ", &skills)[0].0, "/skill show myskill");
+        assert_eq!(filter_commands("/skill unuse ", &skills)[0].0, "/skill unuse myskill");
+    }
+
+    #[test]
+    fn filter_commands_no_skill_names_empty_completions() {
+        let cmds = filter_commands("/skill use ", &[]);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn skill_subcommand_prefix_filtering() {
+        let cmds = filter_commands("/skill l", &[]);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].0, "/skill list");
+    }
 }

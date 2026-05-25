@@ -229,7 +229,7 @@ fn list_directory_native(path: &str) -> Result<String> {
                 true
             })
             .collect();
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    entries.sort_by_key(|e| e.file_name());
 
     if entries.is_empty() {
         return Ok(format!("(directory '{}' is empty or contains only build/vendor dirs)", path));

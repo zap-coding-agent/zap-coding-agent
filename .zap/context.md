@@ -3,13 +3,14 @@
 <!-- auto-written by zap at session end — edit freely -->
 
 ## Last updated
-2026-05-24 12:44 — Session #117
+2026-05-25 12:24 — Session #128
 
 ## What was being worked on
-it shows lat session , but should show entire hisoty content as well with sessio
+pls check when I laod particular session , it only shows files changes and not r
 
 ## Files touched
-  (none)
+  - /Users/sanjeevgulati/personal-repos/ideas/src/session/commands.rs
+  - /Users/sanjeevgulati/personal-repos/ideas/src/tui/mod.rs
 
 ## What's next
 <!-- fill this in between sessions -->

@@ -151,7 +151,7 @@ impl FileBrowser {
         if is_expanded {
             // Collapse: remove all children
             self.entries[self.selected].is_expanded = false;
-            let mut i = self.selected + 1;
+            let i = self.selected + 1;
             while i < self.entries.len() && self.entries[i].depth > depth {
                 self.entries.remove(i);
             }

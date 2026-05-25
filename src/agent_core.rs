@@ -379,7 +379,7 @@ pub async fn run_subagent(goal: &str, config: &Config) -> Result<String> {
         if files_changed.is_empty() {
             String::new()
         } else {
-            format!("  changed: {}", files_changed.join(", ").truecolor(130, 125, 150).to_string())
+            format!("  changed: {}", files_changed.join(", ").truecolor(130, 125, 150))
         },
     );
     audit::record(&format!("subagent_end depth={} turns={} tools={}", depth_level, turns, total_tools))?;

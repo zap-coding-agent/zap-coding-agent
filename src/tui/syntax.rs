@@ -11,11 +11,11 @@ static SYNTAX_SET: std::sync::OnceLock<SyntaxSet> = std::sync::OnceLock::new();
 static THEME_SET: std::sync::OnceLock<ThemeSet> = std::sync::OnceLock::new();
 
 fn get_syntax_set() -> &'static SyntaxSet {
-    SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines())
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
 fn get_theme_set() -> &'static ThemeSet {
-    THEME_SET.get_or_init(|| ThemeSet::load_defaults())
+    THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
 /// Convert syntect color to ratatui color.
@@ -104,14 +104,13 @@ pub fn parse_markdown(text: &str) -> Vec<Line<'static>> {
                 let new_style = match &tag {
                     Tag::Heading(level, _, _) => {
                         use pulldown_cmark::HeadingLevel;
-                        let (c, sz) = match level {
-                            HeadingLevel::H1 => (Color::Rgb(255, 200, 50), true),
-                            HeadingLevel::H2 => (Color::Rgb(100, 210, 255), true),
-                            HeadingLevel::H3 => (Color::Rgb(100, 210, 120), false),
-                            _               => (Color::Rgb(175, 170, 200), false),
+                        let c = match level {
+                            HeadingLevel::H1 => Color::Rgb(255, 200, 50),
+                            HeadingLevel::H2 => Color::Rgb(100, 210, 255),
+                            HeadingLevel::H3 => Color::Rgb(100, 210, 120),
+                            _               => Color::Rgb(175, 170, 200),
                         };
-                        let s = Style::default().fg(c).add_modifier(Modifier::BOLD);
-                        if sz { s } else { s }
+                        Style::default().fg(c).add_modifier(Modifier::BOLD)
                     }
                     Tag::Strong    => strong,
                     Tag::Emphasis  => em,
