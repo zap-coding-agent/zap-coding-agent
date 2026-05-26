@@ -287,10 +287,23 @@ async fn find_symbol_definition(symbol: &str, path: &str, lang_hint: &str) -> Re
 
 // ── code_map builder ──────────────────────────────────────────────────────────
 
+/// Strip Windows extended-length UNC prefix (`\\?\`) from canonical paths.
+/// On Windows, `canonicalize()` always returns `\\?\C:\...` which breaks LIKE
+/// queries against stored paths (which have no such prefix).
+/// No-op on Unix.
+fn strip_unc_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        std::path::PathBuf::from(stripped.to_string())
+    } else {
+        p
+    }
+}
+
 async fn build_code_map(path: &str, max_depth: usize, file_type: Option<&str>) -> Result<String> {
     let p = std::path::Path::new(path);
 
-    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let canonical = strip_unc_prefix(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
     let index_syms = crate::code_index::global_symbols_in_path(&canonical.to_string_lossy());
 
     if !index_syms.is_empty() {
