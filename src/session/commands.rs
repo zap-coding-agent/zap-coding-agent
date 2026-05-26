@@ -1061,10 +1061,6 @@ impl Session {
         do_index: bool,
         do_understand: bool,
     ) -> (String, Option<String>) {
-        // User explicitly invoked /init — pre-grant file writes so the LLM analysis
-        // turn can write ZAP.md and understanding.md without per-file permission prompts.
-        self.permissions.grant_session(&["edit_file", "write_file", "batch_edit"]);
-
         let project_type = detect_project_type();
         let lang_label = if languages.is_empty() {
             project_type.to_string()
