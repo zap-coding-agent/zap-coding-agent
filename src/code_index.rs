@@ -272,6 +272,33 @@ impl CodeIndex {
         Ok(Self { conn, db_path })
     }
 
+    /// In-memory SQLite fallback — no persistence, but never fails.
+    /// Used when the project directory and system temp dir are both unwritable.
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory().context("open in-memory code index")?;
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS symbols (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                path      TEXT NOT NULL,
+                name      TEXT NOT NULL,
+                kind      TEXT NOT NULL,
+                line      INTEGER NOT NULL,
+                signature TEXT NOT NULL DEFAULT '',
+                language  TEXT NOT NULL DEFAULT '',
+                context   TEXT NOT NULL DEFAULT '',
+                ref_count INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_sym_path ON symbols(path);
+            CREATE TABLE IF NOT EXISTS indexed_files (
+                path          TEXT PRIMARY KEY,
+                mtime         INTEGER NOT NULL,
+                symbol_count  INTEGER NOT NULL DEFAULT 0
+            );
+        ")?;
+        Ok(Self { conn, db_path: std::path::PathBuf::from(":memory:") })
+    }
+
     pub fn db_path(&self) -> &Path { &self.db_path }
 
     /// True if the file has been modified since it was last indexed.

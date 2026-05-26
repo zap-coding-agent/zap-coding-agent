@@ -412,9 +412,16 @@ impl Session {
         // Open the index DB but do NOT scan on startup — scanning can be slow on
         // large directories. Use /index to trigger a manual scan.
         let code_index = {
+            // Fallback chain: cwd → system temp dir → in-memory.
+            // The /tmp fallback was wrong on Windows (path doesn't exist → panic).
             let idx = crate::code_index::CodeIndex::open(&cwd)
-                .unwrap_or_else(|_| {
-                    crate::code_index::CodeIndex::open(std::path::Path::new("/tmp")).unwrap()
+                .or_else(|_| crate::code_index::CodeIndex::open(&std::env::temp_dir()))
+                .or_else(|_| crate::code_index::CodeIndex::open_in_memory())
+                .unwrap_or_else(|e| {
+                    // This path should be unreachable but must not panic.
+                    crate::log::write("WARN ", &format!("code index unavailable: {e}"));
+                    // Create the most minimal valid CodeIndex we can.
+                    crate::code_index::CodeIndex::open_in_memory().expect("SQLite in-memory always works")
                 });
             let arc = Arc::new(Mutex::new(idx));
             crate::code_index::set_global(arc.clone());
