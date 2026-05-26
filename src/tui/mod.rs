@@ -107,6 +107,81 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     app.git_ahead = ahead;
     app.git_behind = behind;
 
+    // If there is a previous session (startup notices include "↩ Last:"), replay its
+    // conversation into app.messages so the user sees the history without /sessions.
+    let has_last_banner = session.startup_notices.iter().any(|n| n.starts_with("↩ Last:"));
+    if has_last_banner {
+        if let Ok(sessions) = session.store.recent_sessions(2) {
+            if let Some((prev_id, _goal, _model, _created)) = sessions.get(1) {
+                let prev_id = *prev_id;
+                if let Ok(Some(json)) = session.store.load_messages(prev_id) {
+                    if let Ok(msgs) = serde_json::from_str::<Vec<crate::llm_client::Message>>(&json) {
+                        use std::collections::HashMap;
+                        let tool_results: HashMap<&str, &str> = msgs.iter()
+                            .flat_map(|m| m.content.iter())
+                            .filter_map(|b| match b {
+                                crate::llm_client::ContentBlock::ToolResult { tool_use_id, content } =>
+                                    Some((tool_use_id.as_str(), content.as_str())),
+                                _ => None,
+                            })
+                            .collect();
+                        for msg in &msgs {
+                            if msg.content.iter().any(|b| matches!(b, crate::llm_client::ContentBlock::ToolResult { .. })) {
+                                continue;
+                            }
+                            let role = match msg.role.as_str() {
+                                "user" => MsgRole::User,
+                                _ => MsgRole::Assistant,
+                            };
+                            let blocks: Vec<UiBlock> = msg.content.iter().filter_map(|b| match b {
+                                crate::llm_client::ContentBlock::Text { text } => {
+                                    Some(UiBlock::Text(text.clone()))
+                                }
+                                crate::llm_client::ContentBlock::ToolUse { id, name, input } => {
+                                    let input_str = serde_json::to_string(input).unwrap_or_default();
+                                    let label = if input_str.chars().count() > 100 {
+                                        format!("{}…", input_str.chars().take(97).collect::<String>())
+                                    } else {
+                                        input_str
+                                    };
+                                    let result = tool_results.get(id.as_str()).map(|content| {
+                                        let preview = if content.chars().count() > 200 {
+                                            format!("{}…", content.chars().take(197).collect::<String>())
+                                        } else {
+                                            (*content).to_string()
+                                        };
+                                        ToolDone { elapsed_ms: 0, success: true, preview }
+                                    });
+                                    Some(UiBlock::Tool(UiToolCall {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        label,
+                                        result,
+                                    }))
+                                }
+                                crate::llm_client::ContentBlock::Thinking { thinking, .. } => {
+                                    Some(UiBlock::Thinking { char_count: thinking.chars().count() })
+                                }
+                                crate::llm_client::ContentBlock::Reasoning { content } => {
+                                    Some(UiBlock::Text(format!("[Reasoning]\n{}", content)))
+                                }
+                                _ => None,
+                            }).collect();
+                            if !blocks.is_empty() {
+                                app.messages.push(UiMessage { role, blocks });
+                            }
+                        }
+                        app.messages.push(UiMessage {
+                            role: MsgRole::Assistant,
+                            blocks: vec![UiBlock::Text(format!("─── end of session #{prev_id} ───"))],
+                        });
+                        app.auto_scroll = true;
+                    }
+                }
+            }
+        }
+    }
+
     // Build rich welcome line (replaces the startup println!s we suppressed).
     let skill_note = {
         let always_on_count = crate::skill_manager::always_on_skills(&session.skills).len();
