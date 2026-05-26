@@ -1,5 +1,42 @@
 use anyhow::{Context, Result};
 
+// ── tool discovery ─────────────────────────────────────────────────────────────
+
+/// Find a CLI tool by name. Checks the process PATH first, then probes
+/// common Git-for-Windows install locations (VS Code injects these into its
+/// own environment but plain PowerShell/CMD processes do not).
+async fn find_tool(name: &str) -> Option<String> {
+    // Fast PATH check: if the OS can find it, use the bare name.
+    if crate::shell_runner::run_args(name, &["--version"])
+        .await
+        .map(|o| o.exit_code == 0)
+        .unwrap_or(false)
+    {
+        return Some(name.to_string());
+    }
+
+    // On Windows, Git for Windows ships grep and sometimes rg under its usr/bin
+    // directory. IDEs (VS Code, JetBrains) add this to PATH automatically, but
+    // processes launched from PowerShell or CMD usually don't have it.
+    #[cfg(windows)]
+    {
+        let pf = std::env::var("PROGRAMFILES")
+            .unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let candidates = [
+            format!(r"{}\Git\usr\bin\{}.exe", pf, name),
+            format!(r"C:\Program Files\Git\usr\bin\{}.exe", name),
+            format!(r"C:\Program Files (x86)\Git\usr\bin\{}.exe", name),
+        ];
+        for path in &candidates {
+            if std::path::Path::new(path).exists() {
+                return Some(path.clone());
+            }
+        }
+    }
+
+    None
+}
+
 // ── ripgrep / grep / native search ────────────────────────────────────────────
 
 pub(super) async fn search_with_rg_or_grep(
@@ -11,12 +48,7 @@ pub(super) async fn search_with_rg_or_grep(
     context_lines: usize,
     max_results: u64,
 ) -> Result<String> {
-    let rg_available = crate::shell_runner::run_args("rg", &["--version"])
-        .await
-        .map(|o| o.exit_code == 0)
-        .unwrap_or(false);
-
-    if rg_available {
+    if let Some(rg) = find_tool("rg").await {
         let mut args: Vec<String> = vec![
             "--no-heading".into(),
             "--line-number".into(),
@@ -33,7 +65,7 @@ pub(super) async fn search_with_rg_or_grep(
         args.push(path.to_string());
 
         let str_args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let out = crate::shell_runner::run_args("rg", &str_args).await?;
+        let out = crate::shell_runner::run_args(&rg, &str_args).await?;
         return if out.stdout.is_empty() {
             Ok(format!("no matches for '{}' in '{}'", pattern, path))
         } else {
@@ -41,33 +73,32 @@ pub(super) async fn search_with_rg_or_grep(
         };
     }
 
-    let mut args: Vec<&str> = vec!["-rn", "--color=never"];
-    if case_insensitive { args.push("-i"); }
-    if fixed_string      { args.push("-F"); }
-    let max_str = max_results.to_string();
-    args.extend_from_slice(&["-m", max_str.as_str()]);
-    if let Some(ft) = file_type {
-        let glob = match ft {
-            "rust" => "*.rs",  "py" | "python" => "*.py",
-            "ts" | "typescript" => "*.ts",  "js" | "javascript" => "*.js",
-            "go" => "*.go",  "java" => "*.java",
-            "c" => "*.c",  "cpp" => "*.cpp",
-            other => other,
-        };
-        args.push("--include"); args.push(glob);
-    }
-    args.push(pattern);
-    args.push(path);
-
-    let grep_result = crate::shell_runner::run_args("grep", &args).await;
-    match grep_result {
-        Ok(out) if !out.stdout.is_empty() =>
-            return Ok(format!("## Search: '{}' (grep)\n\n{}", pattern, out.stdout)),
-        Ok(_) =>
-            return Ok(format!("no matches for '{}' in '{}'", pattern, path)),
-        Err(_) => {
-            // grep not available (Windows) — fall through to pure-Rust search
+    if let Some(grep) = find_tool("grep").await {
+        let mut args: Vec<String> = vec!["-rn".into(), "--color=never".into()];
+        if case_insensitive { args.push("-i".into()); }
+        if fixed_string      { args.push("-F".into()); }
+        args.push(format!("-m{}", max_results));
+        if let Some(ft) = file_type {
+            let glob = match ft {
+                "rust" => "*.rs",  "py" | "python" => "*.py",
+                "ts" | "typescript" => "*.ts",  "js" | "javascript" => "*.js",
+                "go" => "*.go",  "java" => "*.java",
+                "c" => "*.c",  "cpp" => "*.cpp",
+                other => other,
+            };
+            args.push("--include".into());
+            args.push(glob.into());
         }
+        args.push(pattern.into());
+        args.push(path.into());
+
+        let str_args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = crate::shell_runner::run_args(&grep, &str_args).await?;
+        return if out.stdout.is_empty() {
+            Ok(format!("no matches for '{}' in '{}'", pattern, path))
+        } else {
+            Ok(format!("## Search: '{}' (grep)\n\n{}", pattern, out.stdout))
+        };
     }
 
     // Pure-Rust fallback: no external tools needed. Works on all platforms.
