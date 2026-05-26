@@ -687,6 +687,19 @@ Use `/provider` inside zap to switch interactively — settings are saved automa
 provider        = "anthropic"   # active provider slug
 permission_mode = "ask"         # ask | auto | deny
 
+# Optional: import skills from other tools or shared libraries.
+# Loaded after ~/.zap/skills/ but before .zap/skills/ — higher entry wins on name collision.
+skill_paths = [
+    ".kiro/skills",       # Amazon Kiro skills
+    ".claude/skills",     # Claude Code skills
+]
+
+# Optional: always-on context from steering docs, project wikis, etc.
+# All .md files in these dirs are appended to the system prompt every turn.
+context_paths = [
+    ".kiro/steering",
+]
+
 [providers.anthropic]
 kind     = "anthropic"
 model    = "claude-sonnet-4-6"
@@ -974,7 +987,59 @@ If you delete a file or want to reset a skill to its default, re-export it:
   turn #6  "add an endpoint for POST /users"          → (no match)  ← missing api-conventions skill?
 ```
 
-Same-name skills override lower-priority ones: `.zap/skills/` > `~/.zap/skills/` > built-in.
+Same-name skills override lower-priority ones: `.zap/skills/` > external paths > `~/.zap/skills/` > built-in.
+
+### Multi-tool skill sources — Kiro, Claude Code, and custom dirs
+
+If your project already has skills written for Amazon Kiro (`.kiro/skills/`) or Claude Code (`.claude/skills/`), you can pull them into zap without copying files. Add `skill_paths` to `~/.agent.toml`:
+
+```toml
+# ~/.agent.toml
+skill_paths = [
+    ".kiro/skills",          # Amazon Kiro skills (per-project)
+    ".claude/skills",        # Claude Code skills (per-project)
+    "~/shared-skills",       # your own cross-project library
+]
+```
+
+zap loads every `.md` file it finds in those directories and merges them into the flat skill registry. Skills from `skill_paths` override global (`~/.zap/skills/`) but lose to project-local (`.zap/skills/`).
+
+**Full precedence** (lowest → highest, later wins on name collision):
+
+| Source | Location | Glyph in `/skill list` |
+|---|---|---|
+| Built-in | compiled into binary | `◆` |
+| Global | `~/.zap/skills/` | `●` |
+| External | `skill_paths` entries, left → right | `◉` |
+| Project | `.zap/skills/` | `▶` |
+
+`/skill list` shows the source tag next to every skill so you can see exactly where each one came from:
+
+```
+  ◆ rust             [built-in]   always-on
+  ● karpathy-guidelins [global]   always-on
+  ◉ api-design       [kiro/skills]  rest, endpoint, api
+  ◉ code-review      [claude/skills]  code review, pr review
+  ▶ team-principles  [project]    always-on
+```
+
+**Name collision across sources** — if Kiro and `.zap/skills/` both ship a `code-review` skill, the project-local one wins silently. There is currently no `kiro:code-review` prefix syntax to reference a specific source by name — all skills share a flat namespace. If two external sources define the same skill name, the rightmost `skill_paths` entry wins.
+
+### Always-on context from other tools — Kiro steering, Claude context
+
+Steering documents (`.kiro/steering/`) and Claude project context files aren't skills — they have no trigger and no frontmatter. Use `context_paths` to load them as always-on system context:
+
+```toml
+# ~/.agent.toml
+context_paths = [
+    ".kiro/steering",     # Kiro steering docs — loaded every session
+    ".claude/context",    # Claude context docs
+]
+```
+
+All `.md` files found in `context_paths` directories are appended to the system prompt every turn, after the main ZAP.md/CLAUDE.md. Frontmatter (`---` blocks) is stripped automatically. Files are sorted by filename within each directory, so `01-architecture.md` loads before `02-conventions.md`.
+
+> **Tip:** `skill_paths` and `context_paths` are complementary. Use `skill_paths` for keyword-triggered guidance and `context_paths` for always-on context that applies regardless of what you're asking.
 
 ---
 
