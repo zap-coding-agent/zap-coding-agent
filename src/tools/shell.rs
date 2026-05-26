@@ -328,6 +328,9 @@ fn list_directory_native(path: &str) -> Result<String> {
         writeln!(out, "{}  {:>10}  {}  {}", kind, size, modified, display).ok();
     }
 
+    // Remind the LLM not to chain more list_directory calls on subdirectories.
+    writeln!(out, "# (non-recursive — use code_map on subdirs for deeper exploration, not more list_directory calls)").ok();
+
     Ok(out)
 }
 

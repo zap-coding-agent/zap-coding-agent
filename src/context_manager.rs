@@ -65,9 +65,14 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             definition. Saves a `search_code` + `read_file` round-trip.\n\
          3. **`search_code`** — pattern/regex search (ripgrep). Use only when the \
             symbol name is unknown or you need non-definition matches.\n\
-         4. **`list_directory`** — understand project layout. Use before diving into files.\n\
-         5. **`read_file` with `offset`/`limit`** — last resort, targeted. After \
+         4. **`read_file` with `offset`/`limit`** — last resort, targeted. After \
             `code_map` tells you the line range, read only those lines.\n\
+         \n\
+         **`list_directory` — severely restricted:**\n\
+         - Call it AT MOST ONCE per turn, only on the project root `'.'`\n\
+         - It is non-recursive (one level only) — do NOT chain calls across subdirectories\n\
+         - Do NOT use it to enumerate files; use `code_map` on directories instead\n\
+         - Only use it when the project has no index and `code_map` returns nothing\n\
          \n\
          **The index is your primary tool.** `code_map` + `find_definition` cover \
          90% of navigation tasks. Reaching for `read_file` or `search_code` first \
@@ -75,7 +80,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          \n\
          **If `code_map` or `find_definition` return 0 results:**\n\
          - The project may not be indexed — do NOT conclude it is empty.\n\
-         - Fall back to `list_directory` → `search_code` → `read_file`.\n\
+         - Fall back to ONE `list_directory '.'` call only, then `search_code` → `read_file`.\n\
          - Tell the user they can run `/index` to enable fast symbol lookup.\n\
          \n\
          **Never explore these directories** — dependencies/build output only: \
@@ -255,14 +260,13 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
              \n\
              No pre-computed analysis exists for this project yet. \
              **Before answering any question that requires project knowledge, \
-             orient yourself by exploring:**\n\
-             1. `list_directory` at the project root — see top-level structure\n\
-             2. `code_map` on key source directories and entry-point files \
-                (e.g. `src/`, `server/`, `lib/`, `app/`, `main.*`, `index.*`)\n\
-             3. Read manifest files (`Cargo.toml`, `package.json`, `go.mod`, \
-                `pyproject.toml`, etc.) for the tech stack and dependencies\n\
-             4. `code_map` or `read_file` on the main entry point to understand \
-                the top-level flow\n\
+             orient yourself in at most 4 tool calls:**\n\
+             1. `code_map '.'` — one call gives the full project structure with symbols; \
+                do NOT use `list_directory` to enumerate files\n\
+             2. `read_file` on the manifest only (`Cargo.toml`, `package.json`, `go.mod`) \
+                — for tech stack and build commands\n\
+             3. `code_map` on 1-2 key source dirs if step 1 wasn't enough detail\n\
+             4. `read_file` on the entry point (targeted lines only) if still unclear\n\
              \n\
              Answer from what you concretely discover — do not guess or fabricate \
              project details. Distinguish clearly between what you read from source \
