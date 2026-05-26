@@ -544,28 +544,31 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(state_text, Style::default().fg(value_c)),
     ]));
 
-    // Skills section — active skill + recent history
+    // Skills log — active skill this turn + last 8 turns (with turn numbers)
     if app.active_skill.is_some() || !app.skill_history.is_empty() {
-        let skill_c = Color::Rgb(255, 200, 60);
-        let dim_c   = Color::Rgb(110, 105, 140);
+        let skill_c  = Color::Rgb(255, 200, 60);
+        let dim_c    = Color::Rgb(110, 105, 140);
+        let turn_c   = Color::Rgb(80, 75, 105);
         let trunc = |s: &str, n: usize| -> String {
             if s.chars().count() > n { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
             else { s.to_string() }
         };
         rows.push(Line::from(""));
         rows.push(Line::from(Span::styled(" skills", Style::default().fg(skill_c).bold())));
+        // Active turn — shown while the LLM is running
         if let Some(ref label) = app.active_skill {
+            let turn_no = app.turn + 1;
             rows.push(Line::from(vec![
-                Span::styled(" ▶ ", Style::default().fg(skill_c)),
-                Span::styled(trunc(label, 17), Style::default().fg(Color::Rgb(255, 230, 140)).bold()),
+                Span::styled(format!(" T{:<3}", turn_no), Style::default().fg(skill_c)),
+                Span::styled(trunc(label, 14), Style::default().fg(Color::Rgb(255, 230, 140)).bold()),
             ]));
         }
-        // Recent history — skip the currently-active one (already shown above)
+        // History log — skip first entry if it duplicates the active skill shown above
         let history_start = if app.active_skill.is_some() { 1 } else { 0 };
-        for past in app.skill_history.iter().skip(history_start).take(3) {
+        for (turn_no, label) in app.skill_history.iter().skip(history_start).take(8) {
             rows.push(Line::from(vec![
-                Span::styled("   ", Style::default()),
-                Span::styled(trunc(past, 17), Style::default().fg(dim_c)),
+                Span::styled(format!(" T{:<3}", turn_no), Style::default().fg(turn_c)),
+                Span::styled(trunc(label, 14), Style::default().fg(dim_c)),
             ]));
         }
     }

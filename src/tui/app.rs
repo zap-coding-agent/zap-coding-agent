@@ -287,8 +287,8 @@ pub struct App {
     pub files_changed_this_turn: usize,
     /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
     pub active_skill: Option<String>,
-    /// Ring of the last 3 skills used (newest first) — persists across turns.
-    pub skill_history: Vec<String>,
+    /// Log of the last 8 skills used — (turn_number, label), newest first.
+    pub skill_history: Vec<(usize, String)>,
 
     /// Mid-turn btw input — true while the Ctrl+B input box is open.
     pub btw_mode: bool,
@@ -420,10 +420,12 @@ impl App {
                 self.turn = turn;
             }
             TuiEvent::ActiveSkill(label) => {
-                // Push to history (deduplicate consecutive identical entries, cap at 3)
-                if self.skill_history.first().map(|s| s.as_str()) != Some(&label) {
-                    self.skill_history.insert(0, label.clone());
-                    self.skill_history.truncate(3);
+                // turn + 1 because self.turn counts *completed* turns; this fires at turn start
+                let turn_no = self.turn + 1;
+                // Deduplicate: skip if same label was used in the immediately prior turn
+                if self.skill_history.first().map(|e| e.1.as_str()) != Some(&label) {
+                    self.skill_history.insert(0, (turn_no, label.clone()));
+                    self.skill_history.truncate(8);
                 }
                 self.active_skill = Some(label);
             }
