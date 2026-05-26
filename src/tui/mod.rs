@@ -651,7 +651,7 @@ async fn tui_loop(
                                 }
                             }
                         }
-                        InputAction::LoadSession(sid) => {
+                        InputAction::LoadSession { id: sid, goal } => {
                             match session.store.load_messages(sid) {
                                 Ok(Some(json)) => {
                                     match serde_json::from_str::<Vec<crate::llm_client::Message>>(&json) {
@@ -668,7 +668,9 @@ async fn tui_loop(
                                                     _ => None,
                                                 })
                                                 .collect();
-                                            // Push conversation into TUI view
+                                            // Clear current view — startup notices / prior session must not bleed through
+                                            app.messages.clear();
+                                            // Replay conversation into TUI view
                                             for msg in &msgs {
                                                 // Skip tool-result messages — results are shown inline on the tool call
                                                 if msg.content.iter().any(|b| matches!(b, crate::llm_client::ContentBlock::ToolResult { .. })) {
@@ -719,10 +721,13 @@ async fn tui_loop(
                                             session.messages   = msgs;
                                             session.turn_count = turns;
                                             session.session_id = sid;
+                                            let files_note = crate::project::session_log_files(sid)
+                                                .map(|f| format!("\nFiles: {}", f))
+                                                .unwrap_or_default();
                                             app.messages.push(UiMessage {
                                                 role: MsgRole::Assistant,
                                                 blocks: vec![UiBlock::Text(format!(
-                                                    "Resumed session #{sid} — {count} messages, {turns} turns."
+                                                    "Resumed session #{sid} — {turns} turns, {count} messages.{files_note}"
                                                 ))],
                                             });
                                             app.auto_scroll = true;
@@ -730,7 +735,21 @@ async fn tui_loop(
                                         Err(e) => app.error = Some(format!("session parse error: {e}")),
                                     }
                                 }
-                                Ok(None) => app.error = Some(format!("No messages for session #{sid}")),
+                                Ok(None) => {
+                                    // No messages saved — show goal and file context instead of error
+                                    app.messages.clear();
+                                    let files_note = crate::project::session_log_files(sid)
+                                        .map(|f| format!("\nFiles: {}", f))
+                                        .unwrap_or_default();
+                                    app.messages.push(UiMessage {
+                                        role: MsgRole::Assistant,
+                                        blocks: vec![UiBlock::Text(format!(
+                                            "Session #{sid} — no conversation saved.\nGoal: {goal}{files_note}\n\nYou can continue from here."
+                                        ))],
+                                    });
+                                    session.session_id = sid;
+                                    app.auto_scroll = true;
+                                }
                                 Err(e)   => app.error = Some(format!("load session: {e}")),
                             }
                         }

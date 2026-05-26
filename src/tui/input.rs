@@ -15,7 +15,7 @@ pub enum InputAction {
     ClearInput,
     OpenDirPicker,
     ToggleFileBrowser,
-    LoadSession(i64),
+    LoadSession { id: i64, goal: String },
     CloseSessionPicker,
     /// Ctrl+O: toggle expansion of the last tool call with output.
     ToggleLastToolExpand,
@@ -566,8 +566,9 @@ fn handle_session_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Enter => {
             if let Some(entry) = picker.entries.get(picker.selected) {
                 let id = entry.id;
+                let goal = entry.goal.clone();
                 app.session_picker = None;
-                InputAction::LoadSession(id)
+                InputAction::LoadSession { id, goal }
             } else {
                 app.session_picker = None;
                 InputAction::CloseSessionPicker
