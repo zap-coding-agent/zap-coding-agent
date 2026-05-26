@@ -101,7 +101,23 @@ pub(super) async fn search_with_rg_or_grep(
         };
     }
 
-    // Pure-Rust fallback: no external tools needed. Works on all platforms.
+    // Neither rg nor grep found — warn the user and fall back to built-in search.
+    #[cfg(windows)]
+    crate::zap_warn!(
+        "ripgrep (rg) and grep not found. Using slower built-in search.\n\
+         To fix (pick one):\n\
+         • Install ripgrep:  winget install BurntSushi.ripgrep\n\
+         • Or add Git to PATH: Settings → System → Environment Variables → add\n\
+           C:\\Program Files\\Git\\usr\\bin  to your PATH, then restart the terminal."
+    );
+    #[cfg(not(windows))]
+    crate::zap_warn!(
+        "ripgrep (rg) and grep not found. Using slower built-in search.\n\
+         To fix: install ripgrep — brew install ripgrep  (Mac)\n\
+                                    apt install ripgrep  (Debian/Ubuntu)\n\
+                                    cargo install ripgrep"
+    );
+
     search_rust_native(pattern, path, file_type, case_insensitive, fixed_string, context_lines, max_results)
 }
 
