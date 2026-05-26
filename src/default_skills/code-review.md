@@ -1,7 +1,7 @@
 ---
 category: practice
 name: code-review
-trigger: ["review", "code review", "pr review", "pull request", "feedback", "lgtm", "approve", "critique"]
+trigger: ["code review", "pr review", "pull request", "lgtm", "critique", "review my", "review this", "review the pr", "review the diff", "review the code", "please review", "can you review"]
 tokens: ~450
 ---
 

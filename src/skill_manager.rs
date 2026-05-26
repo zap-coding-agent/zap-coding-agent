@@ -22,6 +22,43 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+/// Check that `trigger` (already lowercased) appears in `text` (already lowercased)
+/// at word boundaries. Strategy depends on trigger length to balance false positives
+/// against useful inflected matches:
+///
+/// - Triggers that don't start with an ASCII letter (e.g. ".rs", "#include", "fn "):
+///   simple substring — these are inherently anchor-like so boundaries don't apply.
+/// - Short alphabetic triggers (≤ 3 chars, e.g. "pr", "go", "sql"):
+///   require BOTH word boundaries so "pr" doesn't match "process".
+/// - Longer alphabetic triggers (≥ 4 chars, e.g. "review"):
+///   require only a word-START boundary so "reviewing" still matches "review"
+///   but "preview" and "irrelevant" do not.
+fn trigger_word_match(text: &str, trigger: &str) -> bool {
+    let tb = trigger.as_bytes();
+    let qb = text.as_bytes();
+    let tlen = tb.len();
+    if tlen == 0 { return false; }
+
+    let first_alpha = trigger.starts_with(|c: char| c.is_ascii_alphabetic());
+    let require_post = first_alpha && tlen <= 3;
+
+    let mut i = 0;
+    while i + tlen <= qb.len() {
+        if &qb[i..i + tlen] == tb {
+            let pre_ok = i == 0 || !qb[i - 1].is_ascii_alphabetic();
+            if pre_ok {
+                if !require_post {
+                    return true;
+                }
+                let post_ok = i + tlen >= qb.len() || !qb[i + tlen].is_ascii_alphabetic();
+                if post_ok { return true; }
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkillCategory {
     Core,     // always injected into the base system prompt
@@ -56,9 +93,20 @@ impl Skill {
     }
 
     /// Returns true if any trigger keyword appears in the query (case-insensitive).
+    ///
+    /// Multi-word triggers (containing a space) use substring match.
+    /// Single-word triggers require a word-start boundary so "review" does not
+    /// fire on "preview" or "irrelevant", but still fires on "reviewing".
     pub fn matches(&self, query: &str) -> bool {
         let lower = query.to_lowercase();
-        self.triggers.iter().any(|t| lower.contains(t.as_str()))
+        self.triggers.iter().any(|t| {
+            let t = t.to_lowercase();
+            if t.contains(' ') {
+                lower.contains(t.as_str())
+            } else {
+                trigger_word_match(&lower, &t)
+            }
+        })
     }
 
     /// Approximate token count (chars / 4).
@@ -669,4 +717,30 @@ When working on tasks related to [topic], follow these guidelines:
 
     std::fs::write(&path, template)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod trigger_tests {
+    use super::trigger_word_match;
+
+    #[test]
+    fn word_start_boundary() {
+        // exact match
+        assert!(trigger_word_match("code review", "review"));
+        // at start of string
+        assert!(trigger_word_match("review my code", "review"));
+        // after punctuation
+        assert!(trigger_word_match("please, review this", "review"));
+        // inflected: "reviewing" still matches "review"
+        assert!(trigger_word_match("i am reviewing the pr", "review"));
+        // must NOT match mid-word ("preview")
+        assert!(!trigger_word_match("preview the changes", "review"));
+        // must NOT match mid-word ("irrelevant")
+        assert!(!trigger_word_match("this is irrelevant", "review"));
+        // short trigger "pr" must not match "process"
+        assert!(!trigger_word_match("run the process", "pr"));
+        // "pr" matches as standalone word
+        assert!(trigger_word_match("the pr is ready", "pr"));
+        assert!(trigger_word_match("pr review needed", "pr"));
+    }
 }

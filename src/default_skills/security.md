@@ -2,7 +2,7 @@
 category: practice
 name: security
 description: Security best practices for auth, secrets, input validation, and crypto.
-trigger: ["auth", "authentication", "authorization", "password", "secret", "api key", "token", "jwt", "oauth", "session", "login", "xss", "sql injection", "csrf", "encrypt", "hash", "sanitize", "validate input"]
+trigger: ["auth", "authentication", "authorization", "password", "api key", "jwt", "oauth", "xss", "sql injection", "csrf", "encrypt", "sanitize", "validate input", "access token", "bearer token", "api token", "secret key", "auth token", "login flow", "session token", "session cookie", "hash password", "password hash"]
 tokens: ~500
 ---
 

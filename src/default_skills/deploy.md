@@ -1,7 +1,7 @@
 ---
 category: practice
 name: deploy
-trigger: ["deploy", "deployment", "release", "ship", "publish", "install locally", "update zap", "build zap"]
+trigger: ["deploy", "deployment", "release version", "ship it", "publish package", "publish release", "install locally", "update zap", "build zap", "cut a release", "release build"]
 tokens: ~200
 ---
 

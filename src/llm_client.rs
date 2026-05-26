@@ -299,7 +299,12 @@ fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
                     serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input }),
 
                 ContentBlock::ToolResult { tool_use_id, content } =>
-                    serde_json::json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": content }),
+                    serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": content,
+                        "is_error": false,
+                    }),
 
                 ContentBlock::Image { media_type, data } =>
                     serde_json::json!({
@@ -487,6 +492,27 @@ impl LlmProvider for AnthropicClient {
             thinking,
         };
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
+
+        // Detect empty tool_result content before it reaches the gateway.
+        // Corporate proxies (Zscaler, Blue Coat, etc.) sometimes strip or zero-out
+        // the content field via DLP rules. Catch it here while the data is still local.
+        if self.bearer_auth {
+            for msg in messages {
+                for block in &msg.content {
+                    if let ContentBlock::ToolResult { tool_use_id, content } = block {
+                        if content.is_empty() {
+                            crate::zap_warn!(
+                                "Tool result for '{}' has empty content before being sent to the gateway. \
+                                 If the model reports empty tool results, your corporate proxy may be \
+                                 stripping tool result content (DLP policy). Check ~/.zap/llm.log to \
+                                 see exactly what was sent.",
+                                tool_use_id
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         // Log request — replace tools array with a count to keep the log readable.
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
@@ -679,6 +705,32 @@ impl LlmProvider for AnthropicClient {
             });
             if let Ok(pretty) = serde_json::to_string_pretty(&resp_val) {
                 crate::log::write_llm("RESPONSE [anthropic]", &pretty);
+            }
+        }
+
+        // When using a custom gateway, check whether the model's response text
+        // contains phrases that indicate it received empty tool results. This is
+        // the telltale sign that the corporate proxy stripped tool_result content.
+        if self.bearer_auth {
+            let had_tool_results = messages.iter().any(|m| {
+                m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+            });
+            if had_tool_results {
+                let response_text: String = content.iter().filter_map(|b| {
+                    if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+                }).collect::<Vec<_>>().join(" ").to_lowercase();
+                let dlp_patterns = ["empty result", "no result", "returned empty", "empty response",
+                                    "no content", "empty output", "no output", "empty string",
+                                    "nothing was returned", "did not return"];
+                if dlp_patterns.iter().any(|p| response_text.contains(p)) {
+                    crate::zap_warn!(
+                        "The model reported empty tool results while using a custom gateway. \
+                         Your corporate proxy may be stripping tool_result content via DLP policy. \
+                         Check ~/.zap/llm.log to verify what was sent — if tool results appear there \
+                         but the model still sees empty content, contact your IT team about the \
+                         gateway's content inspection rules for API requests."
+                    );
+                }
             }
         }
 

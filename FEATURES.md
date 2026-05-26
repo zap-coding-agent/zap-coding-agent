@@ -529,3 +529,4 @@ Features from Claude Code worth bringing into zap. IDE integration, voice, enter
 | Tool definitions | 0 (skipped) |
 | Skills | 0 (skipped) |
 | **Total baseline** | **~20–30 tokens** |
+

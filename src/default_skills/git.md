@@ -1,7 +1,7 @@
 ---
 category: practice
 name: git
-trigger: ["commit", "git", "branch", "merge", "rebase", "pull request", "pr", "stage", "push", "changelog", "release"]
+trigger: ["commit", "git", "branch", "merge", "rebase", "pull request", "pr", "git push", "git stage", "staged changes", "changelog", "git release", "git tag", "git log", "merge conflict", "push to"]
 tokens: ~400
 ---
 
