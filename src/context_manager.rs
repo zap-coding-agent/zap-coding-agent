@@ -229,7 +229,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     }
 
     // ── Project context (ZAP.md + .zap/understanding.md) ─────────────────────
-    if let Some(zap_md) = load_zap_md() {
+    if let Some(zap_md) = load_zap_md(&config.context_paths) {
         sections.push(format!("## Project Context\n{}", zap_md));
     }
     // understanding.md — always inlined (capped at 4 kchars ≈ 1k tokens).
@@ -314,7 +314,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
 /// falling back to CLAUDE.md for projects that haven't migrated yet.
 /// Also loads ~/.zap/ZAP.md as a global layer.
 /// Sections ordered most-general → most-specific so project instructions take priority.
-fn load_zap_md() -> Option<String> {
+fn load_zap_md(context_paths: &[String]) -> Option<String> {
     let home = home_dir();
     let cwd  = std::env::current_dir().ok()?;
 
@@ -373,7 +373,60 @@ fn load_zap_md() -> Option<String> {
         }
     }
 
+    // Extra context directories — opt-in via context_paths config.
+    // Each configured path's .md files are loaded as always-on context,
+    // sorted by filename. Frontmatter (--- ... ---) is stripped from the content.
+    // Useful for: .kiro/steering, .claude/context, or any team-shared markdown docs.
+    for raw_path in context_paths {
+        let dir = expand_tilde(raw_path);
+        if !dir.is_dir() { continue; }
+        let mut file_sections: Vec<(String, String)> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+                let body = strip_frontmatter(&raw);
+                if !body.trim().is_empty() {
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    file_sections.push((name, body.trim().to_string()));
+                }
+            }
+        }
+        if !file_sections.is_empty() {
+            file_sections.sort_by(|a, b| a.0.cmp(&b.0));
+            let joined = file_sections.iter()
+                .map(|(name, body)| format!("#### {}\n{}", name, body))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            sections.push(format!("### {} (context)\n{}", raw_path, joined));
+        }
+    }
+
     if sections.is_empty() { None } else { Some(sections.join("\n\n")) }
+}
+
+/// Strip YAML/TOML frontmatter (--- ... ---) from the top of a markdown file.
+fn strip_frontmatter(raw: &str) -> &str {
+    let s = raw.trim_start();
+    if !s.starts_with("---") { return s; }
+    let after = &s[3..];
+    // Find the closing ---
+    if let Some(pos) = after.find("\n---") {
+        after[pos + 4..].trim_start_matches('\n')
+    } else {
+        s
+    }
+}
+
+fn expand_tilde(p: &str) -> std::path::PathBuf {
+    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(p)
 }
 
 /// Return the user's home directory.

@@ -141,6 +141,9 @@ impl Session {
         if !self.config.skill_paths.is_empty() {
             kv("skill_paths", &self.config.skill_paths.join(", "));
         }
+        if !self.config.context_paths.is_empty() {
+            kv("context_paths", &self.config.context_paths.join(", "));
+        }
         println!("  {}", "─".repeat(44).truecolor(60, 55, 80));
         println!();
     }
