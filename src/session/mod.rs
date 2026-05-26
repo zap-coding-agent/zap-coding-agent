@@ -1109,7 +1109,7 @@ impl Session {
                                 Ok(output) => {
                                     let _ = audit::record(&format!("tool_success name={}", call.name));
                                     let ms = t0.elapsed().as_millis();
-                                    let preview = output.lines().take(10).collect::<Vec<_>>().join("\n");
+                                    let preview = smart_tool_preview(&call.name, &output);
                                     // Notify TUI of tool done
                                     crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
                                         id: call.id.clone(),
@@ -1528,6 +1528,78 @@ fn is_pure_greeting(text: &str) -> bool {
         || t.starts_with(&format!("{} ", g))
         || t.starts_with(&format!("{},", g))
         || t.starts_with(&format!("{}!", g)))
+}
+
+/// Produce a one-line TUI preview for a tool result that highlights what was found.
+/// For index-backed tools (find_definition, search_code, code_map) this shows a
+/// count-based summary so the developer can see zap navigated via the code index.
+/// Falls back to the first non-empty line for any other tool.
+fn smart_tool_preview(tool_name: &str, output: &str) -> String {
+    match tool_name {
+        "find_definition" | "find_symbol" => {
+            // "Definition(s) of 'X' [AST index]:\n  path:line kind name\n..."
+            // or "no definition found for 'X'"
+            if output.starts_with("no definition") || output.starts_with("no match") {
+                return output.lines().next().unwrap_or("no results").to_string();
+            }
+            // Count result lines (indented with "  ")
+            let hits = output.lines().filter(|l| l.starts_with("  ") && l.contains(':'))
+                .count();
+            let first = output.lines().next().unwrap_or("");
+            if hits > 0 {
+                // Extract symbol name from header e.g. "Definition(s) of 'foo' [AST index]:"
+                format!("🗄 {} {} [index]", hits, if hits == 1 { "hit" } else { "hits" })
+            } else {
+                first.to_string()
+            }
+        }
+        "search_code" => {
+            // "## Search: 'X' (ripgrep/grep/native, N matches in M files)"
+            // or "no matches for 'X' in 'Y'"
+            if output.starts_with("no matches") {
+                return output.lines().next().unwrap_or("no matches").to_string();
+            }
+            // First line is the header after "## "
+            let header = output.lines().next().unwrap_or(output);
+            // Extract counts if native format: "(native, N matches in M files)"
+            if let Some(paren) = header.rfind('(') {
+                let summary = &header[paren + 1..].trim_end_matches(')');
+                return format!("🔍 {}", summary);
+            }
+            // rg / grep: count match lines (non-empty, non-separator)
+            let hits = output.lines().skip(2)
+                .filter(|l| !l.is_empty() && *l != "--")
+                .count();
+            let engine = if header.contains("ripgrep") { "rg" }
+                         else if header.contains("native") { "native" }
+                         else { "grep" };
+            format!("🔍 ~{} matches ({})", hits, engine)
+        }
+        "code_map" => {
+            // "# Code map for path\n\nfile (N symbols)\n..."
+            let files = output.lines().filter(|l| l.contains("symbols)") || l.contains("symbol)"))
+                .count();
+            let total_syms: usize = output.lines()
+                .filter_map(|l| {
+                    let start = l.find('(')?;
+                    let end = l.find(" symbol")?;
+                    l[start + 1..end].trim().parse::<usize>().ok()
+                })
+                .sum();
+            if files > 0 {
+                format!("🗄 {} files · {} symbols [index]", files, total_syms)
+            } else {
+                output.lines().next().unwrap_or("code map").to_string()
+            }
+        }
+        _ => {
+            // Default: first non-empty meaningful line
+            output.lines()
+                .find(|l| !l.trim().is_empty() && !l.starts_with("##"))
+                .unwrap_or(output)
+                .to_string()
+        }
+    }
 }
 
 /// Build the message slice to send for a non-casual turn:

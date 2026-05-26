@@ -1,6 +1,6 @@
 [package]
 name = "agent_harness"
-version = "0.13.26"
+version = "0.13.27"
 edition = "2021"
 
 [[bin]]
@@ -45,5 +45,6 @@ syntect = "5.2"
 pulldown-cmark = "0.9"
 libc = "0.2"
 git2 = "0.21.0"
+regex = "1"
 axum = { version = "0.7", features = ["ws"] }
 futures-util = "0.3"
