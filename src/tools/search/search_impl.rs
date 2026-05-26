@@ -102,20 +102,32 @@ fn search_rust_native(
         Box::new(move |line: &str| re.is_match(line))
     };
 
-    let allowed_exts: Option<Vec<&str>> = file_type.map(|ft| match ft {
-        "rust"       => vec!["rs"],
-        "py"|"python"=> vec!["py"],
-        "ts"|"typescript" => vec!["ts"],
-        "js"|"javascript" => vec!["js"],
-        "go"         => vec!["go"],
-        "java"       => vec!["java"],
-        "c"          => vec!["c", "h"],
-        "cpp"        => vec!["cpp", "cc", "cxx", "hpp", "hxx"],
-        other        => vec![other],
-    });
+    // When no file_type is given, restrict to known text extensions to avoid
+    // reading binary files (.db, .lock, images, compiled objects, etc.).
+    const DEFAULT_TEXT_EXTS: &[&str] = &[
+        "rs", "py", "ts", "js", "go", "java", "c", "cpp", "cc", "cxx",
+        "h", "hpp", "rb", "swift", "kt", "cs", "toml", "yaml", "yml",
+        "json", "md", "txt", "sh", "bash", "zsh", "fish", "env",
+        "html", "css", "scss", "xml", "sql",
+    ];
+
+    let allowed_exts: Vec<&str> = match file_type {
+        Some(ft) => match ft {
+            "rust"              => vec!["rs"],
+            "py"|"python"       => vec!["py"],
+            "ts"|"typescript"   => vec!["ts"],
+            "js"|"javascript"   => vec!["js"],
+            "go"                => vec!["go"],
+            "java"              => vec!["java"],
+            "c"                 => vec!["c", "h"],
+            "cpp"               => vec!["cpp", "cc", "cxx", "hpp", "hxx"],
+            other               => vec![other],
+        },
+        None => DEFAULT_TEXT_EXTS.to_vec(),
+    };
 
     let mut files: Vec<std::path::PathBuf> = Vec::new();
-    fn walk(dir: &std::path::Path, exts: &Option<Vec<&str>>, out: &mut Vec<std::path::PathBuf>) {
+    fn walk(dir: &std::path::Path, exts: &[&str], out: &mut Vec<std::path::PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
             let p = entry.path();
@@ -123,11 +135,9 @@ fn search_rust_native(
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if matches!(name, "target"|"node_modules"|".git"|"dist"|"build"|".zap") { continue; }
                 walk(&p, exts, out);
-            } else if let Some(ref allowed) = *exts {
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if allowed.contains(&ext) { out.push(p); }
             } else {
-                out.push(p);
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if exts.contains(&ext) { out.push(p); }
             }
         }
     }
@@ -145,6 +155,9 @@ fn search_rust_native(
         let rel = file_path.strip_prefix(root).unwrap_or(file_path);
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         let mut file_hits = 0u64;
+        // Track the last line we already emitted to avoid duplicating context
+        // when two matches are closer than context_lines apart.
+        let mut last_emitted: Option<usize> = None;
 
         for (i, line) in lines.iter().enumerate() {
             if !matcher(line) { continue; }
@@ -152,18 +165,31 @@ fn search_rust_native(
             file_hits += 1;
             if total_hits > max_results { break 'files; }
 
+            // Separator between non-adjacent match groups.
             let ctx_start = i.saturating_sub(context_lines);
-            for (ci, cl) in lines[ctx_start..i].iter().enumerate() {
-                let ln = ctx_start + ci + 1;
+            if let Some(last) = last_emitted {
+                if ctx_start > last + 1 {
+                    output_lines.push("--".to_string());
+                }
+            }
+
+            // Context before (only lines not already emitted).
+            let emit_from = last_emitted.map(|l| l + 1).unwrap_or(ctx_start).max(ctx_start);
+            for (ci, cl) in lines[emit_from..i].iter().enumerate() {
+                let ln = emit_from + ci + 1;
                 output_lines.push(format!("{}-{}-{}", rel_str, ln, cl));
             }
-            output_lines.push(format!("{}-{}-{}", rel_str, i + 1, line));
+            // Matching line (`:` separator marks it as a match, same as rg/grep).
+            output_lines.push(format!("{}:{}:{}", rel_str, i + 1, line));
+            last_emitted = Some(i);
+
+            // Context after (will be re-evaluated on next iteration to avoid dup).
             let ctx_end = (i + 1 + context_lines).min(lines.len());
             for (ci, cl) in lines[i + 1..ctx_end].iter().enumerate() {
                 let ln = i + 2 + ci;
                 output_lines.push(format!("{}-{}-{}", rel_str, ln, cl));
+                last_emitted = Some(i + 1 + ci);
             }
-            if context_lines > 0 { output_lines.push("--".to_string()); }
         }
         if file_hits > 0 { files_with_hits += 1; }
     }
