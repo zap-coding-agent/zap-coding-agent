@@ -1145,12 +1145,17 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<
                 ]));
             }
         } else if !all_lines.is_empty() {
+            // Show the smart preview summary (first line) instead of a raw line count.
+            // This surfaces "🗄 3 hits [index]", "🔍 native, 2 matches in 1 files", etc.
+            let summary = all_lines[0].trim().to_string();
+            let hint = if all_lines.len() > 1 {
+                format!("  {}  ·  Ctrl+O to expand", summary)
+            } else {
+                format!("  {}", summary)
+            };
             lines.push(Line::from(vec![
                 Span::styled("    ", Style::default().fg(border)),
-                Span::styled(
-                    format!("  {} lines  Ctrl+O to expand", all_lines.len()),
-                    Style::default().fg(hint_color).add_modifier(Modifier::ITALIC),
-                ),
+                Span::styled(hint, Style::default().fg(hint_color).add_modifier(Modifier::ITALIC)),
             ]));
         }
     }

@@ -2,6 +2,10 @@ use anyhow::{Context, Result};
 
 // ── tool discovery ─────────────────────────────────────────────────────────────
 
+// Warn once per process when a tool is found via Git path but not on system PATH.
+#[cfg(windows)]
+static GIT_PATH_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Find a CLI tool by name. Checks the process PATH first, then probes
 /// common Git-for-Windows install locations (VS Code injects these into its
 /// own environment but plain PowerShell/CMD processes do not).
@@ -29,6 +33,17 @@ async fn find_tool(name: &str) -> Option<String> {
         ];
         for path in &candidates {
             if std::path::Path::new(path).exists() {
+                // Warn once: tool works but PATH is incomplete.
+                if !GIT_PATH_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    crate::zap_warn!(
+                        "Using {} from Git for Windows ({})\n\
+                         It is not on your system PATH — add it for faster startup:\n\
+                         Settings → System → Environment Variables → PATH → New:\n\
+                         {}\\Git\\usr\\bin\n\
+                         Or install ripgrep for best performance:  winget install BurntSushi.ripgrep",
+                        name, path, pf
+                    );
+                }
                 return Some(path.clone());
             }
         }
