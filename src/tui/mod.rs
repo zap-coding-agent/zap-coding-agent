@@ -50,10 +50,15 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     channel::init_secret_channel();
     channel::init_btw_queue();
 
-    // 3. Switch to alternate screen.
+    // 3. Switch to alternate screen and hide the native cursor — ratatui will
+    //    position it precisely via frame.set_cursor() when the input is focused.
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::cursor::Hide,
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;

@@ -184,11 +184,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return handle_file_browser_key(app, key);
     }
     
-    // Ctrl+C: cancel during a turn
+    // Ctrl+C: cancel during a turn; quit-confirm when idle.
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
         match &app.state {
             AppState::Thinking | AppState::ToolRunning { .. } => return InputAction::Cancel,
-            AppState::Idle => return InputAction::None,
+            AppState::Idle => {
+                if app.quit_confirm {
+                    return InputAction::Quit;
+                }
+                app.quit_confirm = true;
+                app.error = Some("Press Ctrl+C again to quit — any other key cancels".to_string());
+                return InputAction::None;
+            }
         }
     }
 

@@ -149,9 +149,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         draw_messages(frame, app, left[0]);
         draw_picker_overlay(frame, app, left[0]);
-        draw_input(frame, app, left[1]);
+        let cursor_pos = draw_input(frame, app, left[1]);
         draw_dir_panel(frame, app, left[2]);
         draw_sidebar(frame, app, body[1]);
+        maybe_set_cursor(frame, app, cursor_pos);
     } else {
         // When sidebar is hidden, clear the area where it would have been
         // to prevent ghost characters from a previous wide-frame render.
@@ -172,8 +173,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         draw_messages(frame, app, left[0]);
         draw_picker_overlay(frame, app, left[0]);
-        draw_input(frame, app, left[1]);
+        let cursor_pos = draw_input(frame, app, left[1]);
         draw_dir_panel(frame, app, left[2]);
+        maybe_set_cursor(frame, app, cursor_pos);
     }
     
     // Draw file browser overlay if open
@@ -647,41 +649,53 @@ fn draw_dir_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 
-fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let prefix = "❯ ";
-    let char_count = app.input.chars().count();
-    let cursor_pos = app.cursor;
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(prefix.to_string(), Style::default().fg(Color::Rgb(255, 200, 50)).bold()));
-
-    if cursor_pos >= char_count {
-        spans.push(Span::raw(app.input.clone()));
-        spans.push(Span::styled(" ".to_string(), Style::default().bg(Color::Rgb(255, 200, 50)).fg(Color::Black)));
-    } else {
-        let before: String = app.input.chars().take(cursor_pos).collect();
-        let at: String     = app.input.chars().nth(cursor_pos).map(|c| c.to_string()).unwrap_or_default();
-        let after: String  = app.input.chars().skip(cursor_pos + 1).collect();
-        spans.push(Span::raw(before));
-        spans.push(Span::styled(at, Style::default().bg(Color::Rgb(255, 200, 50)).fg(Color::Black)));
-        spans.push(Span::raw(after));
+/// Call `frame.set_cursor()` only when the app is idle and no popup is covering
+/// the input area. Popups must not fight with the input cursor.
+fn maybe_set_cursor(frame: &mut Frame, app: &App, cursor_pos: Option<(u16, u16)>) {
+    use super::app::AppState;
+    let no_popup = app.permission_popup.is_none()
+        && app.secret_popup.is_none()
+        && app.session_picker.is_none()
+        && app.mode_picker.is_none()
+        && app.domain_picker.is_none()
+        && app.file_browser.is_none();
+    if matches!(app.state, AppState::Idle) && no_popup {
+        if let Some((cx, cy)) = cursor_pos {
+            frame.set_cursor_position((cx, cy));
+        }
     }
+}
 
-    // Compute scroll offset so the cursor is always visible.
-    let content_w = area.width.saturating_sub(2) as usize; // borders
+/// Render the input box. Returns the screen (col, row) where the native cursor
+/// should be placed so the caller can call `frame.set_cursor()` when appropriate.
+fn draw_input(frame: &mut Frame, app: &App, area: Rect) -> Option<(u16, u16)> {
+    let prefix = "❯ ";
     let prefix_chars = prefix.chars().count();
-    let cursor_char_in_text = prefix_chars + cursor_pos; // cursor_pos is char-index
-    let scroll = if content_w > 0 {
+    let cursor_pos = app.cursor;
+    let content_w = area.width.saturating_sub(2) as usize; // minus L+R borders
+
+    // Compute scroll offset and screen cursor position.
+    let (scroll, cursor_screen) = if content_w > 0 {
+        let cursor_char_in_text = prefix_chars + cursor_pos;
         let cursor_row = cursor_char_in_text / content_w;
-        let visible_rows = area.height.saturating_sub(2) as usize; // borders
-        if cursor_row >= visible_rows {
+        let cursor_col = cursor_char_in_text % content_w;
+        let visible_rows = area.height.saturating_sub(2) as usize;
+        let scroll = if cursor_row >= visible_rows {
             (cursor_row - visible_rows + 1) as u16
         } else {
-            0
-        }
+            0u16
+        };
+        let screen_x = area.x + 1 + cursor_col as u16;
+        let screen_y = area.y + 1 + cursor_row as u16 - scroll;
+        (scroll, Some((screen_x, screen_y)))
     } else {
-        0
+        (0u16, None)
     };
+
+    let spans: Vec<Span<'static>> = vec![
+        Span::styled(prefix.to_string(), Style::default().fg(Color::Rgb(255, 200, 50)).bold()),
+        Span::raw(app.input.clone()),
+    ];
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -694,6 +708,8 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
             .scroll((scroll, 0)),
         area,
     );
+
+    cursor_screen
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
