@@ -287,6 +287,8 @@ pub struct App {
     pub files_changed_this_turn: usize,
     /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
     pub active_skill: Option<String>,
+    /// Ring of the last 3 skills used (newest first) — persists across turns.
+    pub skill_history: Vec<String>,
 
     /// Mid-turn btw input — true while the Ctrl+B input box is open.
     pub btw_mode: bool,
@@ -343,6 +345,7 @@ impl App {
             secret_popup: None,
             files_changed_this_turn: 0,
             active_skill: None,
+            skill_history: Vec::new(),
             btw_mode: false,
             btw_draft: String::new(),
             btw_cursor: 0,
@@ -417,6 +420,11 @@ impl App {
                 self.turn = turn;
             }
             TuiEvent::ActiveSkill(label) => {
+                // Push to history (deduplicate consecutive identical entries, cap at 3)
+                if self.skill_history.first().map(|s| s.as_str()) != Some(&label) {
+                    self.skill_history.insert(0, label.clone());
+                    self.skill_history.truncate(3);
+                }
                 self.active_skill = Some(label);
             }
             TuiEvent::BtwCarryover(msgs) => {

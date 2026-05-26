@@ -544,17 +544,30 @@ fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(state_text, Style::default().fg(value_c)),
     ]));
 
-    // Active skill — only shown while a skill is injected this turn
-    if let Some(ref skill_label) = app.active_skill {
+    // Skills section — active skill + recent history
+    if app.active_skill.is_some() || !app.skill_history.is_empty() {
         let skill_c = Color::Rgb(255, 200, 60);
-        let short: String = if skill_label.chars().count() > 15 {
-            format!("{}…", skill_label.chars().take(14).collect::<String>())
-        } else {
-            skill_label.clone()
+        let dim_c   = Color::Rgb(110, 105, 140);
+        let trunc = |s: &str, n: usize| -> String {
+            if s.chars().count() > n { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
+            else { s.to_string() }
         };
         rows.push(Line::from(""));
-        rows.push(Line::from(Span::styled(" skill", Style::default().fg(skill_c).bold())));
-        rows.push(kv("active", short, Color::Rgb(255, 230, 140)));
+        rows.push(Line::from(Span::styled(" skills", Style::default().fg(skill_c).bold())));
+        if let Some(ref label) = app.active_skill {
+            rows.push(Line::from(vec![
+                Span::styled(" ▶ ", Style::default().fg(skill_c)),
+                Span::styled(trunc(label, 17), Style::default().fg(Color::Rgb(255, 230, 140)).bold()),
+            ]));
+        }
+        // Recent history — skip the currently-active one (already shown above)
+        let history_start = if app.active_skill.is_some() { 1 } else { 0 };
+        for past in app.skill_history.iter().skip(history_start).take(3) {
+            rows.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(trunc(past, 17), Style::default().fg(dim_c)),
+            ]));
+        }
     }
 
     // Goal section — only shown when a /goal is active
