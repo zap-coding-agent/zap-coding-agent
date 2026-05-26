@@ -247,27 +247,25 @@ impl Session {
         // ── C2: Load project.json — use persisted languages, skip domain prompt ─
         let project_meta = crate::project::load_project_meta();
 
-        // Build domain scope: project.json takes priority, then manifest detection, then prompt.
+        // Build domain scope: project.json → manifest detection → extension scan → empty.
+        // Never prompt the user — skills fire via keyword triggers regardless of scope.
         let detected = crate::skill_manager::detect_domain_scope(&skills);
         let domain_scope: std::collections::HashSet<String> = if let Some(ref meta) = project_meta {
             if !meta.language.is_empty() {
-                // Languages already known — no prompt needed.
                 meta.language.iter().cloned().collect()
             } else if !detected.is_empty() {
                 detected.iter().cloned().collect()
             } else {
-                std::collections::HashSet::new()
+                // Manifest check missed — try extension scan (handles React/TS repos without
+                // a package.json at the exact cwd root).
+                crate::skill_manager::detect_from_extensions(&skills)
+                    .into_iter().collect()
             }
         } else if !detected.is_empty() {
             detected.iter().cloned().collect()
-        } else if !config.is_subagent && !config.skip_domain_prompt
-                  && unsafe { libc::isatty(0 as libc::c_int) } != 0 {
-            // Nothing auto-detected — ask the user once (TTY only).
-            crate::skill_manager::prompt_domain_scope(&skills)
-                .map(|v| v.into_iter().collect())
-                .unwrap_or_default()
         } else {
-            std::collections::HashSet::new()
+            crate::skill_manager::detect_from_extensions(&skills)
+                .into_iter().collect()
         };
 
         // ── C3: Index nudge (shown once when project isn't indexed yet) ────────
@@ -1576,18 +1574,29 @@ fn smart_tool_preview(tool_name: &str, output: &str) -> String {
             format!("🔍 ~{} matches ({})", hits, engine)
         }
         "code_map" => {
-            // "# Code map for path\n\nfile (N symbols)\n..."
-            let files = output.lines().filter(|l| l.contains("symbols)") || l.contains("symbol)"))
-                .count();
+            // AST index header: "## Code map: <path> [AST index, N symbol(s)]"
+            // Parse symbol count directly from header to avoid slicing pitfalls.
+            if let Some(first) = output.lines().next() {
+                if let Some(bracket) = first.find("[AST index, ") {
+                    let after = &first[bracket + "[AST index, ".len()..];
+                    let count_str = after.split_whitespace().next().unwrap_or("?");
+                    return format!("🗄 {} symbols [index]", count_str);
+                }
+            }
+            // Fallback format: lines like "path (N symbols)" — use rfind so the
+            // '(' we find is always the one directly before " symbol".
             let total_syms: usize = output.lines()
                 .filter_map(|l| {
-                    let start = l.find('(')?;
                     let end = l.find(" symbol")?;
+                    let start = l[..end].rfind('(')?;
                     l[start + 1..end].trim().parse::<usize>().ok()
                 })
                 .sum();
-            if files > 0 {
-                format!("🗄 {} files · {} symbols [index]", files, total_syms)
+            let files = output.lines()
+                .filter(|l| l.ends_with(':') && !l.starts_with(' ') && !l.starts_with('#'))
+                .count();
+            if total_syms > 0 {
+                format!("🗄 {} files · {} symbols", files.max(1), total_syms)
             } else {
                 output.lines().next().unwrap_or("code map").to_string()
             }
