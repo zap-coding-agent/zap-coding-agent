@@ -347,6 +347,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Panic hook + log | `src/main.rs` | restores terminal on panic, writes `[PANIC]` to `~/.zap/zap.log` |
 | Tracing to stderr | `src/main.rs` | tracing no longer corrupts TUI alternate screen |
 | TUI permissions | `src/permission_manager.rs` | native TUI dialogs, no CLI breakout |
+| Permission popup key routing fix | `src/tui/mod.rs`, `src/tui/input.rs` | Permission popup moved to top of key-handler priority chain — previously btw_mode or secret_popup could consume Y/A before it reached the permission handler. Enter added as allow key alongside Y. |
+| /init auto-grants file writes | `src/permission_manager.rs:grant_session`, `src/session/commands.rs:cmd_init_direct` | User invoking /init already consents to file writes — pre-grants edit_file/write_file/batch_edit so LLM analysis turn never prompts for permission. Eliminates the repeated permission popups during init. |
 | TUI permission event-race fix | `src/tui/channel.rs`, `src/permission_manager.rs`, `src/tui/mod.rs` | `PERM_PROMPT_ACTIVE` AtomicBool: set while `prompt_batch_tui` owns the crossterm queue; TUI tick loop skips its own `event::poll` so Y/N/A keypresses aren't stolen — fixes MCP/shell dialogs hanging silently |
 | DeepSeek vision block | `src/llm_client.rs:provider_supports_vision`, `OpenAiClient::new` | all deepseek.com models reject `image_url` content blocks (text-only API); /paste and /attach warn immediately; history drops are silent |
 | Deploy skill | `src/default_skills/deploy.md` | triggers on: deploy, release, ship, publish; nohup background pattern (`nohup bash scripts/deploy.sh > /tmp/zap-deploy.log 2>&1 &`) avoids the 60s shell timeout |

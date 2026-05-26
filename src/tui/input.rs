@@ -157,10 +157,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         }
     }
 
-    // Permission popup — Y/N/A/Esc to respond, everything else ignored.
+    // Permission popup — highest priority. Y/Enter=allow, A=always, N/Esc=deny.
     if app.permission_popup.is_some() {
         match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => return InputAction::PermitAllow,
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return InputAction::PermitAllow,
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => return InputAction::PermitDeny,
             KeyCode::Char('a') | KeyCode::Char('A') => return InputAction::PermitAlways,
             _ => return InputAction::None,

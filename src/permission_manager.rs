@@ -33,6 +33,21 @@ impl PermissionManager {
         Self { mode, session_grants: HashMap::new() }
     }
 
+    /// Pre-grant a set of tools for the rest of the session without prompting.
+    /// Used by /init — the user already consented by invoking the command.
+    pub fn grant_session(&mut self, tools: &[&str]) {
+        for &tool in tools {
+            let class = tool_grant_class(tool);
+            if class.is_empty() {
+                self.session_grants.insert(tool.to_string(), true);
+            } else {
+                for &related in class {
+                    self.session_grants.insert(related.to_string(), true);
+                }
+            }
+        }
+    }
+
     /// Non-blocking check — returns whether to allow, deny, or ask the user.
     /// Returns true if the user already granted "always" for this tool this session.
     pub fn is_session_granted(&self, tool_name: &str) -> bool {

@@ -403,39 +403,9 @@ async fn tui_loop(
                                             break; // stop draining — turn is cancelled
                                         }
 
-                                        if app.btw_mode || (k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL)) {
-                                            if let InputAction::BtwSubmit(text) = handle_key(app, k) {
-                                                // Show in chat immediately with ↳ btw: prefix.
-                                                app.messages.push(UiMessage {
-                                                    role: MsgRole::User,
-                                                    blocks: vec![UiBlock::Text(format!("↳ btw: {text}"))],
-                                                });
-                                                app.auto_scroll = true;
-                                                channel::push_btw(text);
-                                            }
-                                        } else if app.secret_popup.is_some() {
-                                            // Route Y/N/Esc to the secret scanner popup.
-                                            match handle_key(app, k) {
-                                                InputAction::SecretAllow => {
-                                                    if let Some(ref mut popup) = app.secret_popup {
-                                                        if let Some(tx) = popup.response_tx.take() {
-                                                            let _ = tx.send(true);
-                                                        }
-                                                    }
-                                                    app.secret_popup = None;
-                                                }
-                                                InputAction::SecretDeny => {
-                                                    if let Some(ref mut popup) = app.secret_popup {
-                                                        if let Some(tx) = popup.response_tx.take() {
-                                                            let _ = tx.send(false);
-                                                        }
-                                                    }
-                                                    app.secret_popup = None;
-                                                }
-                                                _ => {}
-                                            }
-                                        } else if app.permission_popup.is_some() {
-                                            // Route Y/N/A to the permission popup.
+                                        // Permission popup is highest priority — checked before
+                                        // btw mode so keys are never consumed by other handlers.
+                                        if app.permission_popup.is_some() {
                                             match handle_key(app, k) {
                                                 InputAction::PermitAllow => {
                                                     if let Some(ref mut popup) = app.permission_popup {
@@ -462,6 +432,36 @@ async fn tui_loop(
                                                     app.permission_popup = None;
                                                 }
                                                 _ => {}
+                                            }
+                                        } else if app.secret_popup.is_some() {
+                                            // Route Y/N/Esc to the secret scanner popup.
+                                            match handle_key(app, k) {
+                                                InputAction::SecretAllow => {
+                                                    if let Some(ref mut popup) = app.secret_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(true);
+                                                        }
+                                                    }
+                                                    app.secret_popup = None;
+                                                }
+                                                InputAction::SecretDeny => {
+                                                    if let Some(ref mut popup) = app.secret_popup {
+                                                        if let Some(tx) = popup.response_tx.take() {
+                                                            let _ = tx.send(false);
+                                                        }
+                                                    }
+                                                    app.secret_popup = None;
+                                                }
+                                                _ => {}
+                                            }
+                                        } else if app.btw_mode || (k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL)) {
+                                            if let InputAction::BtwSubmit(text) = handle_key(app, k) {
+                                                app.messages.push(UiMessage {
+                                                    role: MsgRole::User,
+                                                    blocks: vec![UiBlock::Text(format!("↳ btw: {text}"))],
+                                                });
+                                                app.auto_scroll = true;
+                                                channel::push_btw(text);
                                             }
                                         }
                                     }
