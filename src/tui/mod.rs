@@ -281,7 +281,31 @@ async fn tui_loop(
         terminal.draw(|frame| render::draw(frame, app))?;
 
         // Handle pending input (user just pressed Enter)
-        if let Some(input) = app.pending_input.take() {
+        if let Some(mut input) = app.pending_input.take() {
+            // /<skill-name> [args] — direct skill execution shortcut.
+            // Strip the '/' so input routes through the normal LLM message path,
+            // and temporarily pin the skill for exactly this one turn.
+            // Only build the name list when the input looks like a skill command
+            // (starts with '/' and isn't obviously a built-in).
+            let skill_names_snap: Vec<String> = if commands::could_be_skill_command(&input) {
+                session.skills.iter().map(|s| s.name.clone()).collect()
+            } else {
+                Vec::new()
+            };
+            let one_shot_unpin: Option<String> =
+                match commands::resolve_skill_command(&input, &skill_names_snap) {
+                    Some(skill_name) => {
+                        input = input[1..].to_string(); // strip leading '/'
+                        if session.pinned_skills.contains(&skill_name) {
+                            None // already pinned — no unpin needed after
+                        } else {
+                            session.pinned_skills.insert(skill_name.clone());
+                            Some(skill_name)
+                        }
+                    }
+                    None => None,
+                };
+
             if input.starts_with('/') {
                 // /sessions → open TUI-native session picker instead of dropping to CLI.
                 let cmd = input.trim();
@@ -625,6 +649,10 @@ async fn tui_loop(
                         app.auto_scroll = true;
                     }
                 }
+            }
+            // Unpin any skill that was pinned only for this single turn.
+            if let Some(ref name) = one_shot_unpin {
+                session.pinned_skills.remove(name.as_str());
             }
             continue;
         }

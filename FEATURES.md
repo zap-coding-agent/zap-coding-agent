@@ -32,7 +32,12 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Module | File | Responsibility |
 |---|---|---|
 | Session core | `src/session/mod.rs` | struct, `new()`, tool loop, slash dispatcher |
-| Slash commands | `src/session/commands.rs` | all `cmd_*` handlers, `/init` helpers |
+| Slash commands | `src/session/commands/` | 10 focused submodules (code, index, tasks, git, skills, memory, media, provider, session_mgmt, info) |
+| TUI render | `src/tui/render/` | 7 focused submodules (messages, layout, header, overlays, diff, dialogs) |
+| TUI commands | `src/tui/commands/` | command picker, filter/resolve, handle_inline; text builders in text.rs |
+| Session history | `src/session/history.rs` | conversation history helpers |
+| Session preview | `src/session/preview.rs` | message preview rendering |
+| Session casual | `src/session/casual.rs` | casual conversation handling |
 | Theme constants | `src/ui.rs:theme` | named colour palette (PRIMARY, MUTED, BORDER, …) |
 | inquire picker style | `src/ui.rs:inquire_render_config` | shared RenderConfig for all pickers |
 
