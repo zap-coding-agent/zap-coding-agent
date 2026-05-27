@@ -243,11 +243,74 @@ impl Session {
         (output, llm_prompt)
     }
 
-    /// Write `.zap/context.md` and append to `.zap/session_log.md` at session end.
+    /// Write `.zap/context.md` and append to `.zap/session_log.md` at session end (sync, no LLM).
     pub fn save_context(&self) {
-        if self.turn_count == 0 {
-            return;
+        self.save_context_inner(None);
+    }
+
+    /// Ask the LLM for a brief "What's next" summary, then save context with it.
+    pub async fn save_context_with_summary(&self) {
+        if self.turn_count == 0 { return; }
+        println!("  {} Writing session summary…", "◎".truecolor(180, 175, 210));
+        let whats_next = self.summarize_whats_next().await;
+        self.save_context_inner(whats_next.as_deref());
+    }
+
+    /// Build a short "What's next" summary from recent conversation history via LLM.
+    async fn summarize_whats_next(&self) -> Option<String> {
+        use crate::llm_client::{Message, ContentBlock};
+        use std::time::Duration;
+
+        if self.turn_count == 0 { return None; }
+
+        // Collect last 10 text messages (user + assistant, no tool results).
+        let recent: Vec<String> = self.messages.iter().rev()
+            .filter_map(|m| {
+                let texts: Vec<&str> = m.content.iter().filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                }).collect();
+                if texts.is_empty() { None } else { Some(format!("[{}] {}", m.role, texts.join(" "))) }
+            })
+            .take(10)
+            .collect::<Vec<_>>()
+            .into_iter().rev().collect();
+
+        if recent.is_empty() { return None; }
+
+        let transcript = recent.join("\n\n");
+        let prompt = format!(
+            "Based on this conversation, write 1-3 concise bullet points describing \
+             what should be worked on next in this project. Be specific: mention file names, \
+             function names, or features. No preamble.\n\n{transcript}"
+        );
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(20),
+            self.client.send(
+                "You summarize software development sessions into actionable next-step notes.",
+                &[Message::user_text(prompt)],
+                &[],
+                None,
+                0,
+            ),
+        ).await;
+
+        match result {
+            Ok(Ok(resp)) => {
+                let text: String = resp.content.iter().filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() { None } else { Some(trimmed) }
+            }
+            _ => None,
         }
+    }
+
+    fn save_context_inner(&self, whats_next: Option<&str>) {
+        if self.turn_count == 0 { return; }
         let goal = self.store
             .get_session_goal(self.session_id)
             .unwrap_or_else(|| "(untitled session)".to_string());
@@ -255,6 +318,7 @@ impl Session {
             self.session_id,
             &goal,
             &self.files_changed,
+            whats_next,
         ) {
             crate::log::write("WARN ", &format!("could not write context.md: {}", e));
         }

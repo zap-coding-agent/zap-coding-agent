@@ -250,8 +250,20 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
                     .collect::<Vec<_>>()
                     .join("\n");
                 sections.push(format!(
-                    "## Agent Memory\nThese facts were saved in previous sessions:\n{}", facts
+                    "## Agent Memory\n\
+                     These facts were saved in previous sessions:\n{facts}\n\n\
+                     You can proactively persist cross-project facts that are worth \
+                     remembering using `/memory set <key> <value>`.",
+                    facts = facts
                 ));
+            } else {
+                sections.push(
+                    "## Agent Memory\n\
+                     No facts saved yet. Use `/memory set <key> <value>` to persist \
+                     cross-project facts (e.g. preferred patterns, team conventions, \
+                     API endpoints) that should be available in future sessions."
+                        .to_string(),
+                );
             }
         }
     }
@@ -305,22 +317,14 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
              who it's for — not a dump of internal implementation details."
         ));
     }
-    // On-demand knowledge files — context.md and session_log.md are session-
-    // specific and change every turn, so keep them as lazy hints.
-    {
-        let mut hints: Vec<&str> = Vec::new();
-        if std::path::Path::new(".zap/context.md").exists() {
-            hints.push("- `.zap/context.md` — last session: goal, files touched, what's next (read when asked to resume, \"where were we\", or what to work on next)");
-        }
-        if std::path::Path::new(".zap/session_log.md").exists() {
-            hints.push("- `.zap/session_log.md` — history of past sessions (read when asked about past work or recent changes)");
-        }
-        if !hints.is_empty() {
-            sections.push(format!(
-                "## Session History Files\nRead these with `read_file` only when relevant:\n{}",
-                hints.join("\n")
-            ));
-        }
+    // session_log.md — lazy hint (context.md is already injected above at startup)
+    if std::path::Path::new(".zap/session_log.md").exists() {
+        sections.push(
+            "## Session History\n\
+             `.zap/session_log.md` lists goals and files from past sessions. \
+             Read it with `read_file` when the user asks about past work or recent changes."
+                .to_string(),
+        );
     }
 
     // ── Git status ────────────────────────────────────────────────────────────

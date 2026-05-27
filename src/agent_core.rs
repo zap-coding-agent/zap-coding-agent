@@ -206,7 +206,7 @@ pub async fn run_repl(config: &Config) -> Result<()> {
     }
 
     let _ = rl.save_history(&history_path);
-    session.save_context();
+    session.save_context_with_summary().await;
     session.hooks.fire_session_end();
     println!("\n  {} Goodbye.", "⚡".bright_yellow());
     audit::record("repl_end")?;

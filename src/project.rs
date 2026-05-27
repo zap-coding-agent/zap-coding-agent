@@ -106,8 +106,36 @@ pub fn context_files() -> Vec<String> {
     files
 }
 
+/// Extract the "What's next" section content from context.md, if any.
+fn extract_whats_next(content: &str) -> Option<String> {
+    let mut in_section = false;
+    let mut lines: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        if line.starts_with("## What's next") {
+            in_section = true;
+            continue;
+        }
+        if in_section {
+            if line.starts_with("## ") { break; }
+            lines.push(line);
+        }
+    }
+    let text = lines.join("\n").trim().to_string();
+    if text.is_empty() || text.starts_with("<!--") {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 /// Write `.zap/context.md` at session end.
-pub fn save_session_context(session_id: i64, goal: &str, files_changed: &[String]) -> Result<()> {
+/// `whats_next`: LLM-generated summary of next steps; if `None`, preserves existing content.
+pub fn save_session_context(
+    session_id: i64,
+    goal: &str,
+    files_changed: &[String],
+    whats_next: Option<&str>,
+) -> Result<()> {
     let now = Utc::now().format("%Y-%m-%d %H:%M").to_string();
     let files_section = if files_changed.is_empty() {
         "  (none)".to_string()
@@ -120,6 +148,14 @@ pub fn save_session_context(session_id: i64, goal: &str, files_changed: &[String
             .collect::<Vec<_>>()
             .join("\n")
     };
+
+    // Prefer the provided summary; fall back to preserved existing content.
+    let existing = std::fs::read_to_string(zap_dir().join("context.md")).unwrap_or_default();
+    let next_section = whats_next
+        .map(|s| s.to_string())
+        .or_else(|| extract_whats_next(&existing))
+        .unwrap_or_else(|| "<!-- fill this in between sessions -->".to_string());
+
     let content = format!(
         "# Session Context\n\
          \n\
@@ -135,7 +171,7 @@ pub fn save_session_context(session_id: i64, goal: &str, files_changed: &[String
          {files_section}\n\
          \n\
          ## What's next\n\
-         <!-- fill this in between sessions -->\n"
+         {next_section}\n"
     );
     std::fs::write(zap_dir().join("context.md"), content)?;
     Ok(())

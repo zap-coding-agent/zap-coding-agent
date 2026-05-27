@@ -550,6 +550,77 @@ The key insight: `/init` is not just a template generator — it's the bridge be
 
 ---
 
+### 7. Automated Session Continuity — Never Lose Your Thread
+
+Claude Code and most other agents have no persistent memory of what you worked on last time. Every session you start over, re-explaining the goal, pasting in the error you were debugging, and reloading context you already established.
+
+zap automates the handoff between sessions completely — you pick up exactly where you left off, without doing anything.
+
+#### What happens at session end
+
+When you close zap (`/exit`, Ctrl+C, or closing the terminal), it automatically:
+
+1. **Summarizes what's next** — makes a small LLM call (~500 tokens, 20s timeout) over the last 10 messages and generates 1-3 bullet points describing the concrete next steps: file names, function names, features still in progress.
+2. **Writes `.zap/context.md`** — a structured handoff file: goal, files touched, and the LLM-generated "What's next" summary.
+3. **Appends `.zap/session_log.md`** — a dated history of every session: goal + files changed.
+
+```
+# Session Context
+
+## Last updated
+2026-05-27 14:32 — Session #42
+
+## What was being worked on
+Refactoring session/mod.rs into submodules
+
+## Files touched
+  - src/session/commands/code.rs
+  - src/session/turn.rs
+  - src/context_manager.rs
+
+## What's next
+- Add `summarize_whats_next` to session/commands/code.rs (async, 20s timeout)
+- Update tui/mod.rs line 110 and agent_core.rs line 209 to call `.await`
+- Bump version to 0.13.38 and update FEATURES.md before commit
+```
+
+#### What happens at session start
+
+When you open zap again:
+
+- The "What was being worked on" line appears in the **startup banner** — you see it before you type anything
+- The full `context.md` is injected into the **system prompt** as `## Last Session Handoff` — the agent already knows the context before your first message
+- In CLI mode, zap asks "Resume from last session?" — one keypress to restore context
+
+```
+  ◌ Last: Refactoring session/mod.rs into submodules
+  ◌ Files: src/session/commands/code.rs, src/session/turn.rs
+```
+
+#### Better than Claude Code's approach
+
+Claude Code has no automated session handoff. It relies on you to maintain a `CLAUDE.md` or re-paste context manually. zap does it automatically — the LLM generates the "What's next" summary, so it captures intent and in-progress state that a simple file-diff or commit log can't.
+
+#### How it compares to Claude's memory system
+
+| | Claude (claude.ai) | zap |
+|---|---|---|
+| Per-conversation | ✗ — each chat is isolated | ✓ context.md injected every session |
+| Cross-project | ✓ global user memory | `/memory set` — persisted key-value store, injected globally |
+| Auto-generated | ✓ Claude writes memories | ✓ LLM summarizes "What's next" at exit |
+| File-visible | ✗ opaque | ✓ `.zap/context.md`, readable and editable |
+
+**Agent memory** (`/memory set key value`) is the cross-project equivalent — facts saved here (API patterns, team conventions, preferred approaches) are injected into every session, across every project.
+
+```
+/memory set error-style  always use anyhow::Context for wrapping errors
+/memory set test-db      never mock the database — always use a test container
+/memory list             show all saved facts
+/memory del error-style  remove a fact
+```
+
+---
+
 ## Features at a glance
 
 | | |
