@@ -163,8 +163,13 @@ pub(super) async fn run_normal_turn(
                     done = true;
                 }
                 _ = tick => {
-                    while let Ok(ev) = rx.try_recv() {
-                        app.apply_event(ev);
+                    // Cap at 64 events per tick so a warning flood (e.g. index errors)
+                    // cannot starve the spinner or freeze the UI.
+                    for _ in 0..64 {
+                        match rx.try_recv() {
+                            Ok(ev) => app.apply_event(ev),
+                            Err(_) => break,
+                        }
                     }
                     app.tick_spinner();
 

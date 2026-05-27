@@ -14,7 +14,13 @@ impl CodeIndex {
         let conn = rusqlite::Connection::open(&db_path)
             .context("open code index db")?;
 
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        // WAL mode is faster but can fail on Windows with locked .db-shm files
+        // (antivirus, OneDrive, network drives). Fall back to DELETE silently.
+        conn.execute_batch("PRAGMA synchronous=NORMAL;")
+            .context("set synchronous pragma")?;
+        if conn.execute_batch("PRAGMA journal_mode=WAL;").is_err() {
+            let _ = conn.execute_batch("PRAGMA journal_mode=DELETE;");
+        }
 
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS symbols (
@@ -128,6 +134,8 @@ impl CodeIndex {
     pub fn index_dir(&mut self, dir: &Path) -> Result<(usize, usize)> {
         let mut files = 0;
         let mut symbols = 0;
+        let mut skipped = 0usize;
+        let mut first_err: Option<String> = None;
 
         let extensions = &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java"];
         let entries = walkdir_filtered(dir, extensions);
@@ -136,9 +144,21 @@ impl CodeIndex {
             if self.needs_reindex(&path) {
                 match self.index_file(&path) {
                     Ok(n) => { files += 1; symbols += n; }
-                    Err(e) => crate::log::write("WARN ", &format!("index: skip {:?}: {}", path, e)),
+                    Err(e) => {
+                        // Accumulate silently — emit one summary at the end to avoid
+                        // flooding the TUI with per-file warnings (e.g. readonly DB).
+                        if first_err.is_none() { first_err = Some(e.to_string()); }
+                        skipped += 1;
+                    }
                 }
             }
+        }
+
+        if skipped > 0 {
+            crate::log::write("WARN ", &format!(
+                "index: {} file(s) skipped — {} (fix .zap/code.db permissions or run /init again)",
+                skipped, first_err.unwrap_or_default()
+            ));
         }
 
         if files > 0 {

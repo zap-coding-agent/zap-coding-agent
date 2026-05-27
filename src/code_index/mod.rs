@@ -196,19 +196,28 @@ pub fn spawn_background_indexer(cwd: PathBuf) {
             .unwrap_or(120);
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(secs));
         interval.tick().await;
+        let mut consecutive_errors = 0u32;
         loop {
             interval.tick().await;
             let Some(g) = GLOBAL_INDEX.get() else { continue };
             let Ok(mut guard) = g.try_lock() else { continue };
             match guard.index_dir(&cwd) {
                 Ok((files, symbols)) if files > 0 => {
+                    consecutive_errors = 0;
                     crate::log::write(
                         "INDEX",
                         &format!("tree-sitter · background · {} files updated · {} symbols", files, symbols),
                     );
                 }
-                Ok(_) => {}
-                Err(e) => crate::log::write("WARN ", &format!("background index error: {}", e)),
+                Ok(_) => { consecutive_errors = 0; }
+                Err(e) => {
+                    consecutive_errors += 1;
+                    crate::log::write("WARN ", &format!("background index error: {}", e));
+                    if consecutive_errors >= 3 {
+                        crate::log::write("WARN ", "background indexer: stopping after 3 consecutive failures (check .zap/code.db)");
+                        break;
+                    }
+                }
             }
         }
     });
