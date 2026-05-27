@@ -403,6 +403,8 @@ impl App {
                                 self.files_changed_this_turn += 1;
                             }
                             tc.result = Some(ToolDone { elapsed_ms, success, preview });
+                            // Auto-expand every tool result — users can Ctrl+O to collapse.
+                            self.expanded_tools.insert(id.clone());
                             break;
                         }
                     }

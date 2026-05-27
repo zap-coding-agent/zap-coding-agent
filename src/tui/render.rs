@@ -737,9 +737,9 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let keybinds = if matches!(app.state, AppState::Idle) {
-        "  ↑↓ scroll  Tab  Ctrl+O expand  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+Q quit"
+        "  ↑↓ scroll  Tab  Ctrl+O collapse  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+Q quit"
     } else {
-        "  ↑↓ scroll  Ctrl+O expand  Ctrl+C cancel"
+        "  ↑↓ scroll  Ctrl+O collapse  Ctrl+C cancel"
     };
     let mut spans = vec![
         Span::styled(hint, Style::default().fg(hint_color)),
@@ -1139,7 +1139,7 @@ pub fn tool_call_lines(tc: &UiToolCall, expanded: bool, width: u16) -> Vec<Line<
                 lines.push(Line::from(vec![
                     Span::styled("    ", Style::default().fg(border)),
                     Span::styled(
-                        "  ↑ Ctrl+O for next tool  (all expanded → collapses all)".to_string(),
+                        "  ↑ Ctrl+O collapses all  ·  Ctrl+O again to re-expand".to_string(),
                         Style::default().fg(hint_color).add_modifier(Modifier::ITALIC),
                     ),
                 ]));
