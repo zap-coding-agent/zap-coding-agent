@@ -233,6 +233,39 @@ pub(super) fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         rows.push(kv("time", format!("{}s", elapsed), Color::Rgb(170, 165, 195)));
     }
 
+    // ── Active task list (todo_write/todo_read tools) ─────────────────────────
+    let todos = crate::tools::global_todos();
+    if !todos.is_empty() {
+        let done  = todos.iter().filter(|t| t.status == crate::tools::todo::TodoStatus::Done).count();
+        let total = todos.len();
+        let todo_head_c = Color::Rgb(100, 200, 255);
+        let done_c   = Color::Rgb(100, 180, 120);
+        let active_c = Color::Rgb(255, 210, 80);
+        let pend_c   = Color::Rgb(130, 125, 160);
+        rows.push(Line::from(""));
+        rows.push(Line::from(vec![
+            Span::styled(" tasks", Style::default().fg(todo_head_c).bold()),
+            Span::styled(format!(" {done}/{total}"), Style::default().fg(pend_c)),
+        ]));
+        let max_w = (area.width as usize).saturating_sub(5).max(10);
+        for t in &todos {
+            let (icon_c, icon) = match t.status {
+                crate::tools::todo::TodoStatus::Done       => (done_c,   "●"),
+                crate::tools::todo::TodoStatus::InProgress => (active_c, "◑"),
+                crate::tools::todo::TodoStatus::Pending    => (pend_c,   "○"),
+            };
+            let text: String = if t.content.chars().count() > max_w {
+                format!("{}…", t.content.chars().take(max_w.saturating_sub(1)).collect::<String>())
+            } else {
+                t.content.clone()
+            };
+            rows.push(Line::from(vec![
+                Span::styled(format!(" {} ", icon), Style::default().fg(icon_c)),
+                Span::styled(text, Style::default().fg(pend_c)),
+            ]));
+        }
+    }
+
     let block = Block::default().borders(Borders::LEFT).border_style(Style::default().fg(Color::Rgb(45, 42, 60)));
     let inner = block.inner(area);
     frame.render_widget(block, area);

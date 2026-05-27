@@ -66,6 +66,7 @@ pub struct Session {
 impl Session {
     pub async fn new(config: &Config) -> Result<Self> {
         crate::http::init(config);
+        crate::tools::clear_todos();
         let store = persistence::init()?;
         let session_id = store.save_session("(repl)", &config.model)?;
 

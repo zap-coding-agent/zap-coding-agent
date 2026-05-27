@@ -240,6 +240,26 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
+    // ── Task tracking ─────────────────────────────────────────────────────────
+    sections.push(
+        "## Task Tracking\n\
+         \n\
+         Use `todo_write` and `todo_read` to track multi-step work:\n\
+         \n\
+         - **When to create a list:** the user's request requires 3 or more distinct \
+           steps (e.g. \"add auth to every endpoint\", \"refactor X into Y\", \
+           \"implement feature Z\"). Call `todo_read` first to check for an existing list, \
+           then `todo_write` with all items.\n\
+         - **Status discipline:** mark an item `in_progress` before starting it, \
+           `done` immediately after completing it. Only one item should be `in_progress` \
+           at a time.\n\
+         - **Replace the whole list:** each `todo_write` call is a full replacement — \
+           include every item, not just the changed ones.\n\
+         - **When not to use it:** single-step tasks, quick answers, read-only queries, \
+           or tasks already tracked in a ZAP.md `## Tasks` section."
+            .to_string(),
+    );
+
     // ── Agent memory (persistent key-value facts) ─────────────────────────────
     if let Ok(store) = crate::persistence::init() {
         if let Ok(entries) = store.all_memory() {

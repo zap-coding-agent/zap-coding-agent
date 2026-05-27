@@ -8,9 +8,11 @@ pub mod agent;
 pub mod file;
 pub mod search;
 pub mod shell;
+pub mod todo;
 pub mod web;
 
 pub use agent::SpawnAgentTool;
+pub use todo::{clear_todos, global_todos};
 
 // ── Tool trait ────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,8 @@ impl ToolRegistry {
         use shell::{ListDirectoryTool, ShellTool};
         use web::{WebFetchTool, WebSearchTool};
 
+        use todo::{TodoReadTool, TodoWriteTool};
+
         let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new(), mcp_tool_names: std::collections::HashSet::new() };
         r.register(Arc::new(ReadFileTool));
         r.register(Arc::new(EditFileTool));
@@ -72,6 +76,8 @@ impl ToolRegistry {
         r.register(Arc::new(CodeMapTool));
         r.register(Arc::new(WebFetchTool));
         r.register(Arc::new(WebSearchTool));
+        r.register(Arc::new(TodoWriteTool));
+        r.register(Arc::new(TodoReadTool));
         r
     }
 
