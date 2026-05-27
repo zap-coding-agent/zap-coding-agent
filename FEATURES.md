@@ -31,13 +31,24 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 ### Module structure
 | Module | File | Responsibility |
 |---|---|---|
-| Session core | `src/session/mod.rs` | struct, `new()`, tool loop, slash dispatcher |
+| Session core | `src/session/mod.rs` | struct, `new()`, slash dispatcher, context helpers |
+| Session turn | `src/session/turn.rs` | `handle_user_turn` — LLM loop, compaction, streaming |
+| Session tools | `src/session/tools.rs` | `execute_tool_round` — permissions, parallel execution, secrets scan |
+| Session history | `src/session/history.rs` | windowed history, token limits, tool-result pruning |
+| Session preview | `src/session/preview.rs` | `smart_tool_preview` — tool-specific one-liner summaries |
+| Session casual | `src/session/casual.rs` | casual-message detection, context injection rules |
 | Slash commands | `src/session/commands/` | 10 focused submodules (code, index, tasks, git, skills, memory, media, provider, session_mgmt, info) |
+| Code index | `src/code_index/mod.rs` | global singleton, `spawn_background_indexer`, public types |
+| Code index impl | `src/code_index/index_impl.rs` | all `impl CodeIndex` methods (open, index, search, stats) |
+| Code index walk | `src/code_index/walk.rs` | filesystem walk, language detection, mtime helpers |
+| Code index extract | `src/code_index/extract.rs` | tree-sitter symbol extraction for Rust/Python/JS/Go/Java |
 | TUI render | `src/tui/render/` | 7 focused submodules (messages, layout, header, overlays, diff, dialogs) |
 | TUI commands | `src/tui/commands/` | command picker, filter/resolve, handle_inline; text builders in text.rs |
-| Session history | `src/session/history.rs` | conversation history helpers |
-| Session preview | `src/session/preview.rs` | message preview rendering |
-| Session casual | `src/session/casual.rs` | casual conversation handling |
+| TUI turn handler | `src/tui/turn_handler.rs` | `run_normal_turn`, `handle_tui_slash` — main turn/slash routing |
+| TUI startup | `src/tui/startup.rs` | session replay, welcome messages, session load |
+| TUI goal | `src/tui/goal.rs` | `/goal` command handler, completion detection, tool-expand cycling |
+| TUI lifecycle | `src/tui/lifecycle.rs` | suspend/resume terminal, dir picker, task-planning flow |
+| TUI git info | `src/tui/git_info.rs` | branch name, dirty/ahead/behind status, diff shortstat |
 | Theme constants | `src/ui.rs:theme` | named colour palette (PRIMARY, MUTED, BORDER, …) |
 | inquire picker style | `src/ui.rs:inquire_render_config` | shared RenderConfig for all pickers |
 

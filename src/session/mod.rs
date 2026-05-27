@@ -1,51 +1,28 @@
-/// Core agent session: struct, initialisation, tool loop, and slash dispatcher.
-/// Slash-command implementations live in `commands` to keep this file focused.
 pub mod commands;
 mod casual;
 mod history;
 mod preview;
-use casual::{is_casual_message, is_topic_shift, needs_prior_context};
+mod tools;
+mod turn;
+
 pub use history::model_context_limit;
-use history::{ctx_bar, select_tools_for_turn, windowed_history};
-use preview::smart_tool_preview;
+
 use anyhow::Result;
 use colored::Colorize;
-use futures::future::join_all;
 use inquire::Confirm;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::Ordering;
 
 use crate::{
-    audit,
-    config::{Config, Provider},
+    config::Config,
     context_manager,
-    llm_client::{create_client, BeforeOutput, ContentBlock, LlmProvider, Message, Usage},
+    llm_client::{create_client, ContentBlock, LlmProvider, Message, Usage},
     permission_manager::PermissionManager,
     persistence,
     tools::{SpawnAgentTool, ToolRegistry},
-    ui::{format_cost, tool_icon, ThinkingSpinner},
+    ui::ThinkingSpinner,
 };
 
 pub const MAX_TURNS: usize = 50;
-
-/// Print a truncated inline preview of tool output so the user can see what happened
-/// even if the LLM produces no follow-up text.
-fn print_tool_output(output: &str) {
-    let trimmed = output.trim();
-    if trimmed.is_empty() { return; }
-    const MAX_LINES: usize = 20;
-    let lines: Vec<&str> = trimmed.lines().collect();
-    let shown = lines.len().min(MAX_LINES);
-    for line in &lines[..shown] {
-        println!("    {}", line.truecolor(160, 155, 185));
-    }
-    if lines.len() > MAX_LINES {
-        println!(
-            "    {}",
-            format!("… {} more lines", lines.len() - MAX_LINES).truecolor(100, 95, 130)
-        );
-    }
-}
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
@@ -83,7 +60,6 @@ pub struct Session {
     /// Info lines shown at TUI startup (context banner, init nudge). Drained by run_tui().
     pub startup_notices: Vec<String>,
     /// Per-turn skill trace: (turn_number, input_preview, skill_names, reason_if_none).
-    /// "reason_if_none" is Some("casual") or Some("no match") when skills=[].
     pub skill_trace: Vec<(usize, String, Vec<String>, Option<String>)>,
 }
 
@@ -111,25 +87,19 @@ impl Session {
         let tool_defs  = tools.tool_definitions();
         let tool_count = tool_defs.len();
 
-        // First run: write bundled skills to ~/.zap/skills/ so users can view/edit them.
-        // Skips any file that already exists — user edits are never overwritten.
         let _bootstrapped = crate::skill_manager::bootstrap_bundled_skills();
 
         let skills    = crate::skill_manager::load_all_skills(&config.skill_paths);
         let always_on = crate::skill_manager::always_on_skills(&skills);
 
-        // Bake Core skills into the base system prompt once at startup.
         if !always_on.is_empty() {
             let block = crate::skill_manager::build_always_on_prompt(&always_on);
             system.push_str("\n\n");
             system.push_str(&block);
         }
 
-        // ── C2: Load project.json — use persisted languages, skip domain prompt ─
         let project_meta = crate::project::load_project_meta();
 
-        // Build domain scope: project.json → manifest detection → extension scan → empty.
-        // Never prompt the user — skills fire via keyword triggers regardless of scope.
         let detected = crate::skill_manager::detect_domain_scope(&skills);
         let domain_scope: std::collections::HashSet<String> = if let Some(ref meta) = project_meta {
             if !meta.language.is_empty() {
@@ -137,8 +107,6 @@ impl Session {
             } else if !detected.is_empty() {
                 detected.iter().cloned().collect()
             } else {
-                // Manifest check missed — try extension scan (handles React/TS repos without
-                // a package.json at the exact cwd root).
                 crate::skill_manager::detect_from_extensions(&skills)
                     .into_iter().collect()
             }
@@ -149,7 +117,6 @@ impl Session {
                 .into_iter().collect()
         };
 
-        // ── C3: Index nudge (shown once when project isn't indexed yet) ────────
         let index_nudge: Option<String> = if config.is_subagent {
             None
         } else {
@@ -232,7 +199,6 @@ impl Session {
             }
         }
 
-        // ── C1: Session context banner + system prompt injection ──────────────
         let mut startup_notices: Vec<String> = Vec::new();
         if !config.is_subagent {
             if let Some(summary) = crate::project::context_summary() {
@@ -244,7 +210,6 @@ impl Session {
                 };
 
                 if config.tui_mode {
-                    // TUI: silently inject + queue notices for welcome area.
                     startup_notices.push(format!("↩ Last: {}", summary));
                     if !files_part.is_empty() {
                         startup_notices.push(format!("   {}", files_part));
@@ -254,7 +219,6 @@ impl Session {
                         system.push_str(&ctx);
                     }
                 } else {
-                    // CLI: show banner and ask whether to resume (TTY only).
                     println!("  {} Last: {}", "◌".dimmed(), summary.truecolor(180, 175, 210));
                     if !files_part.is_empty() {
                         println!("  {} {}", "◌".dimmed(), files_part.dimmed());
@@ -277,7 +241,6 @@ impl Session {
                 }
             }
 
-            // C3 nudge: print for CLI, queue for TUI.
             if let Some(nudge) = index_nudge {
                 if config.tui_mode {
                     startup_notices.push(nudge);
@@ -288,18 +251,12 @@ impl Session {
         }
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        // Open the index DB but do NOT scan on startup — scanning can be slow on
-        // large directories. Use /index to trigger a manual scan.
         let code_index = {
-            // Fallback chain: cwd → system temp dir → in-memory.
-            // The /tmp fallback was wrong on Windows (path doesn't exist → panic).
             let idx = crate::code_index::CodeIndex::open(&cwd)
                 .or_else(|_| crate::code_index::CodeIndex::open(&std::env::temp_dir()))
                 .or_else(|_| crate::code_index::CodeIndex::open_in_memory())
                 .unwrap_or_else(|e| {
-                    // This path should be unreachable but must not panic.
                     crate::log::write("WARN ", &format!("code index unavailable: {e}"));
-                    // Create the most minimal valid CodeIndex we can.
                     crate::code_index::CodeIndex::open_in_memory().expect("SQLite in-memory always works")
                 });
             let arc = Arc::new(Mutex::new(idx));
@@ -307,15 +264,12 @@ impl Session {
             arc
         };
 
-        // Refresh understanding.md with deterministic facts at session start.
-        // Uses cached index stats (no re-scan) so startup stays fast.
         if !config.is_subagent {
             let (files, symbols, langs) = code_index.lock().ok().and_then(|guard| {
                 let (f, s) = guard.total_stats().ok()?;
                 let l = guard.stats_by_language().ok().unwrap_or_default();
                 Some((f, s, l))
             }).unwrap_or_default();
-            // Warn if index is empty — LLM tools will silently return nothing until /index runs.
             if files == 0 {
                 let msg = "Code index is empty — run /index to enable find_definition and code_map tools.".to_string();
                 if config.tui_mode {
@@ -330,7 +284,6 @@ impl Session {
             }
         }
 
-        // Spawn background tree-sitter indexer for interactive sessions.
         if !config.is_subagent {
             crate::code_index::spawn_background_indexer(cwd.clone());
         }
@@ -381,8 +334,6 @@ impl Session {
         chars / 4
     }
 
-    /// Context fill as 0–100 percentage.
-    /// Priority: ZAP_MAX_CONTEXT_TOKENS env var → --budget flag → model default.
     pub fn context_fill_pct(&self) -> u8 {
         let tokens = self.estimated_context_tokens();
         let limit = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
@@ -391,798 +342,6 @@ impl Session {
             .or_else(|| self.config.budget.map(|b| b as usize))
             .unwrap_or_else(|| model_context_limit(&self.model));
         ((tokens * 100) / limit).min(100) as u8
-    }
-
-    // ── Core tool loop ────────────────────────────────────────────────────────
-
-    pub async fn handle_user_turn(&mut self, input: &str) -> Result<()> {
-        // Fire UserPromptSubmit hooks — any hook that prints to stdout modifies the prompt.
-        let modified;
-        let input = if !self.hooks.user_prompt_submit.is_empty() {
-            if let Some(new_prompt) = self.hooks.fire_user_prompt_submit(input) {
-                modified = new_prompt;
-                modified.as_str()
-            } else {
-                input
-            }
-        } else {
-            input
-        };
-
-        // ── Topic-shift warning ───────────────────────────────────────────────
-        if self.turn_count >= 3 && is_topic_shift(input, &self.messages) {
-            println!(
-                "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
-                "💡".bright_yellow(),
-                "/branch".cyan(),
-                "/exit".cyan(),
-            );
-        }
-
-        // ── Context pressure handling ─────────────────────────────────────────
-        // DISABLE_COMPACT=1 turns off all automatic compaction (use for debugging).
-        let disable_compact = std::env::var("DISABLE_COMPACT").is_ok();
-        let ctx_pct = self.context_fill_pct();
-        let ctx_limit_k = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .or_else(|| self.config.budget.map(|b| b as usize))
-            .unwrap_or_else(|| model_context_limit(&self.model)) / 1000;
-        let ctx_used_k = (self.estimated_context_tokens() / 1000).max(1);
-
-        // --budget hard stop: refuse new turns when at 100%.
-        if self.config.budget.is_some() && ctx_pct >= 100 {
-            println!(
-                "  {} Token budget exhausted (~{}k tokens). Start a new session or use /compact.",
-                "✗".red().bold(), ctx_used_k
-            );
-            return Ok(());
-        }
-        // Silent auto-compact at 90%+ — no blocking dialog. Circuit breaker stops after
-        // 3 failures so autonomous tasks don't loop forever on an uncompactable session.
-        if !disable_compact && ctx_pct >= 90 && self.compact_failures < 3 {
-            println!(
-                "  {} Context {}% (~{}k/{}k) — compacting…",
-                "⟳".truecolor(200, 150, 60), ctx_pct, ctx_used_k, ctx_limit_k,
-            );
-            self.cmd_compact().await;
-        }
-
-        // Determine once whether this is a no-context casual turn.
-        // A message that looks casual but is answering a question or confirming
-        // an action (e.g. "ok push it", "yes", "go ahead") is NOT casual.
-        let is_casual = is_casual_message(input) && !needs_prior_context(input, &self.messages);
-
-        // Skip skill injection entirely for casual/greeting messages — saves 3-10k tokens.
-        let matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual {
-            Vec::new()
-        } else {
-            let mut ms = crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
-            // Inject explicitly pinned skills every turn regardless of trigger matching.
-            for skill in &self.skills {
-                if self.pinned_skills.contains(&skill.name)
-                    && !ms.iter().any(|s| s.name == skill.name)
-                {
-                    ms.push(skill);
-                }
-            }
-            ms
-        };
-        let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
-
-        // Record per-turn skill trace for /skill log.
-        {
-            let preview: String = input.chars().take(60).collect();
-            let names: Vec<String> = matched_skills.iter().map(|s| s.name.clone()).collect();
-            let reason = if matched_skills.is_empty() {
-                Some(if is_casual { "casual".to_string() } else { "no match".to_string() })
-            } else {
-                None
-            };
-            self.skill_trace.push((self.turn_count + 1, preview, names, reason));
-        }
-
-        let effective_system = if is_casual {
-            context_manager::build_casual_system_prompt(&self.config)
-        } else if matched_skills.is_empty() {
-            self.system.clone()
-        } else {
-            let skill_summary = crate::skill_manager::skills_summary(&matched_skills);
-            if crate::tui::channel::is_tui_mode() {
-                crate::tui::channel::tui_send(
-                    crate::tui::channel::TuiEvent::ActiveSkill(skill_summary.clone())
-                );
-            } else {
-                println!(
-                    "  {} skills: {}",
-                    "↳".truecolor(255, 200, 60),
-                    skill_summary.dimmed()
-                );
-            }
-            let skill_block = crate::skill_manager::build_skill_prompt(&matched_skills);
-            // Append skill block to the already-built base system prompt instead of
-            // rebuilding from scratch — avoids re-reading CLAUDE.md on every skill turn.
-            format!("{}\n\n{}", self.system, skill_block)
-        };
-
-        let msg_tokens_estimate = input.len() / 4;
-
-        // Repair orphaned tool_use blocks from an interrupted previous turn.
-        // If the last message is an assistant message that still has ToolUse blocks,
-        // the corresponding tool_results were never sent (Ctrl+C, secrets abort, etc.).
-        // Add synthetic results so the API doesn't reject the next request with HTTP 400.
-        if let Some(last) = self.messages.last() {
-            if last.role == "assistant" {
-                let orphaned: Vec<String> = last.content.iter()
-                    .filter_map(|b| {
-                        if let ContentBlock::ToolUse { id, .. } = b { Some(id.clone()) } else { None }
-                    })
-                    .collect();
-                if !orphaned.is_empty() {
-                    let synthetic: Vec<ContentBlock> = orphaned.into_iter()
-                        .map(|id| ContentBlock::ToolResult {
-                            tool_use_id: id,
-                            content: "Turn cancelled — result unavailable.".to_string(),
-                        })
-                        .collect();
-                    self.messages.push(Message::tool_results(synthetic));
-                }
-            }
-        }
-
-        let user_msg = if self.staged_images.is_empty() {
-            Message::user_text(input)
-        } else {
-            let mut blocks: Vec<ContentBlock> = self.staged_images.drain(..)
-                .map(|(mime, data)| ContentBlock::Image { media_type: mime, data })
-                .collect();
-            blocks.push(ContentBlock::Text { text: input.to_string() });
-            Message { role: "user".to_string(), content: blocks }
-        };
-        self.messages.push(user_msg);
-        self.turn_count += 1;
-        audit::record(&format!("user_turn: {}", input))?;
-
-        if self.turn_count == 1 {
-            let short = if input.len() > 80 { &input[..80] } else { input };
-            let _ = self.store.update_session_goal(self.session_id, short);
-        }
-
-        for turn in 0..MAX_TURNS {
-            tracing::info!(turn = turn, "calling LLM");
-
-            // In TUI mode use a no-op spinner — the TUI event loop animates via
-            // LlmChunk events. In CLI mode use the normal indicatif spinner.
-            let mut spinner = if crate::tui::channel::is_tui_mode() {
-                crate::ui::ThinkingSpinner::noop()
-            } else {
-                Self::make_spinner()
-            };
-            let before_output: BeforeOutput = if crate::tui::channel::is_tui_mode() {
-                Box::new(|| {})
-            } else {
-                let pb_clone      = spinner.pb_clone();
-                let stop_clone    = spinner.stop_signal();
-                let stopped_clone = spinner.stopped_signal();
-                let model_label   = self.model.clone();
-                Box::new(move || {
-                    // Signal the spinner thread to stop and wait for it to fully
-                    // exit before clearing the bar. Without this, indicatif can
-                    // redraw after finish_and_clear() and erase streaming text
-                    // (especially visible on Windows).
-                    stop_clone.store(true, Ordering::Release);
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_millis(200);
-                    while !stopped_clone.load(Ordering::Acquire)
-                        && std::time::Instant::now() < deadline
-                    {
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    pb_clone.finish_and_clear();
-                    println!("  {} {}",
-                        "╭─".truecolor(70, 65, 90),
-                        model_label.truecolor(100, 95, 130));
-                })
-            };
-
-            let turn_tools = select_tools_for_turn(
-                &self.tool_defs, input, &self.config, &self.messages,
-            );
-            // Casual turns (greetings, acks) will never call a tool — skip the
-            // entire tool definitions array to avoid paying ~2k tokens for nothing.
-            let effective_tools: &[serde_json::Value] = if is_casual {
-                &[]
-            } else {
-                &turn_tools
-            };
-            // Casual turns also need no history — a greeting has no use for a
-            // 20-turn code exploration. Send only the current user message.
-            // Non-casual turns get a pruned, windowed slice of history.
-            let effective_msgs_owned: Vec<Message> = if is_casual {
-                self.messages.last().cloned().into_iter().collect()
-            } else {
-                windowed_history(&self.messages)
-            };
-            let effective_messages: &[Message] = &effective_msgs_owned;
-            let result = self.client
-                .send(&effective_system, effective_messages, effective_tools, Some(before_output), self.thinking_budget)
-                .await;
-            spinner.finish_and_clear();
-
-            // Reactive overflow compaction: if the API rejects the request because the
-            // prompt is too long, compact history and retry transparently.
-            // Also retry on SSE stream errors (connection dropped mid-stream by the server).
-            let response = match result {
-                Ok(r) => r,
-                Err(e) => {
-                    let msg = e.to_string().to_lowercase();
-                    let is_overflow = msg.contains("too long")
-                        || msg.contains("context_length_exceeded")
-                        || msg.contains("maximum context length")
-                        || (msg.contains("prompt") && msg.contains("long"));
-                    let is_stream_drop = msg.contains("sse stream error")
-                        || msg.contains("connection reset")
-                        || msg.contains("connection closed")
-                        || msg.contains("broken pipe")
-                        || msg.contains("incomplete message");
-                    if is_overflow && !disable_compact && self.compact_failures < 3 {
-                        crate::zap_warn!("Prompt too long — compacting and retrying…");
-                        if self.cmd_compact().await { continue; }
-                    } else if is_stream_drop {
-                        let notice = "⚠ Stream dropped by server — retrying in 3s…";
-                        if crate::tui::channel::is_tui_mode() {
-                            crate::tui::channel::tui_send(
-                                crate::tui::channel::TuiEvent::LlmChunk(format!("\n{notice}"))
-                            );
-                        } else {
-                            crate::zap_warn!("{}", notice);
-                        }
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-
-            // Empty response: two known causes.
-            // (a) Zero input_tokens → context window exceeded (server sends 200 OK but empty SSE).
-            // (b) Non-zero input_tokens → proxy or gateway dropped the response body.
-            if response.content.is_empty() {
-                let input_tokens = response.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
-                if input_tokens == 0 {
-                    // Reactive overflow: compact and retry once before giving up.
-                    if !disable_compact && self.compact_failures < 3 {
-                        let ctx_k = self.estimated_context_tokens() / 1000;
-                        crate::zap_warn!("Context ~{}k tokens exceeded limit — compacting and retrying…", ctx_k);
-                        if self.cmd_compact().await { continue; }
-                    }
-                    let ctx_k = self.estimated_context_tokens() / 1000;
-                    crate::zap_warn!(
-                        "Model returned an empty response (context ~{}k tokens). \
-                         Try /compact to free space, or increase the model's context window in LM Studio.",
-                        ctx_k
-                    );
-                } else {
-                    crate::zap_warn!(
-                        "Model returned an empty response (stop_reason: {}, input_tokens: {}). \
-                         Your proxy may have dropped the response body. \
-                         Check ~/.zap/llm.log for the raw SSE stream.",
-                        response.stop_reason, input_tokens
-                    );
-                }
-                break;
-            }
-
-            if let Some(ref u) = response.usage {
-                self.session_usage.input_tokens       += u.input_tokens;
-                self.session_usage.output_tokens      += u.output_tokens;
-                self.session_usage.cache_read_tokens  += u.cache_read_tokens;
-                self.session_usage.cache_write_tokens += u.cache_write_tokens;
-
-                let cost_str = format_cost(u, &self.model);
-                let mut parts: Vec<String> = Vec::new();
-                if skill_tokens_this_turn > 0 {
-                    parts.push(format!("skills {}t", skill_tokens_this_turn));
-                }
-                if msg_tokens_estimate > 0 {
-                    parts.push(format!("msg ~{}t", msg_tokens_estimate));
-                }
-                let post_pct = self.context_fill_pct();
-                let bar = ctx_bar(post_pct);
-                let bar_str = if post_pct >= 85 {
-                    bar.red().bold().to_string()
-                } else if post_pct >= 70 {
-                    bar.bright_yellow().to_string()
-                } else {
-                    bar.truecolor(100, 95, 130).to_string()
-                };
-
-                if !crate::tui::channel::is_tui_mode() {
-                    if parts.is_empty() {
-                        println!("  {} {}", "╰─".truecolor(70, 65, 90), cost_str.truecolor(100, 95, 130));
-                    } else {
-                        println!("  {}", "╰─".truecolor(70, 65, 90));
-                        println!("  {} {}  {}  {}",
-                            "↳".truecolor(255, 200, 60),
-                            parts.join("  ").truecolor(100, 95, 130),
-                            "·".truecolor(70, 65, 90),
-                            cost_str.truecolor(100, 95, 130));
-                    }
-                    if post_pct > 0 {
-                        println!("  {} {}", "↳".truecolor(255, 200, 60), bar_str);
-                    }
-                }
-
-                // Compute cumulative session cost and push to TUI header.
-                let (cost_in, cost_out) = crate::ui::cost_per_million(&self.model);
-                let total_usd = (self.session_usage.input_tokens  as f64 * cost_in
-                               + self.session_usage.output_tokens as f64 * cost_out)
-                               / 1_000_000.0;
-                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::CostUpdate {
-                    total_usd,
-                    input:      self.session_usage.input_tokens,
-                    output:     self.session_usage.output_tokens,
-                    cache_read: self.session_usage.cache_read_tokens,
-                });
-                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ContextUpdate {
-                    pct: post_pct,
-                    turn: self.turn_count,
-                });
-            }
-
-            audit::record(&format!(
-                "llm_response turn={} stop_reason={}", turn, response.stop_reason
-            ))?;
-
-            // Always record the assistant turn in history so subsequent turns
-            // have full context (text-only responses were previously not saved).
-            self.messages.push(Message {
-                role:    "assistant".to_string(),
-                content: response.content.clone(),
-            });
-
-            let tool_calls: Vec<&ContentBlock> = response.content.iter()
-                .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
-                .collect();
-
-            if tool_calls.is_empty() {
-                // If the model signaled tool_use but we parsed no tool blocks,
-                // the proxy likely used a non-standard response format.
-                if response.stop_reason == "tool_use" {
-                    crate::zap_warn!(
-                        "Model signaled stop_reason=tool_use but no tool calls were parsed. \
-                         Your proxy may use a unified/normalized schema that differs from \
-                         the Anthropic wire format. Check ~/.zap/llm.log for the raw response."
-                    );
-                }
-                break;
-            }
-
-            // Phase 1: permissions — quick-check each call, then ONE grouped prompt
-            // for anything that needs user input (instead of per-call prompts).
-            #[derive(Clone)]
-            struct ApprovedCall {
-                id:    String,
-                name:  String,
-                input: serde_json::Value,
-                ctx:   String,
-            }
-            let mut approved:        Vec<ApprovedCall>            = Vec::new();
-            let mut tool_results:    Vec<ContentBlock>            = Vec::new();
-            // Calls that need a user prompt: (id, name, ctx, input)
-            let mut needs_prompt:    Vec<(String, String, String, serde_json::Value)> = Vec::new();
-
-            for block in &tool_calls {
-                let ContentBlock::ToolUse { id, name, input } = block else { continue };
-                tracing::info!(tool = %name, "tool use requested");
-                audit::record(&format!("tool_request name={} id={}", name, id))?;
-
-                let ctx = self.tools.get(name)
-                    .map(|t| t.permission_context(input))
-                    .unwrap_or_default();
-
-                let mut perm_decision = self.permissions.quick_check(name);
-                // MCP tools aren't in WRITE_TOOLS so quick_check gives Allow in Ask mode.
-                // Upgrade to NeedsPrompt unless the user already pressed "always" this session.
-                if matches!(perm_decision, crate::permission_manager::QuickDecision::Allow)
-                    && self.tools.is_mcp_tool(name)
-                    && matches!(self.permissions.mode, crate::config::PermissionMode::Ask)
-                    && !self.permissions.is_session_granted(name)
-                {
-                    perm_decision = crate::permission_manager::QuickDecision::NeedsPrompt;
-                }
-                match perm_decision {
-                    crate::permission_manager::QuickDecision::Allow => {
-                        // Even in Auto mode, destructive shell commands require
-                        // an explicit confirmation before executing.
-                        let force_prompt = if name == "shell" {
-                            if let Some(cmd) = input["command"].as_str() {
-                                crate::tools::shell::destructive_pattern(cmd)
-                                    .map(|reason| format!("[DESTRUCTIVE: {}]\n         {}", reason, ctx))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        if let Some(destructive_ctx) = force_prompt {
-                            needs_prompt.push((id.clone(), name.clone(), destructive_ctx, input.clone()));
-                        } else {
-                            match self.hooks.fire_pre_tool_use(name, input) {
-                                crate::hooks::HookDecision::Block(reason) => {
-                                    audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
-                                    tool_results.push(ContentBlock::ToolResult {
-                                        tool_use_id: id.clone(),
-                                        content:     format!("Blocked by hook: {}", reason),
-                                    });
-                                }
-                                crate::hooks::HookDecision::Allow => {
-                                    approved.push(ApprovedCall {
-                                        id: id.clone(), name: name.clone(),
-                                        input: input.clone(), ctx,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    crate::permission_manager::QuickDecision::Deny => {
-                        audit::record(&format!("tool_denied name={} id={}", name, id))?;
-                        tool_results.push(ContentBlock::ToolResult {
-                            tool_use_id: id.clone(),
-                            content:     "Permission denied by policy.".to_string(),
-                        });
-                    }
-                    crate::permission_manager::QuickDecision::NeedsPrompt => {
-                        needs_prompt.push((id.clone(), name.clone(), ctx, input.clone()));
-                    }
-                }
-            }
-
-            // Batch prompt — one grouped UI for all pending calls.
-            if !needs_prompt.is_empty() {
-                // In TUI mode the permission dialog renders in-place (raw mode stays on).
-                // Only suspend for CLI / inquire prompts that need a full terminal.
-                let in_tui = crate::tui::channel::is_tui_mode();
-                if !in_tui { crate::tui::channel::suspend_for_prompt(); }
-                let batch: Vec<(String, String, String)> = needs_prompt.iter()
-                    .map(|(id, name, ctx, _)| (id.clone(), name.clone(), ctx.clone()))
-                    .collect();
-                let decisions = self.permissions.prompt_batch(&batch).await?;
-                if !in_tui { crate::tui::channel::resume_from_prompt(); }
-                for (i, (id, name, ctx, input)) in needs_prompt.into_iter().enumerate() {
-                    if decisions[i] {
-                        match self.hooks.fire_pre_tool_use(&name, &input) {
-                            crate::hooks::HookDecision::Block(reason) => {
-                                audit::record(&format!("tool_blocked name={} reason={}", name, reason))?;
-                                tool_results.push(ContentBlock::ToolResult {
-                                    tool_use_id: id,
-                                    content:     format!("Blocked by hook: {}", reason),
-                                });
-                            }
-                            crate::hooks::HookDecision::Allow => {
-                                approved.push(ApprovedCall { id, name, input, ctx });
-                            }
-                        }
-                    } else {
-                        audit::record(&format!("tool_denied name={} id={}", name, id))?;
-                        tool_results.push(ContentBlock::ToolResult {
-                            tool_use_id: id,
-                            content:     "Permission denied by user.".to_string(),
-                        });
-                    }
-                }
-            }
-
-            // Phase 1b: handle mcp_connect calls (mutates tool registry — must run before parallel phase).
-            let mut connect_calls: Vec<ApprovedCall> = Vec::new();
-            approved.retain(|c| {
-                if c.name == "mcp_connect" { connect_calls.push(c.clone()); false } else { true }
-            });
-            for call in connect_calls {
-                let server_name = call.input["server"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-
-                // Emit ToolStart so TUI shows the connecting state.
-                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolStart {
-                    id:    call.id.clone(),
-                    name:  "mcp_connect".to_string(),
-                    label: server_name.clone(),
-                });
-                if !crate::tui::channel::is_tui_mode() {
-                    println!(
-                        "  {} {}  {}",
-                        "╭─".truecolor(70, 65, 90),
-                        "⬡ mcp_connect".truecolor(100, 210, 255).bold(),
-                        server_name.truecolor(130, 120, 155),
-                    );
-                }
-
-                let t0 = std::time::Instant::now();
-                let result_text = if server_name.is_empty() {
-                    "Error: server_name is required.".to_string()
-                } else {
-                    match self.tools.connect_mcp(&server_name).await {
-                        Ok(msg) => {
-                            self.tool_defs = self.tools.tool_definitions();
-                            msg
-                        }
-                        Err(e) => format!("Failed to connect to '{}': {}", server_name, e),
-                    }
-                };
-                let ms = t0.elapsed().as_millis();
-                let success = !result_text.starts_with("Failed") && !result_text.starts_with("Error");
-
-                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
-                    id:         call.id.clone(),
-                    elapsed_ms: ms as u64,
-                    success,
-                    preview:    result_text.clone(),
-                });
-                if !crate::tui::channel::is_tui_mode() {
-                    if success {
-                        println!("  {} {}  {}",
-                            "╰─".truecolor(70, 65, 90),
-                            "✓".truecolor(80, 210, 120),
-                            format!("{}ms", ms).truecolor(90, 85, 110));
-                    } else {
-                        println!("  {} {} {}",
-                            "╰─".truecolor(70, 65, 90),
-                            "✗".truecolor(220, 80, 80),
-                            result_text.truecolor(220, 80, 80));
-                    }
-                }
-
-                tool_results.push(ContentBlock::ToolResult {
-                    tool_use_id: call.id,
-                    content:     result_text,
-                });
-            }
-
-            // Snapshot (name, input) for PostToolUse hooks before consuming `approved`.
-            let approved_meta: Vec<(String, serde_json::Value)> = approved.iter()
-                .map(|c| (c.name.clone(), c.input.clone()))
-                .collect();
-
-            // Phase 2: execute approved tools in parallel.
-            let exec_futures = approved.into_iter().map(|call| {
-                let tool = self.tools.get(&call.name);
-                async move {
-                    let icon = tool_icon(&call.name);
-                    let cancel_hint = if call.name == "shell" {
-                        format!("  {}", "Ctrl+C to cancel".truecolor(110, 105, 130))
-                    } else {
-                        String::new()
-                    };
-                    let ctx_display = if call.ctx.chars().count() > 52 {
-                        format!("{}…", call.ctx.chars().take(51).collect::<String>())
-                    } else {
-                        call.ctx.clone()
-                    };
-                    // Notify TUI of tool start
-                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolStart {
-                        id: call.id.clone(),
-                        name: call.name.clone(),
-                        label: ctx_display.clone(),
-                    });
-                    if !crate::tui::channel::is_tui_mode() {
-                        println!(
-                            "  {} {} {}  {}{}",
-                            "╭─".truecolor(70, 65, 90),
-                            icon,
-                            call.name.truecolor(100, 210, 255).bold(),
-                            ctx_display.truecolor(130, 120, 155),
-                            cancel_hint,
-                        );
-                    }
-                    let t0 = std::time::Instant::now();
-                    match tool {
-                        Some(t) => {
-                            let _ = audit::record(&format!(
-                                "tool_execute name={} input={}",
-                                call.name,
-                                serde_json::to_string(&call.input).unwrap_or_default()
-                            ));
-                            match t.execute(call.input).await {
-                                Ok(output) => {
-                                    let _ = audit::record(&format!("tool_success name={}", call.name));
-                                    let ms = t0.elapsed().as_millis();
-                                    let preview = smart_tool_preview(&call.name, &output);
-                                    // Notify TUI of tool done
-                                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
-                                        id: call.id.clone(),
-                                        elapsed_ms: ms as u64,
-                                        success: true,
-                                        preview,
-                                    });
-                                    if !crate::tui::channel::is_tui_mode() {
-                                        println!("  {} {}  {}",
-                                            "╰─".truecolor(70, 65, 90),
-                                            "✓".truecolor(80, 210, 120),
-                                            format!("{}ms", ms).truecolor(90, 85, 110));
-                                        if t.shows_inline_output() {
-                                            print_tool_output(&output);
-                                        }
-                                    }
-                                    // Cap tool result size so large outputs don't blow the context.
-                                    const MAX_TOOL_BYTES: usize = 20_000;
-                                    let content = if output.len() > MAX_TOOL_BYTES {
-                                        // Walk back to a valid UTF-8 char boundary.
-                                        let mut cut = MAX_TOOL_BYTES;
-                                        while cut > 0 && !output.is_char_boundary(cut) {
-                                            cut -= 1;
-                                        }
-                                        format!(
-                                            "{}\n\n[... truncated — output was {} bytes, showing first {}]",
-                                            &output[..cut],
-                                            output.len(),
-                                            cut,
-                                        )
-                                    } else {
-                                        output
-                                    };
-                                    ContentBlock::ToolResult { tool_use_id: call.id, content }
-                                }
-                                Err(e) => {
-                                    let _ = audit::record(&format!("tool_error name={} err={}", call.name, e));
-                                    let ms = t0.elapsed().as_millis();
-                                    let err_str = format!("Error: {}", e);
-                                    // Notify TUI of tool done (failure)
-                                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
-                                        id: call.id.clone(),
-                                        elapsed_ms: ms as u64,
-                                        success: false,
-                                        preview: err_str.clone(),
-                                    });
-                                    if !crate::tui::channel::is_tui_mode() {
-                                        println!("  {} {}  {}",
-                                            "╰─".truecolor(70, 65, 90),
-                                            "✗".truecolor(220, 80, 80),
-                                            format!("{}ms", ms).truecolor(90, 85, 110));
-                                        if t.shows_inline_output() {
-                                            println!("    {}", err_str.truecolor(220, 100, 100));
-                                        }
-                                    }
-                                    ContentBlock::ToolResult {
-                                        tool_use_id: call.id,
-                                        content:     err_str,
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            let _ = audit::record(&format!("tool_unknown name={}", call.name));
-                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::ToolDone {
-                                id: call.id.clone(),
-                                elapsed_ms: 0,
-                                success: false,
-                                preview: format!("Unknown tool: {}", call.name),
-                            });
-                            if !crate::tui::channel::is_tui_mode() {
-                                println!("  {} {} unknown tool",
-                                    "╰─".truecolor(70, 65, 90), "✗".truecolor(220, 80, 80));
-                            }
-                            ContentBlock::ToolResult {
-                                tool_use_id: call.id,
-                                content:     format!("Unknown tool: {}", call.name),
-                            }
-                        }
-                    }
-                }
-            });
-            let new_results = join_all(exec_futures).await;
-
-            // Fire PostToolUse hooks (informational — cannot block).
-            for ((name, input), result) in approved_meta.iter().zip(new_results.iter()) {
-                if let ContentBlock::ToolResult { content, .. } = result {
-                    self.hooks.fire_post_tool_use(name, input, content);
-                }
-            }
-
-            // Reindex and record any files that tools reported they wrote to.
-            for block in &tool_calls {
-                if let ContentBlock::ToolUse { name, input, .. } = block {
-                    if let Some(tool) = self.tools.get(name) {
-                        if let Some(path_str) = tool.affected_path(input) {
-                            crate::code_index::global_reindex_file(std::path::Path::new(path_str));
-                            self.files_changed.push(path_str.to_string());
-                        }
-                    }
-                }
-            }
-
-            tool_results.extend(new_results);
-
-            // Warn before sending potential secrets to cloud.
-            if matches!(self.config.provider, Provider::Anthropic)
-                || self.config.base_url.as_deref().map(|u| {
-                    !u.contains("192.168.") && !u.contains("localhost") && !u.contains("127.0.0.1")
-                }).unwrap_or(false)
-            {
-                for result in &tool_results {
-                    if let ContentBlock::ToolResult { content, .. } = result {
-                        let hits = crate::secret_scanner::scan(content);
-                        if !hits.is_empty() {
-                            let send_anyway = if crate::tui::channel::is_tui_mode() {
-                                // TUI-native path: async-await so the tick loop stays alive.
-                                let (tx, rx) = tokio::sync::oneshot::channel();
-                                crate::tui::channel::set_secret_request(
-                                    crate::tui::channel::SecretScannerRequest {
-                                        hits: hits.iter().map(|h| h.to_string()).collect(),
-                                        response_tx: tx,
-                                    },
-                                );
-                                rx.await.unwrap_or(false)
-                            } else {
-                                // CLI path: suspend terminal, prompt, resume.
-                                crate::tui::channel::suspend_for_prompt();
-                                println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
-                                for h in &hits { println!("    {}", h.to_string().yellow()); }
-                                print!("  send anyway? [y/N] ");
-                                let _ = std::io::Write::flush(&mut std::io::stdout());
-                                let mut ans = String::new();
-                                std::io::stdin().read_line(&mut ans).ok();
-                                let send = ans.trim().eq_ignore_ascii_case("y");
-                                if !send {
-                                    println!("  {} aborted by user — secrets not sent", "✗".red());
-                                }
-                                crate::tui::channel::resume_from_prompt();
-                                send
-                            };
-                            if !send_anyway {
-                                if crate::tui::channel::is_tui_mode() {
-                                    crate::tui::channel::tui_send(
-                                        crate::tui::channel::TuiEvent::LlmChunk(
-                                            "\n⚠ Secrets detected in tool output — turn cancelled.".to_string(),
-                                        ),
-                                    );
-                                }
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Inject any mid-turn btw messages the user typed via Ctrl+B.
-            let btw_msgs = crate::tui::channel::drain_btw();
-            let mut tool_msg = Message::tool_results(tool_results);
-            if !btw_msgs.is_empty() {
-                let note = btw_msgs
-                    .iter()
-                    .map(|m| format!("↳ User note (added mid-turn): {m}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                // Append as a text block inside the user message so the model sees it
-                // in context without starting a new turn.
-                if let Some(ContentBlock::Text { text }) = tool_msg.content.last_mut() {
-                    text.push_str(&format!("\n\n{note}"));
-                } else {
-                    tool_msg.content.push(ContentBlock::Text { text: note });
-                }
-            }
-            self.messages.push(tool_msg);
-        }
-
-        // Drain any btw messages that weren't picked up mid-turn (turn ended before next tool call).
-        // Surface them as a new pending turn so the user gets a proper response.
-        let leftover_btw = crate::tui::channel::drain_btw();
-        if !leftover_btw.is_empty() {
-            crate::tui::channel::tui_send(
-                crate::tui::channel::TuiEvent::BtwCarryover(leftover_btw)
-            );
-        }
-
-        // Persist conversation after every turn.
-        if let Ok(json) = serde_json::to_string(&self.messages) {
-            let _ = self.store.save_messages(self.session_id, &json);
-        }
-
-        // Signal remote control clients that the turn is complete.
-        crate::remote_channel::send_done();
-
-        Ok(())
     }
 
     // ── Slash dispatcher ──────────────────────────────────────────────────────
@@ -1300,4 +459,3 @@ impl Session {
         false
     }
 }
-
