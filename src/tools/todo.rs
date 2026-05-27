@@ -14,7 +14,7 @@ pub enum TodoStatus {
 }
 
 impl TodoStatus {
-    fn from_str(s: &str) -> Self {
+    pub(crate) fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "in_progress" | "inprogress" | "active" => Self::InProgress,
             "done" | "completed" | "complete" => Self::Done,
@@ -45,7 +45,7 @@ pub enum Priority {
 }
 
 impl Priority {
-    fn from_str(s: &str) -> Self {
+    pub(crate) fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "high"   => Self::High,
             "low"    => Self::Low,
@@ -184,5 +184,160 @@ impl Tool for TodoReadTool {
         let done  = todos.iter().filter(|t| t.status == TodoStatus::Done).count();
         let total = todos.len();
         Ok(format!("Tasks ({done}/{total} done):\n{}", lines.join("\n")))
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Serialise tests that mutate the global TODO_LIST.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn locked_clean<F: FnOnce()>(f: F) {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_todos();
+        f();
+        clear_todos();
+    }
+
+    // ── Parsing ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn status_known_values() {
+        assert_eq!(TodoStatus::from_str("pending"),     TodoStatus::Pending);
+        assert_eq!(TodoStatus::from_str("in_progress"), TodoStatus::InProgress);
+        assert_eq!(TodoStatus::from_str("inprogress"),  TodoStatus::InProgress);
+        assert_eq!(TodoStatus::from_str("active"),      TodoStatus::InProgress);
+        assert_eq!(TodoStatus::from_str("done"),        TodoStatus::Done);
+        assert_eq!(TodoStatus::from_str("completed"),   TodoStatus::Done);
+        assert_eq!(TodoStatus::from_str("complete"),    TodoStatus::Done);
+    }
+
+    #[test]
+    fn status_unknown_defaults_to_pending() {
+        assert_eq!(TodoStatus::from_str(""),        TodoStatus::Pending);
+        assert_eq!(TodoStatus::from_str("garbage"), TodoStatus::Pending);
+        assert_eq!(TodoStatus::from_str("DONE"),    TodoStatus::Done); // case-insensitive
+    }
+
+    #[test]
+    fn priority_known_values() {
+        assert_eq!(Priority::from_str("high"),   Priority::High);
+        assert_eq!(Priority::from_str("medium"), Priority::Medium);
+        assert_eq!(Priority::from_str("low"),    Priority::Low);
+        assert_eq!(Priority::from_str("HIGH"),   Priority::High); // case-insensitive
+    }
+
+    #[test]
+    fn priority_unknown_defaults_to_medium() {
+        assert_eq!(Priority::from_str(""),       Priority::Medium);
+        assert_eq!(Priority::from_str("urgent"), Priority::Medium);
+    }
+
+    // ── Global state ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn clear_and_read_empty() {
+        locked_clean(|| {
+            assert!(global_todos().is_empty());
+        });
+    }
+
+    #[test]
+    fn set_and_read_round_trip() {
+        locked_clean(|| {
+            set_todos(vec![
+                TodoItem { id: 1, content: "Write tests".into(), status: TodoStatus::InProgress, priority: Priority::High },
+                TodoItem { id: 2, content: "Review PR".into(),   status: TodoStatus::Pending,    priority: Priority::Low  },
+            ]);
+            let list = global_todos();
+            assert_eq!(list.len(), 2);
+            assert_eq!(list[0].content, "Write tests");
+            assert_eq!(list[0].status,  TodoStatus::InProgress);
+            assert_eq!(list[1].priority, Priority::Low);
+        });
+    }
+
+    // ── TodoWrite::execute ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_stores_items_and_reports_done_count() {
+        locked_clean(|| {});
+        let tool = TodoWriteTool;
+        let input = serde_json::json!({ "todos": [
+            { "id": 1, "content": "Step A", "status": "done",        "priority": "high"   },
+            { "id": 2, "content": "Step B", "status": "in_progress", "priority": "medium" },
+            { "id": 3, "content": "Step C", "status": "pending",     "priority": "low"    },
+        ]});
+        let result = tool.execute(input).await.unwrap();
+        assert!(result.contains("1/3"), "expected '1/3 done', got: {result}");
+
+        let list = global_todos();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].status, TodoStatus::Done);
+        assert_eq!(list[1].status, TodoStatus::InProgress);
+        assert_eq!(list[2].priority, Priority::Low);
+        clear_todos();
+    }
+
+    #[tokio::test]
+    async fn write_empty_array_clears_list() {
+        locked_clean(|| {});
+        set_todos(vec![TodoItem { id: 1, content: "old".into(), status: TodoStatus::Pending, priority: Priority::Medium }]);
+        let tool = TodoWriteTool;
+        let result = tool.execute(serde_json::json!({ "todos": [] })).await.unwrap();
+        assert!(result.contains("0/0"));
+        assert!(global_todos().is_empty());
+        clear_todos();
+    }
+
+    #[tokio::test]
+    async fn write_missing_todos_key_errors() {
+        let tool = TodoWriteTool;
+        let err = tool.execute(serde_json::json!({})).await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn write_missing_fields_use_defaults() {
+        locked_clean(|| {});
+        let tool = TodoWriteTool;
+        // content missing → empty string; status missing → pending
+        let input = serde_json::json!({ "todos": [{ "id": 1 }] });
+        let result = tool.execute(input).await.unwrap();
+        assert!(result.contains("0/1"));
+        let list = global_todos();
+        assert_eq!(list[0].content, "");
+        assert_eq!(list[0].status,  TodoStatus::Pending);
+        assert_eq!(list[0].priority, Priority::Medium);
+        clear_todos();
+    }
+
+    // ── TodoRead::execute ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn read_empty_list() {
+        locked_clean(|| {});
+        let result = TodoReadTool.execute(serde_json::json!({})).await.unwrap();
+        assert_eq!(result, "No tasks in the current session.");
+    }
+
+    #[tokio::test]
+    async fn read_shows_items_with_icons() {
+        locked_clean(|| {});
+        set_todos(vec![
+            TodoItem { id: 1, content: "First".into(),  status: TodoStatus::Done,       priority: Priority::High   },
+            TodoItem { id: 2, content: "Second".into(), status: TodoStatus::InProgress, priority: Priority::Medium },
+        ]);
+        let result = TodoReadTool.execute(serde_json::json!({})).await.unwrap();
+        assert!(result.contains("1/2 done"), "got: {result}");
+        assert!(result.contains("●"), "done icon missing");
+        assert!(result.contains("◑"), "in-progress icon missing");
+        assert!(result.contains("First"));
+        assert!(result.contains("Second"));
+        clear_todos();
     }
 }

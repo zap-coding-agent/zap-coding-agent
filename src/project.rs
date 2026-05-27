@@ -107,7 +107,7 @@ pub fn context_files() -> Vec<String> {
 }
 
 /// Extract the "What's next" section content from context.md, if any.
-fn extract_whats_next(content: &str) -> Option<String> {
+pub(crate) fn extract_whats_next(content: &str) -> Option<String> {
     let mut in_section = false;
     let mut lines: Vec<&str> = Vec::new();
     for line in content.lines() {
@@ -474,4 +474,91 @@ Auto-generated from code index. Run `/init` for a detailed LLM-powered analysis.
 
     std::fs::write(&path, content)?;
     Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_context(next: &str) -> String {
+        format!(
+            "# Session Context\n\
+             ## What was being worked on\n\
+             some goal\n\
+             ## Files touched\n\
+               - foo.rs\n\
+             ## What's next\n\
+             {next}\n"
+        )
+    }
+
+    #[test]
+    fn extract_returns_content() {
+        let s = make_context("- Finish auth module
+- Write tests");
+        let r = extract_whats_next(&s).unwrap();
+        assert!(r.contains("Finish auth module"), "got: {r}");
+        assert!(r.contains("Write tests"));
+    }
+
+    #[test]
+    fn extract_none_for_placeholder_comment() {
+        let s = make_context("<!-- fill this in between sessions -->");
+        assert!(extract_whats_next(&s).is_none());
+    }
+
+    #[test]
+    fn extract_none_when_section_absent() {
+        let s = "# Session Context
+## What was being worked on
+goal
+";
+        assert!(extract_whats_next(s).is_none());
+    }
+
+    #[test]
+    fn extract_none_for_blank_content() {
+        let s = make_context("
+
+  
+");
+        assert!(extract_whats_next(&s).is_none());
+    }
+
+    #[test]
+    fn extract_stops_at_next_section_header() {
+        let s = "## What's next
+- step one
+## Other section
+- should not appear
+";
+        let r = extract_whats_next(s).unwrap();
+        assert!(r.contains("step one"));
+        assert!(!r.contains("should not appear"), "leaked: {r}");
+    }
+
+    #[test]
+    fn extract_trims_whitespace() {
+        let s = "## What's next
+
+  - trimmed  
+
+";
+        let r = extract_whats_next(s).unwrap();
+        assert!(!r.starts_with("
+"), "leading newline: {r}");
+        assert!(!r.ends_with("
+"), "trailing newline: {r}");
+    }
+
+    #[test]
+    fn extract_multiline_content() {
+        let s = make_context("- step one
+- step two
+- step three");
+        let r = extract_whats_next(&s).unwrap();
+        assert_eq!(r.lines().count(), 3);
+    }
 }
