@@ -89,6 +89,34 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
+    // ── Semantic search strategy ──────────────────────────────────────────────
+    sections.push(
+        "## Semantic Search Strategy\n\
+         \n\
+         When the user asks about a **concept** rather than an exact symbol name \
+         (e.g. \"authentication\", \"caching\", \"SSO\", \"error handling\"), the code \
+         may use completely different names (e.g. `sso_handler`, `iam_login`, `jwt_validate`).\n\
+         \n\
+         **Before any tool calls, write one line stating what names you will try:**\n\
+         > Searching index for: auth, login, sso, iam, oauth, token, session\n\
+         \n\
+         **Then search in this order — index first, grep as last resort:**\n\
+         1. `find_definition` for the 2–3 most likely candidate names (index hit = exact, done)\n\
+         2. If those miss, `code_map` on the most relevant directory — \
+            scan the symbol list to spot the real name\n\
+         3. Only if `code_map` still doesn't reveal it: `search_code` with a regex \
+            alternation of all candidates: `(auth|sso|login|iam|oauth)`\n\
+         \n\
+         **Always end your answer with one line explaining how you found it:**\n\
+         - Index hit  : \"Found via index: `SsoHandler` at `auth/sso.ts:42`\"\n\
+         - Fallback   : \"Not in index — found via search: `sso_handler` at `auth/sso.ts:42`\"\n\
+         - Not found  : \"Not found in index or search — this feature may not be implemented yet.\"\n\
+         \n\
+         This makes your reasoning transparent: the user sees exactly what was tried, \
+         what matched, and how confident the result is."
+            .to_string(),
+    );
+
     // ── Tool usage policy ─────────────────────────────────────────────────────
     sections.push(
         "## Tool Usage Policy\n\
