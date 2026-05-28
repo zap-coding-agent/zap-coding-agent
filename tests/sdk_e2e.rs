@@ -138,3 +138,147 @@ fn sdk_shell_timeout_respected() {
         "expected timeout mention in output:\n{stdout}"
     );
 }
+
+// ── B2: batch_edit for multiple replacements in the same file ─────────────────
+
+/// B2: agent uses batch_edit (not repeated edit_file calls) when replacing
+/// multiple occurrences across the same file.
+#[test]
+#[ignore = "requires API key — run with: cargo test --test sdk_e2e -- --ignored"]
+fn b2_batch_edit_used_for_multi_replace() {
+    let path = "/tmp/zap_b2_e2e.txt";
+    std::fs::write(
+        path,
+        "PLACEHOLDER one\nPLACEHOLDER two\nPLACEHOLDER three\n",
+    )
+    .expect("setup: write test file");
+
+    let prompt = format!(
+        "{{\"type\":\"user\",\"text\":\"In {path} replace every occurrence of PLACEHOLDER with VALUE. Use batch_edit.\"}}\n"
+    );
+    let stdout = run_sdk(&[&prompt, "{\"type\":\"quit\"}\n"], Duration::from_secs(90));
+
+    assert!(
+        stdout.contains("batch_edit"),
+        "expected batch_edit tool call in stdout:\n{stdout}"
+    );
+    let content = std::fs::read_to_string(path).expect("read result file");
+    assert!(
+        !content.contains("PLACEHOLDER"),
+        "all PLACEHOLDERs should be replaced, got:\n{content}"
+    );
+    assert!(
+        content.contains("VALUE"),
+        "replacements should use VALUE, got:\n{content}"
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+// ── B3: find_references before rename ────────────────────────────────────────
+
+/// B3: agent calls find_references before editing when renaming a symbol.
+#[test]
+#[ignore = "requires API key — run with: cargo test --test sdk_e2e -- --ignored"]
+fn b3_find_references_called_before_rename() {
+    let path = "/tmp/zap_b3_e2e.rs";
+    std::fs::write(
+        path,
+        "fn old_func() -> i32 { 42 }\nfn main() { old_func(); old_func(); }\n",
+    )
+    .expect("setup: write test file");
+
+    let prompt = format!(
+        "{{\"type\":\"user\",\"text\":\"Rename old_func to new_func in {path}. Find all references before editing.\"}}\n"
+    );
+    let stdout = run_sdk(&[&prompt, "{\"type\":\"quit\"}\n"], Duration::from_secs(120));
+
+    // find_references must appear before any edit_file / batch_edit line.
+    let ref_pos = stdout
+        .find("find_references")
+        .unwrap_or_else(|| panic!("find_references not called:\n{stdout}"));
+    let edit_pos = stdout
+        .find("edit_file")
+        .or_else(|| stdout.find("batch_edit"))
+        .unwrap_or_else(|| panic!("no edit tool called after find_references:\n{stdout}"));
+    assert!(
+        ref_pos < edit_pos,
+        "find_references ({ref_pos}) must precede edit ({edit_pos})"
+    );
+
+    let content = std::fs::read_to_string(path).expect("read result file");
+    assert!(
+        !content.contains("old_func"),
+        "old_func should be gone after rename, got:\n{content}"
+    );
+    assert!(
+        content.contains("new_func"),
+        "new_func should be present after rename, got:\n{content}"
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+// ── B4: shell timeout param is respected ─────────────────────────────────────
+
+/// B4: shell timeout parameter is wired through — sleep 10 with 1s timeout
+/// completes well before the 60s default would have expired.
+#[test]
+#[ignore = "requires API key — run with: cargo test --test sdk_e2e -- --ignored"]
+fn b4_shell_timeout_param_wired_through() {
+    let start = std::time::Instant::now();
+    let stdout = run_sdk(
+        &[
+            "{\"type\":\"user\",\"text\":\"Run: sleep 10 — use a 1-second timeout\"}\n",
+            "{\"type\":\"quit\"}\n",
+        ],
+        Duration::from_secs(60),
+    );
+    let elapsed = start.elapsed();
+
+    // If the old default-60s bug were present this would block for ~60s.
+    // With the wired timeout the agent aborts at ~1s + LLM round-trip ≈ <20s.
+    assert!(
+        elapsed < Duration::from_secs(40),
+        "sleep 10 with 1s timeout should abort fast, took {:?}",
+        elapsed
+    );
+    assert!(
+        stdout.contains("timed out") || stdout.contains("timeout") || stdout.contains("error"),
+        "expected timeout error in output:\n{stdout}"
+    );
+}
+
+// ── B5: config files read directly without code_map ──────────────────────────
+
+/// B5: agent reads Cargo.toml directly with read_file — no code_map call first.
+/// The carve-out in the code navigation strategy section allows this.
+#[test]
+#[ignore = "requires API key — run with: cargo test --test sdk_e2e -- --ignored"]
+fn b5_config_file_read_without_code_map() {
+    let stdout = run_sdk(
+        &[
+            "{\"type\":\"user\",\"text\":\"What is the current version in Cargo.toml? Just state the version number.\"}\n",
+            "{\"type\":\"quit\"}\n",
+        ],
+        Duration::from_secs(60),
+    );
+
+    // read_file must be called.
+    assert!(stdout.contains("read_file"), "read_file not found in stdout:\n{stdout}");
+
+    // code_map must NOT be called before read_file (carve-out exempts manifest files).
+    let read_pos = stdout.find("read_file").unwrap();
+    if let Some(map_pos) = stdout.find("code_map") {
+        assert!(
+            map_pos > read_pos,
+            "code_map ({map_pos}) must not appear before read_file ({read_pos}) for Cargo.toml"
+        );
+    }
+
+    // The response must contain the correct version.
+    let text = find_assistant_text(&stdout)
+        .unwrap_or_else(|| panic!("no assistant response:\n{stdout}"));
+    assert!(
+        text.contains("0.13.57"),
+        "response should contain current version 0.13.57, got: {text}"
+    );
+}
