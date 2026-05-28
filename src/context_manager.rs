@@ -97,10 +97,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          (e.g. \"authentication\", \"caching\", \"SSO\", \"error handling\"), the code \
          may use completely different names (e.g. `sso_handler`, `iam_login`, `jwt_validate`).\n\
          \n\
-         **Before any tool calls, write one line stating what names you will try:**\n\
-         > Searching index for: auth, login, sso, iam, oauth, token, session\n\
-         \n\
-         **Then search in this order — index first, grep as last resort:**\n\
+         **Search in this order — index first, grep as last resort:**\n\
          1. `find_definition` for the 2–3 most likely candidate names (index hit = exact, done)\n\
          2. If those miss, `code_map` on the most relevant directory — \
             scan the symbol list to spot the real name\n\
