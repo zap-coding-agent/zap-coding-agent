@@ -184,6 +184,7 @@ pub fn load_all_skills(extra_dirs: &[String]) -> Vec<Skill> {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                // Flat file: <name>.md
                 if path.extension().and_then(|e| e.to_str()) == Some("md") {
                     match parse_skill_file(&path, source.clone()) {
                         Ok(skill) => {
@@ -194,6 +195,26 @@ pub fn load_all_skills(extra_dirs: &[String]) -> Vec<Skill> {
                             }
                         }
                         Err(e) => crate::zap_warn!("skill: could not parse {:?}: {}", path, e),
+                    }
+                // Kiro-style subdirectory: <name>/SKILL.md
+                } else if path.is_dir() {
+                    let skill_md = path.join("SKILL.md");
+                    if skill_md.exists() {
+                        let dir_name = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        match parse_skill_file(&skill_md, source.clone()) {
+                            Ok(mut skill) => {
+                                skill.name = dir_name;
+                                if let Some(pos) = skills.iter().position(|s| s.name == skill.name) {
+                                    skills[pos] = skill;
+                                } else {
+                                    skills.push(skill);
+                                }
+                            }
+                            Err(e) => crate::zap_warn!("skill: could not parse {:?}: {}", skill_md, e),
+                        }
                     }
                 }
             }
