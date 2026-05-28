@@ -7,6 +7,7 @@ use tokio::time::timeout;
 /// background processes (`nohup cmd > /dev/null 2>&1 &`) and return immediately.
 pub const COMMAND_TIMEOUT_SECS: u64 = 60;
 
+#[derive(Debug)]
 pub struct ShellOutput {
     pub stdout: String,
     pub stderr: String,
@@ -105,5 +106,34 @@ async fn run_with_timeout(cmd: &mut Command) -> Result<ShellOutput> {
              Tip: for long-running processes use: nohup <cmd> > /tmp/out.log 2>&1 &",
             COMMAND_TIMEOUT_SECS
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn timeout_is_respected() {
+        let start = std::time::Instant::now();
+        let result = run_command_timeout("sleep 5", 1).await;
+        let elapsed = start.elapsed().as_secs();
+        assert!(result.is_err(), "should have timed out");
+        assert!(elapsed < 3, "should complete in ~1s, took {elapsed}s");
+    }
+
+    #[tokio::test]
+    async fn short_command_completes_within_timeout() {
+        let out = run_command_timeout("echo hello", 30).await.unwrap();
+        assert_eq!(out.stdout.trim(), "hello");
+        assert_eq!(out.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn timeout_error_message_includes_duration() {
+        let err = run_command_timeout("sleep 5", 1).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("timed out"), "error must say timed out");
+        assert!(msg.contains('1'), "error must mention the timeout value");
     }
 }

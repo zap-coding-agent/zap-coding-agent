@@ -541,3 +541,34 @@ fn git_status_summary() -> Option<String> {
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() { None } else { Some(text) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn system_prompt_contains_batch_edit() {
+        let prompt = build_system_prompt(&Config::default()).unwrap();
+        assert!(prompt.contains("batch_edit"), "tool policy must mention batch_edit");
+    }
+
+    #[test]
+    fn system_prompt_contains_find_references() {
+        let prompt = build_system_prompt(&Config::default()).unwrap();
+        assert!(prompt.contains("find_references"), "tool policy must mention find_references");
+    }
+
+    #[test]
+    fn system_prompt_contains_config_carveout() {
+        let prompt = build_system_prompt(&Config::default()).unwrap();
+        assert!(prompt.contains("Cargo.toml") && prompt.contains("Exception"),
+            "code nav must include config-file carve-out");
+    }
+
+    #[test]
+    fn casual_prompt_omits_tool_policy() {
+        let prompt = build_casual_system_prompt(&Config::default());
+        assert!(!prompt.contains("batch_edit"), "casual prompt must not include full tool policy");
+    }
+}

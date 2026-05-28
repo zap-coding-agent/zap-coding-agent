@@ -320,3 +320,33 @@ impl Config {
     }
 }
 
+#[cfg(test)]
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            permission_mode: PermissionMode::Auto,
+            api_key: String::new(),
+            model: "test-model".to_string(),
+            provider: Provider::OpenAi,
+            base_url: None,
+            output_format: OutputFormat::Text,
+            agent_depth: 0,
+            is_subagent: false,
+            spawn_depth: 0,
+            proxy: None,
+            no_proxy: None,
+            ca_bundle: None,
+            tls_skip_verify: false,
+            timeout_secs: 120,
+            budget: None,
+            skill_paths: vec![],
+            context_paths: vec![],
+            disable_stream: false,
+            skip_domain_prompt: false,
+            tui_mode: false,
+            provider_slug: "test".to_string(),
+            all_providers: HashMap::new(),
+        }
+    }
+}
+
