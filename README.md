@@ -305,6 +305,43 @@ And open feature requests asking Anthropic to add this natively: [#4556](https:/
 
 The two approaches solve different failure modes. Agentic search avoids index drift. AST indexing avoids blind writes into a codebase the agent hasn't fully read.
 
+#### Does the index hurt quality? Honest answer
+
+This is the right question to ask before committing to this approach.
+
+**What the index cannot do:**
+
+| Limitation | Why |
+|---|---|
+| No semantic search | AST sees `fn process_payment()` — it doesn't know it's related to `fn charge_stripe()` unless you search for both by name. Grep can find "stripe" in comments and variable names; the index only knows symbol names and kinds. |
+| No type resolution | `x: Bar` is indexed as a symbol reference but zap can't tell you what `Bar` resolves to across modules or crate boundaries. The LSP can. zap can't. |
+| Index can lag | The background indexer runs every 120s. If you rename a function mid-session using a shell command and immediately ask zap about it, the old name might still be in the index for a brief window. (Write-path is immediate — zap reindexes any file it edits itself. The lag only applies to external edits.) |
+| Supported languages only | Rust, Python, TypeScript, JavaScript, Go, Java. Files in other languages are invisible to the index — grep fallback only. |
+
+**Where this actually loses vs. Claude Code:**
+
+Claude Code's pure agentic search handles one class of question better: **open-ended semantic exploration**. "Find all the code involved in the checkout flow" — the index returns nothing useful unless you already know the symbol names. Claude Code's model decides to grep for "checkout", "cart", "payment" across the codebase and builds a picture. zap's model queries the index, gets low-confidence results, and falls back to the same grep — but it burns an extra round-trip.
+
+**Why it doesn't hurt structural quality:**
+
+Boris Cherny's claim that agentic search won "by a lot" was specifically about **RAG and vector embeddings** — not AST indexes. Those are different tools. Vector search introduces false positives (semantically similar but wrong symbols). AST indexes don't — a symbol lookup either hits or misses, with no hallucinated matches. The fallback to ripgrep when the index misses means zap never does *worse* than pure grep; it only does better when the symbol is indexed.
+
+**The actual quality risk:**
+
+The real risk isn't that the index returns wrong results — it's that the model over-trusts "not found in index" and stops looking. Mitigated by the explicit ripgrep fallback that runs on every index miss, and the model instruction to use `search_code` when `find_definition` returns nothing.
+
+**Net verdict:**
+
+| Question type | Index approach | Agentic search |
+|---|---|---|
+| "Does `UserRepository` exist?" | ✓ instant, exact | slower (grep scan) |
+| "What pattern do existing repositories follow?" | ✓ schema query across all types | slower (read multiple files) |
+| "Find all code related to checkout flow" | ~ (falls back to grep) | ✓ semantic exploration |
+| "What type does `x` resolve to?" | ✗ (no type inference) | ✓ (can read and reason) |
+| Large repo, first question of session | ✓ (no file reads needed) | slower (cold grep) |
+
+zap's bet is that the structural questions — "what exists?", "what's the pattern?", "where is it defined?" — dominate real coding sessions, and the semantic exploration case is handled adequately by the grep fallback. The bet fails if your workflow is mostly open-ended codebase exploration with no known symbol names to anchor on. It wins if your workflow is mostly "build on top of what's there" — which describes most feature work.
+
 ---
 
 ### 3. Built in Rust — One Binary, No Runtime
