@@ -85,6 +85,11 @@ These files are never pre-loaded into the context window — the model reads the
 
 ---
 
+<!-- demo GIF — generate with: cd demos/code_indexing && vhs demo.tape -->
+<!-- ![code indexing demo](demos/code_indexing/demo.gif) -->
+
+---
+
 ## What makes zap different
 
 ### 1. Skill-First Approach — Context That Earns Its Place

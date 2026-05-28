@@ -32,8 +32,12 @@ available for actual reasoning.
 # 1. Clone Flask and build the index
 ./setup.sh
 
-# 2. Run all three scenarios
+# 2. Run all three scenarios (live output)
 ./run.sh
+
+# 3. Record demo GIFs (requires: brew install vhs)
+vhs demo.tape        # → demo.gif       (scenario 1 only, ~25 s)
+vhs demo_full.tape   # → demo_full.gif  (all 3 scenarios, ~2 min)
 ```
 
 ## Scenarios
