@@ -251,7 +251,7 @@ impl Session {
     /// Ask the LLM for a brief "What's next" summary, then save context with it.
     pub async fn save_context_with_summary(&self) {
         if self.turn_count == 0 { return; }
-        println!("  {} Writing session summary…", "◎".truecolor(180, 175, 210));
+        println!("  {} Saving session… (5s)", "◎".truecolor(180, 175, 210));
         let whats_next = self.summarize_whats_next().await;
         self.save_context_inner(whats_next.as_deref());
     }
@@ -286,7 +286,7 @@ impl Session {
         );
 
         let result = tokio::time::timeout(
-            Duration::from_secs(20),
+            Duration::from_secs(5),
             self.client.send(
                 "You summarize software development sessions into actionable next-step notes.",
                 &[Message::user_text(prompt)],
