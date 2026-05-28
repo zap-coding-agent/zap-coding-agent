@@ -145,10 +145,14 @@ impl CodeIndex {
                 match self.index_file(&path) {
                     Ok(n) => { files += 1; symbols += n; }
                     Err(e) => {
-                        // Accumulate silently — emit one summary at the end to avoid
-                        // flooding the TUI with per-file warnings (e.g. readonly DB).
-                        if first_err.is_none() { first_err = Some(e.to_string()); }
+                        let msg = e.to_string();
+                        if first_err.is_none() { first_err = Some(msg.clone()); }
                         skipped += 1;
+                        // Bail immediately on readonly — avoids holding the mutex for O(N)
+                        // files and prevents the TUI from hanging on foreground tool calls.
+                        if msg.contains("readonly") || msg.contains("read only") || msg.contains("ReadOnly") {
+                            break;
+                        }
                     }
                 }
             }
@@ -157,7 +161,7 @@ impl CodeIndex {
         if skipped > 0 {
             crate::log::write("WARN ", &format!(
                 "index: {} file(s) skipped — {} (fix .zap/code.db permissions or run /init again)",
-                skipped, first_err.unwrap_or_default()
+                skipped, first_err.as_deref().unwrap_or_default()
             ));
         }
 
@@ -167,6 +171,12 @@ impl CodeIndex {
                 &format!("tree-sitter · scan complete · {} files · {} symbols · {}", files, symbols, dir.display()),
             );
             let _ = self.compute_reference_counts();
+        }
+
+        // Propagate failure so the background indexer can count consecutive errors
+        // and stop retrying after 3 — without this it loops forever every 120 s.
+        if files == 0 && skipped > 0 {
+            return Err(anyhow::anyhow!("{}", first_err.unwrap_or_else(|| "all files skipped".to_string())));
         }
 
         Ok((files, symbols))
