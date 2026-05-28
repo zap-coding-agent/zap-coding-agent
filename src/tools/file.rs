@@ -249,17 +249,24 @@ impl Tool for WriteFileTool {
 
         let _ = crate::snapshot::save_snapshot(path);
 
-        if let Some(parent) = std::path::Path::new(path).parent() {
+        let abs_path = normalize_path(path);
+        if let Some(parent) = abs_path.parent() {
             if !parent.as_os_str().is_empty() {
                 tokio::fs::create_dir_all(parent)
                     .await
-                    .with_context(|| format!("write_file: cannot create dirs for '{}'", path))?;
+                    .with_context(|| format!(
+                        "write_file: cannot create dirs '{}' (resolved to '{}')",
+                        path, parent.display()
+                    ))?;
             }
         }
 
-        tokio::fs::write(path, content)
+        tokio::fs::write(&abs_path, content)
             .await
-            .with_context(|| format!("write_file: cannot write '{}'", path))?;
+            .with_context(|| format!(
+                "write_file: cannot write '{}' (resolved to '{}')",
+                path, abs_path.display()
+            ))?;
 
         Ok(format!("wrote {} bytes to '{}'", content.len(), path))
     }
