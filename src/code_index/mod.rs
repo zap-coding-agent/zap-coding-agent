@@ -201,7 +201,11 @@ pub fn spawn_background_indexer(cwd: PathBuf) {
             interval.tick().await;
             let Some(g) = GLOBAL_INDEX.get() else { continue };
             let Ok(mut guard) = g.try_lock() else { continue };
-            match guard.index_dir(&cwd) {
+            // index_dir is synchronous (tree-sitter parsing + SQLite writes).
+            // block_in_place tells tokio to spin up a replacement worker thread
+            // so the async pool stays at full capacity while this runs.
+            let result = tokio::task::block_in_place(|| guard.index_dir(&cwd));
+            match result {
                 Ok((files, symbols)) if files > 0 => {
                     consecutive_errors = 0;
                     crate::log::write(
