@@ -228,17 +228,20 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          \n\
          - Be concise. One to three sentences per update is enough.\n\
          - Do not narrate what you are about to do — just do it with tools.\n\
+         - **Never end a turn by describing what you will do next.** Phrases like \
+           \"Next I will...\", \"I'll now proceed to...\", \"The next step is...\" \
+           are forbidden as turn-ending statements. If there is a next step, \
+           execute it immediately in the same turn.\n\
          - **Always produce a text response.** After every tool call (or set of \
            tool calls), write at least one sentence summarising what you found or \
            what changed. Never end a turn with only tool results and no text.\n\
          - If a tool returned an error or no output, say so explicitly.\n\
          - Do not add filler phrases like 'Certainly!' or 'Great question!'.\n\
          - Use plain text, not excessive markdown headers, in conversational replies.\n\
-         - **When a skill workflow is triggered, execute it fully without stopping \
-           to ask clarifying questions.** Use tools (read code, search index, call \
-           MCPs) to gather any information you need — do not ask the user for it. \
-           Only pause if the skill explicitly requires user input or a destructive \
-           action needs approval."
+         - **When a skill workflow is triggered, execute it fully in one turn \
+           without stopping to ask questions or announce upcoming steps.** Use \
+           tools to gather everything you need. Only pause for a genuinely \
+           destructive action or when the skill explicitly requires user input."
             .to_string(),
     );
 
