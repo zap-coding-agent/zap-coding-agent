@@ -5,6 +5,12 @@
 agent_audit.jsonl
 agent_sessions.db
 
+# Code index DB — auto-generated cache, never commit (tracked files on Windows
+# can be checked out readonly, causing "attempt to write a readonly database")
+.zap/code.db
+.zap/code.db-shm
+.zap/code.db-wal
+
 # User config (contains API keys — never commit)
 .agent.toml
 *.env
