@@ -1,0 +1,5 @@
+# Cloned demo repos — never commit, re-cloned by setup.sh
+flask/
+express/
+requests/
+fastapi/

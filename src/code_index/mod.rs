@@ -227,6 +227,17 @@ pub fn spawn_background_indexer(cwd: PathBuf) {
     });
 }
 
+/// Build the index for the current directory and print stats.
+/// Used by `zap --index-only` — no session, no LLM call.
+pub fn run_index_standalone() -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    println!("  → indexing {} …", cwd.display());
+    let mut index = CodeIndex::open(&cwd)?;
+    let (files, syms) = index.index_dir(&cwd)?;
+    println!("  ✓ {} file(s) · {} symbol(s) indexed  (.zap/code.db)", files, syms);
+    Ok(())
+}
+
 // ── CodeIndex ─────────────────────────────────────────────────────────────────
 
 pub struct CodeIndex {

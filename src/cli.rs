@@ -61,6 +61,12 @@ pub struct Args {
     /// Also set by AGENT_NO_TUI=1.
     #[arg(long)]
     pub cli: bool,
+
+    /// Build the AST code index for the current directory and exit.
+    /// No LLM call — runs tree-sitter + SQLite, same as /index inside a session.
+    /// Useful in CI or demo setup scripts to pre-index a repo before running zap.
+    #[arg(long)]
+    pub index_only: bool,
 }
 
 // ── Banner ────────────────────────────────────────────────────────────────────
@@ -287,6 +293,10 @@ pub async fn run() -> Result<()> {
 
     if let Some(b) = args.budget {
         config.budget = Some(b);
+    }
+
+    if args.index_only {
+        return crate::code_index::run_index_standalone();
     }
 
     if args.sdk {
