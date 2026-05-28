@@ -201,6 +201,45 @@ pub fn render_diff(diff_text: &str) -> Vec<Line<'static>> {
         
         lines.push(Line::from(Span::styled(text.to_string(), style)));
     }
-    
+
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spans_to_text(lines: &[ratatui::text::Line<'_>]) -> String {
+        lines.iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn windows_backslash_dot_preserved() {
+        // pulldown-cmark treats \. as a CommonMark escape (dot is ASCII punct),
+        // which would turn cicrm-react\.kiro into cicrm-react.kiro.
+        let input = r"File written to C:\dev\repo\cicrm-react\.kiro\specs\bug.md";
+        let rendered = spans_to_text(&parse_markdown(input));
+        assert!(
+            rendered.contains(r"\.kiro"),
+            "backslash before .kiro was consumed; got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn unix_path_unchanged() {
+        // Unix/macOS paths have no backslashes — must pass through unchanged.
+        let input = "File at /dev/repo/cicrm-react/.kiro/specs/bug.md";
+        let rendered = spans_to_text(&parse_markdown(input));
+        assert!(rendered.contains("/.kiro/"), "forward-slash path corrupted: {rendered:?}");
+    }
+
+    #[test]
+    fn markdown_formatting_still_works() {
+        let rendered = spans_to_text(&parse_markdown("**bold** and `code`"));
+        assert!(rendered.contains("bold"), "bold text lost: {rendered:?}");
+        assert!(rendered.contains("code"), "code span lost: {rendered:?}");
+    }
 }
