@@ -236,7 +236,12 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
            what changed. Never end a turn with only tool results and no text.\n\
          - If a tool returned an error or no output, say so explicitly.\n\
          - Do not add filler phrases like 'Certainly!' or 'Great question!'.\n\
-         - Use plain text, not excessive markdown headers, in conversational replies."
+         - Use plain text, not excessive markdown headers, in conversational replies.\n\
+         - **When a skill workflow is triggered, execute it fully without stopping \
+           to ask clarifying questions.** Use tools (read code, search index, call \
+           MCPs) to gather any information you need — do not ask the user for it. \
+           Only pause if the skill explicitly requires user input or a destructive \
+           action needs approval."
             .to_string(),
     );
 
