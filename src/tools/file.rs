@@ -268,7 +268,7 @@ impl Tool for WriteFileTool {
                 path, abs_path.display()
             ))?;
 
-        Ok(format!("wrote {} bytes to '{}'", content.len(), path))
+        Ok(format!("wrote {} bytes to '{}' ({})", content.len(), path, abs_path.display()))
     }
 }
 
