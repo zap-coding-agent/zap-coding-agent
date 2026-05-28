@@ -256,7 +256,7 @@ impl Tool for WriteFileTool {
                     .await
                     .with_context(|| format!(
                         "write_file: cannot create dirs '{}' (resolved to '{}')",
-                        path, parent.display()
+                        path, parent.to_string_lossy().replace('\\', "/")
                     ))?;
             }
         }
@@ -265,10 +265,11 @@ impl Tool for WriteFileTool {
             .await
             .with_context(|| format!(
                 "write_file: cannot write '{}' (resolved to '{}')",
-                path, abs_path.display()
+                path, abs_path.to_string_lossy().replace('\\', "/")
             ))?;
 
-        Ok(format!("wrote {} bytes to '{}' ({})", content.len(), path, abs_path.display()))
+        let abs_display = abs_path.to_string_lossy().replace('\\', "/");
+        Ok(format!("wrote {} bytes to '{}' ({})", content.len(), path, abs_display))
     }
 }
 

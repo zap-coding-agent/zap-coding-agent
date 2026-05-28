@@ -92,6 +92,17 @@ pub fn parse_markdown(text: &str) -> Vec<Line<'static>> {
     let em     = Style::default().fg(Color::Rgb(180, 175, 205)).add_modifier(Modifier::ITALIC);
     let code   = Style::default().fg(Color::Rgb(130, 215, 255)).bg(Color::Rgb(38, 44, 72));
 
+    // CommonMark treats \<punct> as a backslash escape. The only problematic
+    // sequence in Windows paths is \. (backslash + dot), which turns
+    // cicrm-react\.kiro into cicrm-react.kiro. Double it so it survives.
+    let escaped;
+    let text = if text.contains("\\.") {
+        escaped = text.replace("\\.", "\\\\.");
+        escaped.as_str()
+    } else {
+        text
+    };
+
     let parser = Parser::new(text);
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_line: Vec<Span<'static>> = Vec::new();
