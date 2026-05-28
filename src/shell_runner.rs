@@ -5,12 +5,30 @@ use tokio::time::timeout;
 
 /// Default timeout for foreground commands. Long-running tasks should use
 /// background processes (`nohup cmd > /dev/null 2>&1 &`) and return immediately.
-const COMMAND_TIMEOUT_SECS: u64 = 60;
+pub const COMMAND_TIMEOUT_SECS: u64 = 60;
 
 pub struct ShellOutput {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+}
+
+/// Run an arbitrary shell string with a custom timeout.
+pub async fn run_command_timeout(command: &str, timeout_secs: u64) -> Result<ShellOutput> {
+    tracing::info!(command = %command, timeout_secs, "executing shell command");
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
+    run_with_timeout_secs(&mut cmd, timeout_secs).await
 }
 
 /// Run an arbitrary shell string.
@@ -49,6 +67,23 @@ pub async fn run_args_in(program: &str, args: &[&str], dir: &str) -> Result<Shel
     cmd.args(args);
     cmd.current_dir(dir);
     run_with_timeout(&mut cmd).await
+}
+
+async fn run_with_timeout_secs(cmd: &mut Command, secs: u64) -> Result<ShellOutput> {
+    let child = cmd.kill_on_drop(true).output();
+    match timeout(Duration::from_secs(secs), child).await {
+        Ok(Ok(output)) => Ok(ShellOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+        }),
+        Ok(Err(e)) => Err(e).context("command execution failed"),
+        Err(_) => Err(anyhow::anyhow!(
+            "command timed out after {}s\n\
+             Tip: for long-running processes use: nohup <cmd> > /tmp/out.log 2>&1 &",
+            secs
+        )),
+    }
 }
 
 async fn run_with_timeout(cmd: &mut Command) -> Result<ShellOutput> {

@@ -134,7 +134,8 @@ impl Tool for ShellTool {
     fn name(&self) -> &str { "shell" }
     fn description(&self) -> &str {
         "Execute a shell command and return its stdout + stderr. \
-         Requires user approval before executing. Timeout: 30 s."
+         Requires user approval before executing. \
+         Default timeout: 60 s. Use the timeout param for long-running commands (max 300 s)."
     }
     fn input_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -142,7 +143,7 @@ impl Tool for ShellTool {
             "properties": {
                 "command":     { "type": "string",  "description": "Shell command to run." },
                 "description": { "type": "string",  "description": "One-line human-readable description of what this command does." },
-                "timeout":     { "type": "integer", "description": "Timeout in seconds (default 30)." }
+                "timeout":     { "type": "integer", "description": "Timeout in seconds (default 60, max 300). Use for long test suites or slow builds." }
             },
             "required": ["command"]
         })
@@ -161,7 +162,12 @@ impl Tool for ShellTool {
             .ok_or_else(|| anyhow::anyhow!("shell: 'command' must be a string"))?;
         guard_shell(command)?;
 
-        let out = crate::shell_runner::run_command(command).await?;
+        let timeout_secs = input["timeout"]
+            .as_u64()
+            .map(|t| t.min(300))
+            .unwrap_or(crate::shell_runner::COMMAND_TIMEOUT_SECS);
+
+        let out = crate::shell_runner::run_command_timeout(command, timeout_secs).await?;
         let mut result = String::new();
         if !out.stdout.is_empty() {
             result.push_str(&out.stdout);

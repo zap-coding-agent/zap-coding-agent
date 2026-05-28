@@ -57,10 +57,14 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          \n\
          **Strict tool order — do not skip steps:**\n\
          \n\
-         1. **`code_map`** — ALWAYS call this first on any file or directory before \
+         1. **`code_map`** — call this first on any source file or directory before \
             reading it. Returns functions, structs, classes, and line numbers so you \
-            know exactly which lines to read. Do NOT call `read_file` on a file you \
-            have not yet `code_map`ped.\n\
+            know exactly which lines to read. Do NOT call `read_file` on a large source \
+            file you have not yet `code_map`ped.\n\
+            **Exception:** small config/manifest files (`Cargo.toml`, `package.json`, \
+            `go.mod`, `Makefile`, `.env`, `docker-compose.yml`, `pyproject.toml`) may \
+            be read directly with `read_file` — they contain no symbols worth mapping \
+            and a full read costs nothing.\n\
          2. **`find_definition`** — when you know a symbol name, jump directly to its \
             definition. Saves a `search_code` + `read_file` round-trip.\n\
          3. **`search_code`** — pattern/regex search (ripgrep). Use only when the \
@@ -131,6 +135,14 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
            of surrounding context to make it unambiguous.\n\
          - Only use `write_file` when creating a new file or intentionally \
            replacing 100% of an existing file's content.\n\
+         - **For multiple edits to the same file, use `batch_edit` instead of \
+           sequential `edit_file` calls.** It applies all replacements atomically \
+           in one round-trip and shows a single diff. Example: renaming a function \
+           that appears in 4 places — one `batch_edit` call, not four `edit_file` calls.\n\
+         - **Before renaming or deleting any symbol, call `find_references` first** \
+           to see every call site. Skipping this causes silent breakage when callers \
+           exist in other files. Note: `find_references` uses text search — verify \
+           the result list looks reasonable before acting on short or common names.\n\
          \n\
          **Git commands — use `shell` directly:**\n\
          - `git status --short && git log --oneline -10` — working tree + recent history\n\
