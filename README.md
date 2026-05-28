@@ -85,8 +85,8 @@ These files are never pre-loaded into the context window — the model reads the
 
 ---
 
-<!-- demo GIF — generate with: cd demos/code_indexing && vhs demo.tape -->
-<!-- ![code indexing demo](demos/code_indexing/demo.gif) -->
+<!-- generate with: cd demos/code_indexing && VHS_NO_SANDBOX=1 vhs demo.tape -->
+![code indexing demo](demos/code_indexing/demo.gif)
 
 ---
 

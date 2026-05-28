@@ -1,30 +1,31 @@
 # Full demo — all 3 scenarios (~2 min)
 # Shows: symbol lookup, cross-file request trace, Blueprint API surface
 #
-# Usage:
+# Usage (run from demos/code_indexing/ after ./setup.sh):
 #   brew install vhs
-#   cd demos/code_indexing
-#   vhs demo_full.tape       → produces demo_full.gif
+#   VHS_NO_SANDBOX=1 vhs demo_full.tape   → demo_full.gif
 
 Output demo_full.gif
-
 Set FontSize 13
-Set Width 110
-Set Height 38
-Set Theme "Tokyo Night"
+Set Width 1400
+Set Height 700
+Set Theme "TokyoNight"
 Set PlaybackSpeed 1
 Set TypingSpeed 40ms
 
 Hide
+Type `export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"`
+Enter
+Sleep 200ms
 Type "cd flask"
 Enter
 Ctrl+L
 Show
 
 # ── Scenario 1: find the Flask class ─────────────────────────────────────────
-Sleep 400ms
+Sleep 300ms
 Type "../scenarios/01_find_class.sh"
-Sleep 600ms
+Sleep 800ms
 Enter
 Sleep 30s
 
@@ -33,7 +34,7 @@ Sleep 1500ms
 Ctrl+L
 Sleep 400ms
 Type "../scenarios/02_trace_request.sh"
-Sleep 600ms
+Sleep 800ms
 Enter
 Sleep 60s
 
@@ -42,6 +43,6 @@ Sleep 1500ms
 Ctrl+L
 Sleep 400ms
 Type "../scenarios/03_blueprint_api.sh"
-Sleep 600ms
+Sleep 800ms
 Enter
 Sleep 60s
