@@ -305,42 +305,32 @@ And open feature requests asking Anthropic to add this natively: [#4556](https:/
 
 The two approaches solve different failure modes. Agentic search avoids index drift. AST indexing avoids blind writes into a codebase the agent hasn't fully read.
 
-#### Does the index hurt quality? Honest answer
+#### Does the index trade quality for speed?
 
-This is the right question to ask before committing to this approach.
+No — it trades one search strategy for a better one, with a full fallback for the cases the index doesn't own.
 
-**What the index cannot do:**
+**The concern usually raised:** "agentic search won by a lot" — Boris Cherny said this when Anthropic dropped their RAG/vector approach early on. That's true, and the reasoning is sound: vector embeddings introduce false positives (semantically similar but wrong matches), require a build step, and drift as the codebase changes. But zap doesn't use vectors or RAG. It uses an **AST symbol index** — fundamentally different. A symbol lookup either returns the exact definition or it doesn't. No hallucinated matches, no similarity threshold to tune, no embedding model to maintain.
 
-| Limitation | Why |
-|---|---|
-| No semantic search | AST sees `fn process_payment()` — it doesn't know it's related to `fn charge_stripe()` unless you search for both by name. Grep can find "stripe" in comments and variable names; the index only knows symbol names and kinds. |
-| No type resolution | `x: Bar` is indexed as a symbol reference but zap can't tell you what `Bar` resolves to across modules or crate boundaries. The LSP can. zap can't. |
-| Index can lag | The background indexer runs every 120s. If you rename a function mid-session using a shell command and immediately ask zap about it, the old name might still be in the index for a brief window. (Write-path is immediate — zap reindexes any file it edits itself. The lag only applies to external edits.) |
-| Supported languages only | Rust, Python, TypeScript, JavaScript, Go, Java. Files in other languages are invisible to the index — grep fallback only. |
+**The index owns structural questions — where agentic search pays full price:**
 
-**Where this actually loses vs. Claude Code:**
+Every time Claude Code answers "where is `UserRepository` defined?", the model spends tokens deciding which files to read, issues multiple grep calls, reads partial file content, and synthesizes the answer. The index answers the same question in a single SQLite lookup. On a 50k-line repo, that's the difference between 1 tool call and 5.
 
-Claude Code's pure agentic search handles one class of question better: **open-ended semantic exploration**. "Find all the code involved in the checkout flow" — the index returns nothing useful unless you already know the symbol names. Claude Code's model decides to grep for "checkout", "cart", "payment" across the codebase and builds a picture. zap's model queries the index, gets low-confidence results, and falls back to the same grep — but it burns an extra round-trip.
+**Grep handles what the index doesn't:**
 
-**Why it doesn't hurt structural quality:**
+The index knows symbol names, kinds, and locations. It doesn't do open-ended semantic search — "find everything related to the checkout flow" is a grep question, not a symbol question. zap's model uses `search_code` (ripgrep) for those. The index and grep are complementary layers, not competing ones. Every `find_definition` miss automatically falls back to ripgrep — so zap never does worse than pure agentic search, only better when a symbol is indexed.
 
-Boris Cherny's claim that agentic search won "by a lot" was specifically about **RAG and vector embeddings** — not AST indexes. Those are different tools. Vector search introduces false positives (semantically similar but wrong symbols). AST indexes don't — a symbol lookup either hits or misses, with no hallucinated matches. The fallback to ripgrep when the index misses means zap never does *worse* than pure grep; it only does better when the symbol is indexed.
+**The design boundary:**
 
-**The actual quality risk:**
+The index is scoped to the questions that matter most when writing code: "does this already exist?", "what pattern do existing implementations follow?", "where is this defined?". These are the questions that produce duplicate files, invented patterns, and blind writes when unanswered. Open-ended exploration ("show me everything related to payments") is rarer and handled by grep. Type resolution across module boundaries is an LSP problem — and a deliberate non-goal for a terminal agent that ships as a single binary.
 
-The real risk isn't that the index returns wrong results — it's that the model over-trusts "not found in index" and stops looking. Mitigated by the explicit ripgrep fallback that runs on every index miss, and the model instruction to use `search_code` when `find_definition` returns nothing.
-
-**Net verdict:**
-
-| Question type | Index approach | Agentic search |
+| Question | zap | Pure agentic search |
 |---|---|---|
-| "Does `UserRepository` exist?" | ✓ instant, exact | slower (grep scan) |
-| "What pattern do existing repositories follow?" | ✓ schema query across all types | slower (read multiple files) |
-| "Find all code related to checkout flow" | ~ (falls back to grep) | ✓ semantic exploration |
-| "What type does `x` resolve to?" | ✗ (no type inference) | ✓ (can read and reason) |
-| Large repo, first question of session | ✓ (no file reads needed) | slower (cold grep) |
+| "Does `UserRepository` already exist?" | instant SQL lookup | grep scan + file reads |
+| "What pattern do existing repos follow?" | schema query across all types | read multiple files |
+| "Find all code related to the checkout flow" | ripgrep (same as agentic) | ripgrep |
+| Large codebase, cold start | index pre-built, no file reads | cold grep every turn |
 
-zap's bet is that the structural questions — "what exists?", "what's the pattern?", "where is it defined?" — dominate real coding sessions, and the semantic exploration case is handled adequately by the grep fallback. The bet fails if your workflow is mostly open-ended codebase exploration with no known symbol names to anchor on. It wins if your workflow is mostly "build on top of what's there" — which describes most feature work.
+The index doesn't reduce quality — it reduces the number of file reads required to answer structural questions, which directly reduces token cost and the chance of the model writing over something that already exists.
 
 ---
 
