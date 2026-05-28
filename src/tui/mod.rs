@@ -98,7 +98,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     startup::replay_last_session_into_app(&mut app, &session);
     startup::push_startup_messages(&mut app, &mut session);
 
-    let result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
+    let _result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
 
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(
@@ -109,7 +109,10 @@ pub async fn run_tui(config: &Config) -> Result<()> {
 
     session.save_context_with_summary().await;
     session.hooks.fire_session_end();
-    result
+    // Force-exit: bypass tokio runtime shutdown, which blocks waiting for
+    // background tasks (indexer, remote server) to finish their current
+    // synchronous work. Context is already saved; the OS cleans up the rest.
+    std::process::exit(0);
 }
 
 async fn tui_loop(
