@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1;36mScenario 1\033[0m  ·  "Where is the Flask class defined?"\n'
+printf '\n'
+printf '  \033[31m✗  Without index:\033[0m  list_directory → read 4+ files  (8 tool calls)\033[0m\n'
+printf '  \033[32m✓  With index:\033[0m     find_definition("Flask") → file:line  (1 call)\033[0m\n'
+printf '\n'
+printf '  \033[2mwatch:  find_definition fires  →  INDEX hit  →  exact answer\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'

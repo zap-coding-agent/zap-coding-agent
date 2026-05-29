@@ -1,5 +1,5 @@
-# Quick hero demo — scenario 1 only (~25 s)
-# Records the core value prop: find_definition → INDEX hit → exact answer
+# Hero demo — scenario 1 only (~1 min)
+# Flow: title card (5s) → scene explanation (5s) → execute → read output
 #
 # Usage (run from demos/code_indexing/ after ./setup.sh):
 #   brew install vhs
@@ -11,9 +11,8 @@ Set Width 1400
 Set Height 700
 Set Theme "TokyoNight"
 Set PlaybackSpeed 1
-Set TypingSpeed 40ms
+Set TypingSpeed 60ms
 
-# Navigate into the Flask repo (silently — index already built by setup.sh)
 Hide
 Type `export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"`
 Enter
@@ -23,11 +22,28 @@ Enter
 Ctrl+L
 Show
 
-# Type the command, pause so the viewer can read it, then execute
-Sleep 300ms
+# ── Title card ────────────────────────────────────────────────────────────────
+Sleep 500ms
+Type "../scenarios/_title.sh"
+Sleep 600ms
+Enter
+Sleep 5s
+
+# ── Scenario 1 explanation ────────────────────────────────────────────────────
+Ctrl+L
+Sleep 400ms
+Type "../scenarios/_scene_01.sh"
+Sleep 600ms
+Enter
+Sleep 5s
+
+# ── Execute scenario 1 ────────────────────────────────────────────────────────
+Ctrl+L
+Sleep 400ms
 Type "../scenarios/01_find_class.sh"
 Sleep 800ms
 Enter
 
 # Wait: session startup → find_definition → INDEX hit → response
-Sleep 30s
+# Then pause so viewer can read the output
+Sleep 40s

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1;36mScenario 3\033[0m  ·  "What public methods does Blueprint expose?"\n'
+printf '\n'
+printf '  \033[31m✗  Without index:\033[0m  grep → false positives, read whole file\033[0m\n'
+printf '  \033[32m✓  With index:\033[0m     code_map → exact method list with line ranges\033[0m\n'
+printf '\n'
+printf '  \033[2mwatch:  code_map returns structured outline  →  no full-file read\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'

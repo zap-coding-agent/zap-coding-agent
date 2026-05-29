@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1;36mScenario 2\033[0m  ·  "How does a request reach the route handler?"\n'
+printf '\n'
+printf '  \033[31m✗  Without index:\033[0m  open files at random, follow imports blindly\033[0m\n'
+printf '  \033[32m✓  With index:\033[0m     find_definition per symbol, cross-file trace (3–4 calls)\033[0m\n'
+printf '\n'
+printf '  \033[2mwatch:  multiple find_definition calls  →  no blind reads\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
