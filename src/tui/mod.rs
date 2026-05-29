@@ -20,7 +20,8 @@ use std::io::Stdout;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::Event;
+use crossterm::event::{Event, EventStream};
+use futures_util::StreamExt as _;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -122,6 +123,12 @@ async fn tui_loop(
     config: &Config,
     rx: &mut UnboundedReceiver<TuiEvent>,
 ) -> Result<()> {
+    // EventStream is async on all platforms; on Windows it runs the blocking
+    // ReadConsoleInput call on a background OS thread and signals the async
+    // executor when events are ready.  The old poll()+read() pattern could
+    // hang indefinitely on Windows when only MENU_EVENT/FOCUS_EVENT records
+    // were in the console buffer (crossterm drains them silently then blocks).
+    let mut event_stream = EventStream::new();
     loop {
         while let Ok(ev) = rx.try_recv() {
             app.apply_event(ev);
@@ -173,8 +180,16 @@ async fn tui_loop(
             continue;
         }
 
-        if crossterm::event::poll(Duration::from_millis(50))? {
-            match crossterm::event::read()? {
+        let maybe_event = match tokio::time::timeout(
+            Duration::from_millis(50),
+            event_stream.next(),
+        ).await {
+            Ok(Some(Ok(ev))) => Some(ev),
+            Ok(Some(Err(_))) | Ok(None) => None,
+            Err(_) => None,
+        };
+        if let Some(event) = maybe_event {
+            match event {
                 Event::Key(key)
                     if key.kind != crossterm::event::KeyEventKind::Release =>
                 {

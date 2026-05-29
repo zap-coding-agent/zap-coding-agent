@@ -118,6 +118,26 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
+    // ── Finding all references / call sites ───────────────────────────────────
+    sections.push(
+        "## Finding All References / Call Sites\n\
+         \n\
+         When the user asks \"where is X used?\", \"what calls Y?\", or \"what does \
+         this codebase use for …?\" — the index only shows WHERE things are DEFINED. \
+         You must also search for all CALL SITES with `search_code`.\n\
+         \n\
+         **Pattern:**\n\
+         1. `find_definition(X)` — confirm the canonical name\n\
+         2. `search_code` for instantiation, imports, and method calls: \
+            e.g. `(LlmClient|llm\\.send|import llm)`\n\
+         3. Each unique matching file is a caller — group by purpose\n\
+         \n\
+         **Never infer usage from comments.** Only actual code references count. \
+         Missing a call site because you only ran `find_definition` is a silent \
+         wrong answer — always cross-check with `search_code` for enumeration queries."
+            .to_string(),
+    );
+
     // ── Tool usage policy ─────────────────────────────────────────────────────
     sections.push(
         "## Tool Usage Policy\n\
