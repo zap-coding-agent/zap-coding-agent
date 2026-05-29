@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━ What just happened ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[32mfind_definition("Blueprint")\033[0m  →  INDEX hit → located in 2 files\033[0m\n'
+printf '  \033[32mcode_map × 3\033[0m  →  mapped full inheritance chain automatically\033[0m\n'
+printf '     Blueprint  →  SansioBlueprint  →  Scaffold\033[0m\n'
+printf '\n'
+printf '  \033[1m43 public methods\033[0m  with exact file + line  ·  0 false positives\033[0m\n'
+printf '  \033[2mgrep would find ~4 methods in one file, miss 39 inherited ones\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'

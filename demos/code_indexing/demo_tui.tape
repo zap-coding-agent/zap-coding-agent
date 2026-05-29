@@ -1,11 +1,5 @@
-# Full annotated TUI demo — code indexing, scenario 1
-# Output: demo_tui.mp4 (no audio — add voiceover in post with merge_voice.sh)
-#
-# Flow:
-#   1. title card     (6 s)
-#   2. scene card     (6 s)
-#   3. TUI session    (60 s) — zap starts, query typed, response streams
-#   4. note card      (8 s)  — explains what just happened
+# Hero TUI demo — scenario 1 only (~2 min)
+# Flow: title (6s) → scene (6s) → TUI session (80s) → note (8s)
 #
 # Usage (run from demos/code_indexing/ after ./setup.sh):
 #   VHS_NO_SANDBOX=1 vhs demo_tui.tape   → demo_tui.mp4
@@ -49,22 +43,17 @@ Type "zap"
 Enter
 Sleep 5s
 
-# Type the query into the TUI input area
 Type "Where is the Flask class defined?"
 Sleep 1200ms
 Enter
+Sleep 80s
 
-# Wait: LLM queries index → tool calls stream → response appears
-Sleep 55s
+# Exit TUI cleanly
+Ctrl+D
+Sleep 2s
 
-# Exit TUI
-Ctrl+Q
-Sleep 1500ms
-
-# ── 4. Note card ─────────────────────────────────────────────────────────────
-Ctrl+L
-Sleep 300ms
-Type "../scenarios/_note_01.sh"
+# ── 4. Note card (clear first so TUI frame doesn't linger) ───────────────────
+Type "clear && ../scenarios/_note_01.sh"
 Sleep 400ms
 Enter
 Sleep 8s

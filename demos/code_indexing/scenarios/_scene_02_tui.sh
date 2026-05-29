@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1;36mScenario 2\033[0m  ·  "How does Flask route a URL to its handler?"\n'
+printf '\n'
+printf '  \033[31m✗  Without index:\033[0m  open app.py (1 500 lines), read blindly, follow imports\033[0m\n'
+printf '  \033[32m✓  With index:\033[0m     find_definition × 4 → reads only the relevant sections\033[0m\n'
+printf '\n'
+printf '  \033[2mwatch:  4 INDEX hits in sequence  →  full request trace, no blind reads\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'

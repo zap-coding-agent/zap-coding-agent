@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1;36mScenario 3\033[0m  ·  "What public methods does Blueprint expose?"\n'
+printf '\n'
+printf '  \033[31m✗  Without index:\033[0m  grep "def " blueprints.py → misses inherited methods\033[0m\n'
+printf '  \033[32m✓  With index:\033[0m     code_map → full inheritance chain, exact line numbers\033[0m\n'
+printf '\n'
+printf '  \033[2mwatch:  find_definition → code_map × 3 files  →  43 methods, no false positives\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
