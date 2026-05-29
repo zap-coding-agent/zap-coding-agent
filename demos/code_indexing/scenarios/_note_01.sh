@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Appears AFTER scenario 1 output — explains what the viewer just saw
+printf '\n'
+printf '  \033[38;5;220m━━ What just happened ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m◎ scope: python\033[0m\n'
+printf '     zap detected pyproject.toml → Python project → only Python-relevant\n'
+printf '     skills are eligible for injection this session\n'
+printf '\n'
+printf '  \033[32m╭─ find_definition\033[0m\n'
+printf '     LLM called the index directly — did \033[1mnot\033[0m guess a filename\n'
+printf '\n'
+printf '  \033[32mINDEX hit\033[0m\n'
+printf '     Symbol found in SQLite (tree-sitter AST) — \033[1m0 file reads\033[0m to locate it\n'
+printf '\n'
+printf '  \033[1mTool calls: ~2\033[0m  ·  \033[2mWithout index: 8–12 tool calls, ~4 000 tokens\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
