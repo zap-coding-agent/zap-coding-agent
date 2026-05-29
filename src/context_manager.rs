@@ -93,48 +93,49 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
-    // ── Semantic search strategy ──────────────────────────────────────────────
+    // ── Search, discovery, and reasoning ─────────────────────────────────────
     sections.push(
-        "## Semantic Search Strategy\n\
+        "## Search and Discovery\n\
          \n\
-         When the user asks about a **concept** rather than an exact symbol name \
-         (e.g. \"authentication\", \"caching\", \"SSO\", \"error handling\"), the code \
-         may use completely different names (e.g. `sso_handler`, `iam_login`, `jwt_validate`).\n\
+         **Known symbol name → `find_definition`** (index hit, done)\n\
          \n\
-         **Search in this order — index first, grep as last resort:**\n\
-         1. `find_definition` for the 2–3 most likely candidate names (index hit = exact, done)\n\
-         2. If those miss, `code_map` on the most relevant directory — \
-            scan the symbol list to spot the real name\n\
-         3. Only if `code_map` still doesn't reveal it: `search_code` with a regex \
-            alternation of all candidates: `(auth|sso|login|iam|oauth)`\n\
+         **Concept without an exact name** (\"authentication\", \"caching\", \"SSO\"):\n\
+         1. `find_definition` on 2–3 likely candidate names\n\
+         2. If those miss: `code_map` on the relevant directory — scan symbols for the real name\n\
+         3. Last resort: `search_code` with alternation `(auth|sso|login|iam|oauth)`\n\
          \n\
-         **Always end your answer with one line explaining how you found it:**\n\
-         - Index hit  : \"Found via index: `SsoHandler` at `auth/sso.ts:42`\"\n\
-         - Fallback   : \"Not in index — found via search: `sso_handler` at `auth/sso.ts:42`\"\n\
-         - Not found  : \"Not found in index or search — this feature may not be implemented yet.\"\n\
+         **\"Where is X used?\" / \"What does this codebase use for X?\"**\n\
+         The index shows WHERE things are DEFINED — not where they are USED. \
+         Follow `find_definition` with `search_code` for instantiation, imports, \
+         and method calls. Never infer usage from comments; only code references count.\n\
          \n\
-         This makes your reasoning transparent: the user sees exactly what was tried, \
-         what matched, and how confident the result is."
+         **End every answer with one line on how you found it:**\n\
+         Index hit → `Found via index: Symbol at file:line` \
+         · Fallback → `Not in index — found via search`"
             .to_string(),
     );
 
-    // ── Finding all references / call sites ───────────────────────────────────
+    // ── Reasoning and investigation ───────────────────────────────────────────
     sections.push(
-        "## Finding All References / Call Sites\n\
+        "## Reasoning and Investigation\n\
          \n\
-         When the user asks \"where is X used?\", \"what calls Y?\", or \"what does \
-         this codebase use for …?\" — the index only shows WHERE things are DEFINED. \
-         You must also search for all CALL SITES with `search_code`.\n\
+         **Decompose before acting.** Before the first tool call, ask: what is the \
+         question *really* asking?\n\
+         - \"Which X does this codebase use?\" ≠ where X is defined — it means every \
+           place X is instantiated, called, configured, or accessed indirectly\n\
+         - \"How does feature Y work?\" means tracing the full code path, not finding Y's definition\n\
+         - \"Is X safe / complete?\" means checking every caller, not just the implementation\n\
          \n\
-         **Pattern:**\n\
-         1. `find_definition(X)` — confirm the canonical name\n\
-         2. `search_code` for instantiation, imports, and method calls: \
-            e.g. `(LlmClient|llm\\.send|import llm)`\n\
-         3. Each unique matching file is a caller — group by purpose\n\
+         **Completeness mindset.** One search method rarely gives the full picture:\n\
+         - For \"all X\" queries: consider direct calls, wrappers, aliases, injected \
+           instances, dynamic dispatch — each may need a different search pass\n\
+         - Empty result = \"not found this way\", not \"doesn't exist\"\n\
+         - Partial result = \"found some\" — explicitly check what other forms haven't been covered\n\
          \n\
-         **Never infer usage from comments.** Only actual code references count. \
-         Missing a call site because you only ran `find_definition` is a silent \
-         wrong answer — always cross-check with `search_code` for enumeration queries."
+         **Synthesise, don't list.** After gathering evidence, draw a conclusion. \
+         Integrate findings across tool calls — do not dump sequential tool outputs. \
+         State what you found directly, what you inferred, and what static search \
+         cannot see (runtime injection, dynamic dispatch, eval-based calls)."
             .to_string(),
     );
 
