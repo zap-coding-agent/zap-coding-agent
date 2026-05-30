@@ -47,27 +47,6 @@ pub(super) fn replay_last_session_into_app(app: &mut App, session: &crate::sessi
 
 /// Build and push welcome message + drain startup notices into the app.
 pub(super) fn push_startup_messages(app: &mut App, session: &mut crate::session::Session) {
-    let skill_note = {
-        let always_on_count = crate::skill_manager::always_on_skills(&session.skills).len();
-        let practice_count = session.skills.iter()
-            .filter(|s| s.category == crate::skill_manager::SkillCategory::Practice).count();
-        let domain_count = session.skills.iter()
-            .filter(|s| s.category == crate::skill_manager::SkillCategory::Domain).count();
-        if session.skills.is_empty() {
-            String::new()
-        } else {
-            format!("  ·  {} skills ({} core · {} practice · {} domain)",
-                session.skills.len(), always_on_count, practice_count, domain_count)
-        }
-    };
-    app.messages.push(UiMessage {
-        role: MsgRole::Assistant,
-        blocks: vec![UiBlock::Text(format!(
-            "Ready. {} tools loaded{}.",
-            session.tool_count, skill_note
-        ))],
-    });
-
     for notice in session.startup_notices.drain(..) {
         app.messages.push(UiMessage {
             role: MsgRole::Assistant,

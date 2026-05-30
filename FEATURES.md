@@ -414,6 +414,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Token + cost display | `src/session.rs:handle_user_turn` | per-turn: skills t, msg t, ctx k, est. $ |
 | Tab completion | `src/ui.rs:ZapHelper` | slash commands |
 | Slash command picker | `src/ui.rs:show_command_picker` | `/` on empty line opens inquire picker |
+| Startup noise reduction | `src/tui/startup.rs:49` | Removed "Ready. X tools loaded" and skill count from TUI startup — reduces visual noise on every launch |
 | Image attach | `src/session.rs:cmd_attach` | staged until next message |
 | Clipboard paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
 | `/help` | `src/tui/commands.rs:help_text` | grouped command reference; includes goal, deploy, index quality, diff, attach, paste, skill log, remote |

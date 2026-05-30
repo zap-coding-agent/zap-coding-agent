@@ -286,7 +286,14 @@ impl Session {
         }
 
         if !config.is_subagent {
-            crate::code_index::spawn_background_indexer(cwd.clone());
+            // Only auto-index projects that have been explicitly /init'd.
+            // Prevents accidentally indexing C:\, /, or other system directories.
+            let is_indexed = crate::project::load_project_meta()
+                .map(|m| m.indexed)
+                .unwrap_or(false);
+            if is_indexed {
+                crate::code_index::spawn_background_indexer(cwd.clone());
+            }
         }
 
         Ok(Self {
