@@ -107,10 +107,20 @@ impl Session {
     /// Tracks failures in `self.compact_failures`; resets to 0 on success.
     pub async fn cmd_compact(&mut self) -> bool {
         if self.messages.is_empty() {
-            println!("  {} Nothing to compact.", "✗".red());
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                    "✗ Nothing to compact.".to_string()
+                ));
+            } else {
+                println!("  {} Nothing to compact.", "✗".red());
+            }
             return false;
         }
-        let mut spinner = Self::make_spinner();
+        let mut spinner = if crate::tui::channel::is_tui_mode() {
+            crate::ui::ThinkingSpinner::noop()
+        } else {
+            Self::make_spinner()
+        };
         let mut temp = self.messages.clone();
         temp.push(Message::user_text(
             "Please provide a concise summary of this conversation so far. \
@@ -152,17 +162,34 @@ impl Session {
                     "compact: {} messages → 2 (summary) model={}", turn_count, self.config.model
                 ));
                 self.compact_failures = 0;
-                println!("  {} Compacted {} messages into a summary.", "✓".green(), turn_count);
+                if crate::tui::channel::is_tui_mode() {
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                        format!("✓ Compacted {} messages into a summary.", turn_count)
+                    ));
+                } else {
+                    println!("  {} Compacted {} messages into a summary.", "✓".green(), turn_count);
+                }
                 true
             }
             Err(e) => {
                 self.compact_failures += 1;
-                println!("  {} Compact failed: {}", "✗".red(), e);
-                if self.compact_failures >= 3 {
-                    println!(
-                        "  {} Compact failed 3 times — use {} to reset or {} to start fresh.",
-                        "⚠".bright_yellow(), "/clear".cyan(), "/exit".cyan()
-                    );
+                if crate::tui::channel::is_tui_mode() {
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                        format!("✗ Compact failed: {e}")
+                    ));
+                    if self.compact_failures >= 3 {
+                        crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                            "⚠ Compact failed 3 times — use /clear to reset or /new to start fresh.".to_string()
+                        ));
+                    }
+                } else {
+                    println!("  {} Compact failed: {}", "✗".red(), e);
+                    if self.compact_failures >= 3 {
+                        println!(
+                            "  {} Compact failed 3 times — use {} to reset or {} to start fresh.",
+                            "⚠".bright_yellow(), "/clear".cyan(), "/exit".cyan()
+                        );
+                    }
                 }
                 false
             }

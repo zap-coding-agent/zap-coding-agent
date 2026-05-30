@@ -151,7 +151,7 @@ pub(super) fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Cyan))
         .title(Span::styled(
-            " sessions  ↑↓ navigate   Enter load   Esc cancel ",
+            " sessions  ↑↓ navigate   Enter load   N new   Esc cancel ",
             Style::default().fg(Color::Yellow).bold(),
         ));
 
@@ -180,8 +180,28 @@ pub(super) fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
     let rows: Vec<Line<'static>> = picker.entries[start..end]
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
+        .flat_map(|(i, entry)| {
             let is_sel = (start + i) == sel;
+
+            if entry.id == 0 {
+                // Synthetic "New session" entry — render as a highlighted row.
+                let label_text = if inner.width >= 40 {
+                    "  ✚  Start a fresh session"
+                } else {
+                    " ✚ New session"
+                };
+                if is_sel {
+                    return vec![Line::from(Span::styled(
+                        label_text.to_string(),
+                        Style::default().fg(Color::Black).bg(Color::Cyan).bold(),
+                    ))];
+                } else {
+                    return vec![Line::from(Span::styled(
+                        label_text.to_string(),
+                        Style::default().fg(Color::Rgb(100, 200, 255)).bold(),
+                    ))];
+                }
+            }
 
             let goal_disp: String = if entry.goal.chars().count() > goal_w {
                 format!("{}…", entry.goal.chars().take(goal_w.saturating_sub(1)).collect::<String>())
@@ -205,9 +225,9 @@ pub(super) fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
             );
 
             if is_sel {
-                Line::from(Span::styled(text, Style::default().fg(Color::Black).bg(Color::Cyan)))
+                vec![Line::from(Span::styled(text, Style::default().fg(Color::Black).bg(Color::Cyan)))]
             } else {
-                Line::from(Span::styled(text, Style::default().fg(Color::White)))
+                vec![Line::from(Span::styled(text, Style::default().fg(Color::White)))]
             }
         })
         .collect();

@@ -128,10 +128,16 @@ pub(super) fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     let elapsed_secs = app.turn_tick / 62;
     let (state_icon, state_color, state_text): (&str, Color, String) = match &app.state {
         AppState::Idle => ("●", Color::Green, "idle".to_string()),
-        AppState::Thinking => (
-            spin, Color::Yellow,
-            format!("{}… {}s", super::THINKING_WORDS[word_idx], elapsed_secs),
-        ),
+        AppState::Thinking => {
+            // Sidebar is 22 chars; prefix " ⠙ " = 4 chars → 18 chars for text.
+            // Drop the thinking word above 99s to keep the seconds counter visible.
+            let text = if elapsed_secs >= 100 {
+                format!("… {}s", elapsed_secs)
+            } else {
+                format!("{}… {}s", super::THINKING_WORDS[word_idx], elapsed_secs)
+            };
+            (spin, Color::Yellow, text)
+        }
         AppState::ToolRunning { name, label } => {
             let verb = super::tool_verb(name);
             let short: String = if label.chars().count() > 12 {
@@ -163,14 +169,13 @@ pub(super) fn draw_sidebar(frame: &mut Frame, app: &App, area: Rect) {
 
     if app.tokens_input > 0 || app.tokens_output > 0 {
         let fmt_k = |n: u32| -> String {
-            if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() }
+            if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1_000_000.0) }
+            else if n >= 1000  { format!("{:.1}k", n as f64 / 1_000.0) }
+            else               { n.to_string() }
         };
-        rows.push(Line::from(vec![
-            Span::styled(format!(" {:<9}", "in/out"), Style::default().fg(label_c)),
-            Span::styled(fmt_k(app.tokens_input),  Style::default().fg(Color::Rgb(140, 200, 255))),
-            Span::styled(" / ".to_string(), Style::default().fg(Color::Rgb(80, 75, 100))),
-            Span::styled(fmt_k(app.tokens_output), Style::default().fg(Color::Rgb(160, 220, 160))),
-        ]));
+        // Two rows avoids overflow: " in       27.9k" = 15 chars ≤ 22.
+        rows.push(kv("in",  fmt_k(app.tokens_input),  Color::Rgb(140, 200, 255)));
+        rows.push(kv("out", fmt_k(app.tokens_output), Color::Rgb(160, 220, 160)));
         if app.tokens_cache_read > 0 {
             rows.push(kv("cached", fmt_k(app.tokens_cache_read), Color::Rgb(160, 140, 220)));
         }
@@ -385,7 +390,7 @@ pub(super) fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let keybinds = if matches!(app.state, AppState::Idle) {
-        "  ↑↓ scroll  Tab  Ctrl+O collapse  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+Q quit"
+        "  ↑↓ scroll  Tab  Ctrl+O collapse  Ctrl+F files  Ctrl+G diff  Ctrl+P dir  Ctrl+N new  Ctrl+Q quit"
     } else {
         "  ↑↓ scroll  Ctrl+O collapse  Ctrl+C cancel"
     };

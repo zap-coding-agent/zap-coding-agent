@@ -282,6 +282,60 @@ async fn tui_loop(
                         InputAction::LoadSession { id: sid, goal } => {
                             startup::load_session_into_app(app, session, sid, goal);
                         }
+                        InputAction::StartNewSession => {
+                            // Save current session messages before starting fresh.
+                            if let Ok(json) = serde_json::to_string(&session.messages) {
+                                let _ = session.store.save_messages(session.session_id, &json);
+                            }
+                            // Create a new session in the store.
+                            match session.store.save_session("(new session)", &session.model) {
+                                Ok(new_id) => {
+                                    // Reset app to fresh state.
+                                    app.messages.clear();
+                                    app.streaming_blocks.clear();
+                                    app.input.clear();
+                                    app.cursor = 0;
+                                    app.scroll = 0;
+                                    app.auto_scroll = true;
+                                    app.turn = 0;
+                                    app.context_pct = 0;
+                                    app.tokens_input = 0;
+                                    app.tokens_output = 0;
+                                    app.tokens_cache_read = 0;
+                                    app.total_cost_usd = 0.0;
+                                    app.error = None;
+                                    app.picker_sel = 0;
+                                    app.expanded_tools.clear();
+                                    app.quit_confirm = false;
+                                    app.goal_state = None;
+                                    app.active_skill = None;
+                                    app.skill_history.clear();
+                                    // Reset session state.
+                                    session.session_id = new_id;
+                                    session.messages.clear();
+                                    session.turn_count = 0;
+                                    session.session_usage = crate::llm_client::Usage {
+                                        input_tokens: 0,
+                                        output_tokens: 0,
+                                        cache_read_tokens: 0,
+                                        cache_write_tokens: 0,
+                                    };
+                                    session.files_changed.clear();
+                                    session.staged_images.clear();
+                                    session.skill_trace.clear();
+                                    session.compact_failures = 0;
+                                    app.messages.push(UiMessage {
+                                        role: MsgRole::Assistant,
+                                        blocks: vec![UiBlock::Text(format!(
+                                            "Started new session #{new_id}."
+                                        ))],
+                                    });
+                                }
+                                Err(e) => {
+                                    app.error = Some(format!("Failed to create new session: {e}"));
+                                }
+                            }
+                        }
                         InputAction::CloseSessionPicker => {}
                         InputAction::ClearInput => {}
                         InputAction::SelectMode(is_task) => {

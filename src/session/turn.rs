@@ -29,12 +29,16 @@ impl Session {
         };
 
         if self.turn_count >= 3 && is_topic_shift(input, &self.messages) {
-            println!(
-                "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
-                "💡".bright_yellow(),
-                "/branch".cyan(),
-                "/exit".cyan(),
-            );
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                    "💡 Looks like a new topic — consider /new to start fresh or /branch to fork.".to_string()
+                ));
+            } else {
+                println!(
+                    "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
+                    "💡".bright_yellow(), "/branch".cyan(), "/exit".cyan(),
+                );
+            }
         }
 
         let disable_compact = std::env::var("DISABLE_COMPACT").is_ok();
@@ -47,17 +51,29 @@ impl Session {
         let ctx_used_k = (self.estimated_context_tokens() / 1000).max(1);
 
         if self.config.budget.is_some() && ctx_pct >= 100 {
-            println!(
-                "  {} Token budget exhausted (~{}k tokens). Start a new session or use /compact.",
-                "✗".red().bold(), ctx_used_k
-            );
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                    format!("✗ Token budget exhausted (~{}k tokens). Use /new to start fresh or /compact to free space.", ctx_used_k)
+                ));
+            } else {
+                println!(
+                    "  {} Token budget exhausted (~{}k tokens). Start a new session or use /compact.",
+                    "✗".red().bold(), ctx_used_k
+                );
+            }
             return Ok(());
         }
         if !disable_compact && ctx_pct >= 90 && self.compact_failures < 3 {
-            println!(
-                "  {} Context {}% (~{}k/{}k) — compacting…",
-                "⟳".truecolor(200, 150, 60), ctx_pct, ctx_used_k, ctx_limit_k,
-            );
+            if crate::tui::channel::is_tui_mode() {
+                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
+                    format!("⟳ Context {}% (~{}k/{}k) — compacting…", ctx_pct, ctx_used_k, ctx_limit_k)
+                ));
+            } else {
+                println!(
+                    "  {} Context {}% (~{}k/{}k) — compacting…",
+                    "⟳".truecolor(200, 150, 60), ctx_pct, ctx_used_k, ctx_limit_k,
+                );
+            }
             self.cmd_compact().await;
         }
 

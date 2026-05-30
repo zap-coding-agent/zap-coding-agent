@@ -116,6 +116,9 @@ pub enum TuiEvent {
     /// Undelivered btw messages that weren't injected mid-turn (turn ended before next tool call).
     /// The TUI loop auto-submits these as the next user turn so they get a proper response.
     BtwCarryover(Vec<String>),
+    /// A standalone notice (hint, warning, status) pushed as a completed assistant bubble.
+    /// Use instead of println! in TUI mode so output goes into the chat area, not raw stdout.
+    Notice(String),
 }
 
 static TUI_TX: OnceLock<mpsc::UnboundedSender<TuiEvent>> = OnceLock::new();

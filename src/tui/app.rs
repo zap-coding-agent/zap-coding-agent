@@ -442,6 +442,13 @@ impl App {
                 self.pending_input = Some(combined);
                 self.auto_scroll = true;
             }
+            TuiEvent::Notice(text) => {
+                self.messages.push(UiMessage {
+                    role: MsgRole::Assistant,
+                    blocks: vec![UiBlock::Text(text)],
+                });
+                self.auto_scroll = true;
+            }
         }
     }
 

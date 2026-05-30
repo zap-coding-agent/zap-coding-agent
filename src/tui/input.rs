@@ -17,6 +17,8 @@ pub enum InputAction {
     ToggleFileBrowser,
     LoadSession { id: i64, goal: String },
     CloseSessionPicker,
+    /// Start a new session — clear messages and create a fresh session ID.
+    StartNewSession,
     /// Ctrl+O: toggle expansion of the last tool call with output.
     ToggleLastToolExpand,
     /// Ctrl+V: paste image from clipboard.
@@ -232,6 +234,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     if key.code == KeyCode::Char('g') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
             return InputAction::OpenDiffViewer;
+        }
+        return InputAction::None;
+    }
+
+    // Ctrl+N: start a new session (idle only)
+    if key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Idle) {
+            return InputAction::StartNewSession;
         }
         return InputAction::None;
     }
@@ -561,6 +571,10 @@ fn handle_session_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
             app.session_picker = None;
             InputAction::CloseSessionPicker
         }
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.session_picker = None;
+            InputAction::StartNewSession
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             picker.selected = picker.selected.saturating_sub(1);
             InputAction::None
@@ -572,10 +586,16 @@ fn handle_session_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
         }
         KeyCode::Enter => {
             if let Some(entry) = picker.entries.get(picker.selected) {
-                let id = entry.id;
-                let goal = entry.goal.clone();
-                app.session_picker = None;
-                InputAction::LoadSession { id, goal }
+                if entry.id == 0 {
+                    // Synthetic "New session" entry.
+                    app.session_picker = None;
+                    InputAction::StartNewSession
+                } else {
+                    let id = entry.id;
+                    let goal = entry.goal.clone();
+                    app.session_picker = None;
+                    InputAction::LoadSession { id, goal }
+                }
             } else {
                 app.session_picker = None;
                 InputAction::CloseSessionPicker

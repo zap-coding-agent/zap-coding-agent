@@ -27,13 +27,21 @@ pub(super) async fn handle_tui_slash(
     if cmd == "/sessions" || cmd.starts_with("/sessions ") {
         match session.store.recent_sessions(30) {
             Ok(rows) => {
+                let mut entries: Vec<super::app::SessionEntry> = rows.iter().map(|(id, goal, model, ts)| super::app::SessionEntry {
+                    id:    *id,
+                    goal:  goal.clone(),
+                    model: model.clone(),
+                    date:  ts.get(..10).unwrap_or(ts).to_string(),
+                }).collect();
+                // Prepend a synthetic "New session" entry at the top.
+                entries.insert(0, super::app::SessionEntry {
+                    id:    0,
+                    goal:  "New session (start fresh)".to_string(),
+                    model: String::new(),
+                    date:  String::new(),
+                });
                 app.session_picker = Some(super::app::SessionPickerState {
-                    entries: rows.iter().map(|(id, goal, model, ts)| super::app::SessionEntry {
-                        id:    *id,
-                        goal:  goal.clone(),
-                        model: model.clone(),
-                        date:  ts.get(..10).unwrap_or(ts).to_string(),
-                    }).collect(),
+                    entries,
                     selected: 0,
                 });
             }
