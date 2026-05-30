@@ -305,6 +305,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Auto-index gated on /init | `src/session/mod.rs:288` | Background indexer only starts if `project.json` has `indexed: true` — prevents accidentally indexing C:\, /, or other system roots on first launch |
 | read_file pipe delimiter | `src/tools/file.rs:116` | Changed line-number prefix from tab to `" | "` so whitespace in file content is never ambiguous when copying into `edit_file` old_string |
 | Better edit_file error | `src/tools/file.rs:176,329` | When `old_string` not found, error shows head/tail preview with whitespace as visible symbols (→ for tab, ↵ for newline) plus hint to use `cat -A` or `python3 repr()` |
+| Positional guard (expected_line) | `src/tools/file.rs:176,392` | `edit_file` and `batch_edit` accept optional `expected_line` (1-based). Before mutating, verifies the `old_string` match starts exactly on that line. Prevents accidental edits at the wrong location. |
 
 ### Hooks (src/hooks.rs)
 | Feature | File | Notes |

@@ -9,6 +9,7 @@ pub mod file;
 pub mod search;
 pub mod shell;
 pub mod todo;
+pub mod undo;
 pub mod web;
 
 pub use agent::SpawnAgentTool;
@@ -54,9 +55,10 @@ impl Default for ToolRegistry {
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, UndoEditTool, WriteFileTool};
+        use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, WriteFileTool};
         use search::{CodeMapTool, FindDefinitionTool, FindReferencesTool, SearchCodeTool};
         use shell::{ListDirectoryTool, ShellTool};
+        use undo::UndoEditTool;
         use web::{WebFetchTool, WebSearchTool};
 
         use todo::{TodoReadTool, TodoWriteTool};
