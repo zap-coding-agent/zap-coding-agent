@@ -70,8 +70,8 @@ impl Tool for ReadFileTool {
     fn name(&self) -> &str { "read_file" }
     fn description(&self) -> &str {
         "Read a file's contents, with optional line range. \
-         Output is prefixed with 1-based line numbers (same as cat -n) so you \
-         can reference exact lines in subsequent edit_file calls. \
+         Output uses 'line | content' format with 1-based line numbers and a pipe \
+         delimiter, so whitespace in the content is never ambiguous. \
          For large files, use offset + limit to read only the relevant section."
     }
     fn input_schema(&self) -> serde_json::Value {
@@ -113,7 +113,7 @@ impl Tool for ReadFileTool {
         let out = lines[start..end]
             .iter()
             .enumerate()
-            .map(|(i, line)| format!("{}\t{}", start + i + 1, line))
+            .map(|(i, line)| format!("{:<6} | {}", start + i + 1, line))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -174,10 +174,23 @@ impl Tool for EditFileTool {
 
         let count = content.matches(old_string).count();
         if count == 0 {
+            let preview = |s: &str| {
+                let h: String = s.chars().take(40).map(|c|
+                    match c { '\n' => '↵', '\r' => '←', '\t' => '→', c => c }
+                ).collect();
+                let t: String = if s.chars().count() > 50 {
+                    s.chars().rev().take(30).collect::<String>().chars().rev().map(|c|
+                        match c { '\n' => '↵', '\r' => '←', '\t' => '→', c => c }
+                    ).collect()
+                } else { String::new() };
+                if t.is_empty() { format!("`{}`", h) } else { format!("`{}…{}`", h, t) }
+            };
             anyhow::bail!(
                 "edit_file: old_string not found in '{}'. \
-                 Make sure the text matches exactly (including whitespace and indentation).",
-                path
+                 Searched for: {}. \
+                 Make sure the text matches exactly (including whitespace and indentation). \
+                 Hint: use shell + cat -A or python3 repr() to check the file's real bytes.",
+                path, preview(old_string)
             );
         }
         if count > 1 && !replace_all {
@@ -332,7 +345,22 @@ impl Tool for BatchEditTool {
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             let count = original.matches(old).count();
             if count == 0 {
-                anyhow::bail!("batch_edit: edit[{}] old_string not found in '{}'", i, path);
+                let preview = |s: &str| {
+                    let h: String = s.chars().take(40).map(|c|
+                        match c { '\n' => '↵', '\r' => '←', '\t' => '→', c => c }
+                    ).collect();
+                    let t: String = if s.chars().count() > 50 {
+                        s.chars().rev().take(30).collect::<String>().chars().rev().map(|c|
+                            match c { '\n' => '↵', '\r' => '←', '\t' => '→', c => c }
+                        ).collect()
+                    } else { String::new() };
+                    if t.is_empty() { format!("`{}`", h) } else { format!("`{}…{}`", h, t) }
+                };
+                anyhow::bail!(
+                    "batch_edit: edit[{}] old_string not found in '{}'. \
+                     Searched for: {}",
+                    i, path, preview(old)
+                );
             }
             if count > 1 && !replace_all {
                 anyhow::bail!(
