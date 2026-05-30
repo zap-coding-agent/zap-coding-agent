@@ -358,6 +358,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 |---|---|---|
 | SQLite session store | `src/persistence.rs` | `~/.zap/agent.db` (global — shared across all projects) |
 | Message persistence | `src/persistence.rs:save_messages` | serialised after every turn |
+| Fix: session conversation not replayed on restart (v0.13.65) | `src/session/commands/code.rs:save_context_inner` | `save_messages` was gated to compaction + new-session-in-TUI only — normal session exit never persisted messages to the DB. On restart, `replay_last_session_into_app` found no messages row for the previous session and fell back to an older compacted session (or showed nothing). Fix: added `save_messages` call to `save_context_inner` so every clean exit persists the conversation. |
 | Session resume | `src/session.rs:cmd_sessions` | fuzzy picker via inquire |
 | Key-value memory | `src/persistence.rs` | `/memory list/get/set/del` |
 | Branch storage | `src/persistence.rs:save_branch` | per session, in SQLite |

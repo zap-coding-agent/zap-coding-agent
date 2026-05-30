@@ -329,6 +329,11 @@ impl Session {
         ) {
             crate::log::write("WARN ", &format!("could not update session_log.md: {}", e));
         }
+        if let Ok(json) = serde_json::to_string(&self.messages) {
+            if let Err(e) = self.store.save_messages(self.session_id, &json) {
+                crate::log::write("WARN ", &format!("could not save messages: {}", e));
+            }
+        }
         let (files, symbols, langs): (usize, usize, Vec<(String, usize)>) =
             self.code_index.lock().ok().and_then(|mut guard| {
                 let cwd = std::env::current_dir().ok()?;
