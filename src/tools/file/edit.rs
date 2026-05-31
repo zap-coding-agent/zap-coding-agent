@@ -113,19 +113,23 @@ impl Tool for EditFileTool {
             );
         }
 
-        // Positional guard: verify match starts on expected line (1-based)
+        // Positional guard — only meaningful when the match is ambiguous (replace_all with
+        // multiple occurrences). When count == 1 the match is unique, so line-number drift
+        // from prior edits in the same turn should never block a correct edit.
         if let Some(expected) = expected_line {
-            let pos = content.find(old_string).unwrap(); // safe: count > 0
-            let actual_line = content[..pos].chars().filter(|&c| c == '\n').count() + 1;
-            if actual_line != expected {
-                anyhow::bail!(
-                    "edit_file: old_string matched at line {} but you expected line {}. \
-                     Your old_string is correct content but it appears at a different location \
-                     than you intended. Re-read the file with read_file and use the correct \
-                     line number.",
-                    actual_line, expected
-                );
+            if count > 1 {
+                let pos = content.find(old_string).unwrap(); // safe: count > 0
+                let actual_line = content[..pos].chars().filter(|&c| c == '\n').count() + 1;
+                if actual_line != expected {
+                    anyhow::bail!(
+                        "edit_file: old_string matched at line {} but you expected line {} \
+                         and it appears {} times — add more surrounding context to make it \
+                         unique, or drop expected_line.",
+                        actual_line, expected, count
+                    );
+                }
             }
+            // count == 1: match is unambiguous — ignore expected_line drift silently.
         }
 
         let new_content = if replace_all {
@@ -236,17 +240,22 @@ impl Tool for BatchEditTool {
                 );
             }
 
-            // Positional guard per edit
+            // Positional guard — only enforced when the match is ambiguous (count > 1).
+            // A unique match is correct regardless of line-number drift from prior edits.
             if let Some(expected) = edit["expected_line"].as_u64().map(|n| n as usize) {
-                let pos = original.find(old).unwrap(); // safe: count > 0
-                let actual_line = original[..pos].chars().filter(|&c| c == '\n').count() + 1;
-                if actual_line != expected {
-                    anyhow::bail!(
-                        "batch_edit: edit[{}] matched at line {} but expected line {}. \
-                         Re-read the file and use the correct line number from read_file output.",
-                        i, actual_line, expected
-                    );
+                if count > 1 {
+                    let pos = original.find(old).unwrap(); // safe: count > 0
+                    let actual_line = original[..pos].chars().filter(|&c| c == '\n').count() + 1;
+                    if actual_line != expected {
+                        anyhow::bail!(
+                            "batch_edit: edit[{}] matched at line {} but expected line {} \
+                             and it appears {} times — add more context to make it unique, \
+                             or drop expected_line.",
+                            i, actual_line, expected, count
+                        );
+                    }
                 }
+                // count == 1: unambiguous — ignore expected_line drift silently.
             }
 
             effective_olds.push(effective_old);
