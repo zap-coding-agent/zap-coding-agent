@@ -158,14 +158,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
-    // Secret scanner popup — Y/Enter to send anyway, everything else = deny.
-    if app.secret_popup.is_some() {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return InputAction::SecretAllow,
-            _ => return InputAction::SecretDeny,
-        }
-    }
-
     // Permission popup — highest priority. Y/Enter=allow, A=always, N/Esc=deny.
     if app.permission_popup.is_some() {
         match key.code {

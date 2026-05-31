@@ -211,12 +211,6 @@ pub(super) async fn run_normal_turn(
                             response_tx: Some(req.response_tx),
                         });
                     }
-                    if let Some(req) = channel::take_secret_request() {
-                        app.secret_popup = Some(super::app::SecretPopup {
-                            hits: req.hits,
-                            response_tx: Some(req.response_tx),
-                        });
-                    }
 
                     terminal.draw(|frame| render::draw(frame, app))?;
 
@@ -228,10 +222,6 @@ pub(super) async fn run_normal_turn(
                             if k.code == KeyCode::Char('c')
                                 && k.modifiers.contains(KeyModifiers::CONTROL)
                             {
-                                if let Some(ref mut popup) = app.secret_popup {
-                                    if let Some(tx) = popup.response_tx.take() { let _ = tx.send(false); }
-                                }
-                                app.secret_popup = None;
                                 if let Some(ref mut popup) = app.permission_popup {
                                     if let Some(tx) = popup.response_tx.take() { let _ = tx.send(PermissionDecision::Deny); }
                                 }
@@ -261,22 +251,6 @@ pub(super) async fn run_normal_turn(
                                             if let Some(tx) = popup.response_tx.take() { let _ = tx.send(PermissionDecision::Always); }
                                         }
                                         app.permission_popup = None;
-                                    }
-                                    _ => {}
-                                }
-                            } else if app.secret_popup.is_some() {
-                                match handle_key(app, k) {
-                                    InputAction::SecretAllow => {
-                                        if let Some(ref mut popup) = app.secret_popup {
-                                            if let Some(tx) = popup.response_tx.take() { let _ = tx.send(true); }
-                                        }
-                                        app.secret_popup = None;
-                                    }
-                                    InputAction::SecretDeny => {
-                                        if let Some(ref mut popup) = app.secret_popup {
-                                            if let Some(tx) = popup.response_tx.take() { let _ = tx.send(false); }
-                                        }
-                                        app.secret_popup = None;
                                     }
                                     _ => {}
                                 }

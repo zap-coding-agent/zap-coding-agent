@@ -214,10 +214,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
         dialogs::draw_command_popup(frame, app, size);
     }
 
-    if app.secret_popup.is_some() {
-        dialogs::draw_secret_popup(frame, app, size);
-    }
-
     if app.permission_popup.is_some() {
         dialogs::draw_permission_popup(frame, app, size);
     }

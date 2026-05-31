@@ -53,37 +53,6 @@ pub fn init_perm_channel() {
     PERM_REQUEST.set(Mutex::new(None)).ok();
 }
 
-// ── Secret scanner popup (TUI-native) ─────────────────────────────────────────
-
-/// Sent from `handle_user_turn` to the TUI loop when secrets are detected.
-/// Response channel carries `true` = send anyway, `false` = abort turn.
-pub struct SecretScannerRequest {
-    pub hits: Vec<String>,
-    pub response_tx: tokio::sync::oneshot::Sender<bool>,
-}
-
-static SECRET_REQUEST: OnceLock<Mutex<Option<SecretScannerRequest>>> = OnceLock::new();
-
-pub fn init_secret_channel() {
-    SECRET_REQUEST.set(Mutex::new(None)).ok();
-}
-
-pub fn take_secret_request() -> Option<SecretScannerRequest> {
-    SECRET_REQUEST.get().and_then(|mu| mu.lock().ok()).and_then(|mut g| g.take())
-}
-
-pub fn set_secret_request(req: SecretScannerRequest) -> bool {
-    if let Some(mu) = SECRET_REQUEST.get() {
-        if let Ok(mut g) = mu.lock() {
-            if g.is_none() {
-                *g = Some(req);
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Non-blocking — takes the pending request if one exists.
 pub fn take_perm_request() -> Option<PermissionPromptRequest> {
     PERM_REQUEST.get().and_then(|mu| mu.lock().ok()).and_then(|mut g| g.take())

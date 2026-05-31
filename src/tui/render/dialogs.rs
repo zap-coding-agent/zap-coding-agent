@@ -59,68 +59,6 @@ pub(super) fn draw_command_popup(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-pub(super) fn draw_secret_popup(frame: &mut Frame, app: &App, area: Rect) {
-    let popup = match app.secret_popup.as_ref() {
-        Some(p) => p,
-        None => return,
-    };
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("  {} possible secret(s) detected in tool output:", popup.hits.len()),
-            Style::default().fg(Color::Rgb(230, 180, 60)).bold(),
-        ),
-    ]));
-    lines.push(Line::from(""));
-    for hit in popup.hits.iter().take(8) {
-        let hit_disp = if hit.chars().count() > 70 {
-            format!("  {}…", hit.chars().take(69).collect::<String>())
-        } else {
-            format!("  {hit}")
-        };
-        lines.push(Line::from(Span::styled(hit_disp, Style::default().fg(Color::Rgb(200, 160, 60)))));
-    }
-    if popup.hits.len() > 8 {
-        lines.push(Line::from(Span::styled(
-            format!("  … and {} more", popup.hits.len() - 8),
-            Style::default().fg(Color::Rgb(140, 120, 60)),
-        )));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("  [", Style::default().fg(Color::Rgb(80, 75, 100))),
-        Span::styled("Y", Style::default().fg(Color::Rgb(100, 230, 100)).bold()),
-        Span::styled("] Send anyway   ", Style::default().fg(Color::Rgb(80, 75, 100))),
-        Span::styled("[", Style::default().fg(Color::Rgb(80, 75, 100))),
-        Span::styled("Any other key", Style::default().fg(Color::Rgb(230, 100, 100)).bold()),
-        Span::styled("] Cancel turn", Style::default().fg(Color::Rgb(80, 75, 100))),
-    ]));
-
-    let dialog_h = (lines.len() + 3).min(area.height as usize) as u16;
-    let dialog_w = (area.width as f32 * 0.78) as u16;
-    let x = area.x + (area.width.saturating_sub(dialog_w)) / 2;
-    let y = area.y + area.height.saturating_sub(dialog_h);
-    let overlay = Rect { x, y, width: dialog_w, height: dialog_h };
-
-    frame.render_widget(Clear, overlay);
-
-    let bg = Color::Rgb(30, 20, 15);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Rgb(200, 140, 40)))
-        .style(Style::default().bg(bg))
-        .title(Span::styled(
-            " ⚠ Secret Detected ",
-            Style::default().fg(Color::Rgb(255, 180, 60)).bold(),
-        ));
-
-    let inner = block.inner(overlay);
-    frame.render_widget(block, overlay);
-    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(bg)), inner);
-}
-
 pub(super) fn draw_permission_popup(frame: &mut Frame, app: &App, area: Rect) {
     let popup = match app.permission_popup.as_ref() {
         Some(p) => p,

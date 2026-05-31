@@ -46,7 +46,6 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TuiEvent>();
     channel::set_tui_sender(tx.clone());
     channel::init_perm_channel();
-    channel::init_secret_channel();
     channel::init_btw_queue();
 
     crossterm::terminal::enable_raw_mode()?;
@@ -496,18 +495,6 @@ async fn tui_loop(
                         }
                         InputAction::CloseDiffViewer => { app.diff_viewer = None; }
                         InputAction::CloseCommandPopup => { app.command_popup = None; }
-                        InputAction::SecretAllow => {
-                            if let Some(ref mut popup) = app.secret_popup {
-                                if let Some(tx) = popup.response_tx.take() { let _ = tx.send(true); }
-                            }
-                            app.secret_popup = None;
-                        }
-                        InputAction::SecretDeny => {
-                            if let Some(ref mut popup) = app.secret_popup {
-                                if let Some(tx) = popup.response_tx.take() { let _ = tx.send(false); }
-                            }
-                            app.secret_popup = None;
-                        }
                         InputAction::PermitAllow => {
                             if let Some(ref mut popup) = app.permission_popup {
                                 if let Some(tx) = popup.response_tx.take() { let _ = tx.send(PermissionDecision::Allow); }
@@ -567,6 +554,7 @@ async fn tui_loop(
                         InputAction::BtwOpen | InputAction::BtwClose => {}
                         InputAction::BtwSubmit(_) => {}
                         InputAction::None => {}
+                        InputAction::SecretAllow | InputAction::SecretDeny => {}
                     }
                 }
                 Event::Resize(_, _) => { terminal.autoresize()?; }

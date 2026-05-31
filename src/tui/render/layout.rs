@@ -407,7 +407,6 @@ pub(super) fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
 /// Set the native cursor when idle and no popup is covering the input area.
 pub(super) fn maybe_set_cursor(frame: &mut Frame, app: &App, cursor_pos: Option<(u16, u16)>) {
     let no_popup = app.permission_popup.is_none()
-        && app.secret_popup.is_none()
         && app.session_picker.is_none()
         && app.mode_picker.is_none()
         && app.domain_picker.is_none()

@@ -169,12 +169,6 @@ pub struct CommandPopup {
     pub scroll: usize,
 }
 
-/// Secret-scanner overlay — shown when secrets are detected in tool output before cloud send.
-pub struct SecretPopup {
-    pub hits: Vec<String>,
-    pub response_tx: Option<tokio::sync::oneshot::Sender<bool>>,
-}
-
 /// Permission prompt overlay — rendered as a TUI-native popup at the bottom.
 pub struct PermissionPopup {
     /// Tool entries to display: (id, name, context).
@@ -305,10 +299,6 @@ pub struct App {
     /// When Some, Y/N/A/Esc keys are routed to it instead of normal input handling.
     pub permission_popup: Option<PermissionPopup>,
 
-    /// Secret-scanner popup — rendered as a TUI-native overlay when secrets are detected.
-    /// When Some, Y/N/Esc keys are routed to it instead of normal input handling.
-    pub secret_popup: Option<SecretPopup>,
-
     /// Count of file-writing tool calls in the current turn (write_file/edit_file/batch_edit).
     pub files_changed_this_turn: usize,
     /// Skill(s) active this turn — displayed in sidebar, cleared at turn end.
@@ -369,7 +359,6 @@ impl App {
             diff_viewer: None,
             command_popup: None,
             permission_popup: None,
-            secret_popup: None,
             files_changed_this_turn: 0,
             active_skill: None,
             skill_history: Vec::new(),

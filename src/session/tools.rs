@@ -356,43 +356,19 @@ impl Session {
                 !u.contains("192.168.") && !u.contains("localhost") && !u.contains("127.0.0.1")
             }).unwrap_or(false)
         {
-            for result in &tool_results {
+            for result in &mut tool_results {
                 if let ContentBlock::ToolResult { content, .. } = result {
                     let hits = crate::secret_scanner::scan(content);
                     if !hits.is_empty() {
-                        let send_anyway = if crate::tui::channel::is_tui_mode() {
-                            let (tx, rx) = tokio::sync::oneshot::channel();
-                            crate::tui::channel::set_secret_request(
-                                crate::tui::channel::SecretScannerRequest {
-                                    hits: hits.iter().map(|h| h.to_string()).collect(),
-                                    response_tx: tx,
-                                },
+                        let summary = crate::secret_scanner::redact(content, &hits);
+                        if crate::tui::channel::is_tui_mode() {
+                            crate::tui::channel::tui_send(
+                                crate::tui::channel::TuiEvent::LlmChunk(
+                                    format!("\n⚠ {summary} — redacted before sending to cloud model."),
+                                ),
                             );
-                            rx.await.unwrap_or(false)
                         } else {
-                            crate::tui::channel::suspend_for_prompt();
-                            println!("  {} possible secret(s) detected before cloud send:", "⚠".yellow().bold());
-                            for h in &hits { println!("    {}", h.to_string().yellow()); }
-                            print!("  send anyway? [y/N] ");
-                            let _ = std::io::Write::flush(&mut std::io::stdout());
-                            let mut ans = String::new();
-                            std::io::stdin().read_line(&mut ans).ok();
-                            let send = ans.trim().eq_ignore_ascii_case("y");
-                            if !send {
-                                println!("  {} aborted by user — secrets not sent", "✗".red());
-                            }
-                            crate::tui::channel::resume_from_prompt();
-                            send
-                        };
-                        if !send_anyway {
-                            if crate::tui::channel::is_tui_mode() {
-                                crate::tui::channel::tui_send(
-                                    crate::tui::channel::TuiEvent::LlmChunk(
-                                        "\n⚠ Secrets detected in tool output — turn cancelled.".to_string(),
-                                    ),
-                                );
-                            }
-                            return Ok(None);
+                            println!("  ⚠ {summary} — redacted before sending to cloud model.");
                         }
                     }
                 }

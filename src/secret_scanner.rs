@@ -77,3 +77,28 @@ pub fn scan(content: &str) -> Vec<SecretMatch> {
     }
     matches
 }
+
+/// Redact secret lines from `content` in-place.
+/// Returns a summary string describing what was redacted (for user notice).
+pub fn redact(content: &mut String, hits: &[SecretMatch]) -> String {
+    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let mut redacted = Vec::new();
+    for h in hits {
+        let idx = h.line.saturating_sub(1);
+        if idx < lines.len() {
+            let marker = format!("[REDACTED: {}]", h.pattern_name);
+            if lines[idx] != marker {
+                lines[idx] = marker;
+                redacted.push(h.pattern_name);
+            }
+        }
+    }
+    *content = lines.join("\n");
+    redacted.sort();
+    redacted.dedup();
+    format!(
+        "Redacted {} secret(s): {}",
+        redacted.len(),
+        redacted.join(", ")
+    )
+}
