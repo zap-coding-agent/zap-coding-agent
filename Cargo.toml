@@ -1,6 +1,6 @@
 [package]
 name = "agent_harness"
-version = "0.13.73"
+version = "0.13.74"
 edition = "2021"
 
 [[bin]]

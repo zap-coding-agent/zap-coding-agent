@@ -243,6 +243,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `security` | triggered | auth, password, token, jwt, xss, injection… |
 | `understand` | triggered | what is this, summarize, architecture, generate docs, onboard me, tour, orient me… |
 
+> **Note:** `understand` is registered in `bundled_skills()` via `include_str!` — available in all installs without any setup.
+
 ### Corporate / network settings
 | Feature | File | Notes |
 |---|---|---|
