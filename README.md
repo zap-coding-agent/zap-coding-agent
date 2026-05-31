@@ -286,6 +286,84 @@ Dead code candidates  (pub fn, ≤1 reference)
 
 Line counts are read from disk; symbol counts and coupling metrics come from SQLite. Reference counts are computed in one O(source_size) pass at the end of every `/index` run — no call graph required.
 
+#### Explore the index yourself
+
+The index is a plain SQLite database at `.zap/code.db` — you can query it directly at any time, no zap session required.
+
+**macOS / Linux — interactive explorer script:**
+
+```bash
+./scripts/explore-db.sh
+```
+
+Launches an interactive menu with 10 ready-made queries:
+
+```
+1  Overview — symbols by kind          (bar chart)
+2  Top 15 files by symbol count
+3  All functions
+4  All structs
+5  All enums & traits
+6  Search symbol by name               (type a partial name)
+7  All symbols in a file               (type a partial filename)
+8  Find where a symbol is referenced
+9  Biggest files by symbol count
+10 Raw SQL — type your own query
+```
+
+Auto-finds `.zap/code.db` by walking up from your current directory. Requires only `sqlite3`, which ships with macOS. On Linux: `sudo apt install sqlite3`.
+
+---
+
+**Windows — PowerShell + sqlite3:**
+
+1. Install sqlite3 (one-time):
+```powershell
+winget install SQLite.SQLite
+```
+Restart your terminal after install so `sqlite3` is on PATH.
+
+2. Open the index from your project root:
+```powershell
+sqlite3 .zap\code.db
+```
+
+3. Paste any of these ready-made queries at the `sqlite>` prompt:
+
+```sql
+-- symbols by kind (overview)
+SELECT kind, COUNT(*) as count FROM symbols GROUP BY kind ORDER BY count DESC;
+
+-- top 15 files by symbol count
+SELECT symbol_count, path FROM indexed_files ORDER BY symbol_count DESC LIMIT 15;
+
+-- find a symbol by name (replace 'UserRepository' with yours)
+SELECT name, kind, path, line, signature FROM symbols
+WHERE name LIKE '%UserRepository%' COLLATE NOCASE LIMIT 20;
+
+-- all symbols in a specific file (replace 'provider' with your filename)
+SELECT name, kind, line, signature FROM symbols
+WHERE path LIKE '%provider%' ORDER BY line;
+
+-- all structs
+SELECT name, path, line FROM symbols WHERE kind = 'struct' ORDER BY name;
+
+-- all functions in a module
+SELECT name, path, line FROM symbols
+WHERE kind IN ('fn','function','def') AND path LIKE '%session%'
+ORDER BY path, line LIMIT 50;
+
+-- files with the most symbols (god object candidates)
+SELECT symbol_count, path FROM indexed_files
+WHERE symbol_count > 30 ORDER BY symbol_count DESC;
+```
+
+4. Type `.quit` to exit.
+
+> **WSL users**: the bash script works unchanged inside WSL — `./scripts/explore-db.sh` from the project root.
+
+---
+
 #### Why zap indexes when Claude Code deliberately doesn't
 
 Claude Code (Anthropic's own CLI) has **no built-in code indexing**. No tree-sitter, no SQLite, no ctags. It uses pure agentic search — grep + glob + read, chosen at runtime by the model. This was a deliberate, tested decision.
