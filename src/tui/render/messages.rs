@@ -88,6 +88,18 @@ pub fn message_to_lines(msg: &UiMessage, width: u16, expanded: &HashSet<String>)
             UiBlock::Tool(tc)                          => lines.extend(tool_call_lines(tc, expanded.contains(&tc.id), width)),
             UiBlock::Diff { path, content }            => lines.extend(diff_block_lines(path, content, width)),
             UiBlock::Thinking { char_count }           => lines.extend(thinking_collapsed_line(*char_count)),
+            UiBlock::Warning(text) => {
+                lines.push(Line::from(""));
+                lines.extend(
+                    text.lines().map(|l| {
+                        Line::from(vec![Span::styled(
+                            format!("  ⚠ {l}"),
+                            Style::default().fg(Color::Red).bold(),
+                        )])
+                    }),
+                );
+                lines.push(Line::from(""));
+            }
         }
     }
     lines

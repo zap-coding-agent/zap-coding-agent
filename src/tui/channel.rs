@@ -88,6 +88,8 @@ pub enum TuiEvent {
     /// A standalone notice (hint, warning, status) pushed as a completed assistant bubble.
     /// Use instead of println! in TUI mode so output goes into the chat area, not raw stdout.
     Notice(String),
+    /// A red warning banner — used for secret redaction notices and similar.
+    Warning(String),
 }
 
 static TUI_TX: OnceLock<mpsc::UnboundedSender<TuiEvent>> = OnceLock::new();

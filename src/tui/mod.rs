@@ -370,11 +370,21 @@ async fn tui_loop(
                                         new_config.model = model.clone();
                                         new_config.base_url = entry.base_url.clone();
 
+                                        // For auto-detected Gemini, use gcloud ADC credential method.
+                                        let credential_method = if entry.slug == "gemini" && entry.ready {
+                                            Some("gcloud_adc".to_string())
+                                        } else {
+                                            None
+                                        };
+                                        let auth_header = entry.auth_header.map(|h| h.to_string());
+
                                         new_config.all_providers.insert(slug.clone(), crate::config::ProviderEntry {
                                             kind: Some(kind_str.to_string()),
                                             model: Some(model.clone()),
                                             api_key: None,
                                             base_url: entry.base_url.clone(),
+                                            credential_method,
+                                            auth_header,
                                         });
 
                                         session.client = crate::llm_client::create_client(&new_config);

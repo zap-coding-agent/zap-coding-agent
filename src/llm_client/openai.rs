@@ -18,32 +18,37 @@ struct OaiToolAccum {
 
 pub(super) struct OpenAiClient {
     http: reqwest::Client,
-    api_key: String,
+    pub(super) credential: super::CredentialProvider,
     model: String,
     url: String,
     suppress_stream: bool,
     disable_stream: bool,
     image_support: bool,
+    /// Auth header name — "Authorization" (default) or "x-goog-api-key" (Gemini API keys).
+    pub(super) auth_header: String,
 }
 
 impl OpenAiClient {
     pub(super) fn new(
-        api_key: String,
+        credential: super::CredentialProvider,
         model: String,
         base_url: Option<String>,
         suppress_stream: bool,
         disable_stream: bool,
+        auth_header: Option<String>,
     ) -> Self {
         let url = normalize_openai_url(base_url.as_deref());
         let image_support = !url.contains("deepseek.com");
+        let auth_header = auth_header.unwrap_or_else(|| "Authorization".to_string());
         Self {
             http: crate::http::client().clone(),
-            api_key,
+            credential,
             model,
             url,
             suppress_stream,
             disable_stream,
             image_support,
+            auth_header,
         }
     }
 
@@ -208,18 +213,25 @@ impl LlmProvider for OpenAiClient {
         let body_bytes = serde_json::to_vec(&body).context("failed to serialize request")?;
 
         let tools_were_sent = !oai_tools.is_empty();
+
+        // Fetch the credential (static key or gcloud ADC token).
+        let api_key = self.credential.get().map_err(|e| anyhow::anyhow!("{e}"))?;
+
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
 
-            let auth_val = if self.api_key.is_empty() {
+            let auth_val = if api_key.is_empty() {
                 String::new()
+            } else if self.auth_header == "Authorization" {
+                format!("Bearer {}", api_key)
             } else {
-                format!("Bearer {}", self.api_key)
+                // Custom header like x-goog-api-key — value is the key directly.
+                api_key.clone()
             };
             let curl = if auth_val.is_empty() {
-                build_curl_block("openai", &self.url, "Authorization", "", &v)
+                build_curl_block("openai", &self.url, &self.auth_header, "", &v)
             } else {
-                build_curl_block("openai", &self.url, "Authorization", &auth_val, &v)
+                build_curl_block("openai", &self.url, &self.auth_header, &auth_val, &v)
             };
 
             if n > 0 {
@@ -229,7 +241,7 @@ impl LlmProvider for OpenAiClient {
                 let auth_line = if auth_val.is_empty() {
                     "(no auth)".to_string()
                 } else {
-                    format!("Authorization: {}", redact_token(&auth_val))
+                    format!("{}: {}", self.auth_header, redact_token(&auth_val))
                 };
                 crate::log::write_llm(
                     "REQUEST [openai]",
@@ -238,14 +250,19 @@ impl LlmProvider for OpenAiClient {
             }
         }
 
-        let api_key = self.api_key.clone();
+        let auth_header = &self.auth_header;
         let resp = send_with_retry(&self.http, |http| {
             let mut req = http
                 .post(&self.url)
                 .header("content-type", "application/json")
                 .body(body_bytes.clone());
             if !api_key.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", api_key));
+                let value = if auth_header == "Authorization" {
+                    format!("Bearer {}", api_key)
+                } else {
+                    api_key.clone()
+                };
+                req = req.header(auth_header.as_str(), &value);
             }
             req
         })

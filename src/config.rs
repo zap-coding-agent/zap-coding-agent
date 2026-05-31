@@ -33,6 +33,13 @@ pub struct ProviderEntry {
     pub model:    Option<String>,
     /// Full endpoint URL, e.g. "http://localhost:1234/v1/chat/completions".
     pub base_url: Option<String>,
+    /// Credential resolution method: "api_key" (default) or "gcloud_adc".
+    /// When "gcloud_adc", api_key is ignored and credentials are fetched
+    /// from `gcloud auth application-default print-access-token`.
+    pub credential_method: Option<String>,
+    /// Custom auth header name, e.g. "x-goog-api-key" for Gemini API keys.
+    /// If absent, defaults to "Authorization" (Bearer token).
+    pub auth_header: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -305,6 +312,12 @@ impl Config {
             }
             if let Some(ref url) = entry.base_url {
                 writeln!(f, "base_url = {:?}", url)?;
+            }
+            if let Some(ref method) = entry.credential_method {
+                writeln!(f, "credential_method = {:?}", method)?;
+            }
+            if let Some(ref hdr) = entry.auth_header {
+                writeln!(f, "auth_header = {:?}", hdr)?;
             }
             writeln!(f)?;
         }

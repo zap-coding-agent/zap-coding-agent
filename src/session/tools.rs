@@ -363,12 +363,10 @@ impl Session {
                         let summary = crate::secret_scanner::redact(content, &hits);
                         if crate::tui::channel::is_tui_mode() {
                             crate::tui::channel::tui_send(
-                                crate::tui::channel::TuiEvent::LlmChunk(
-                                    format!("\n⚠ {summary} — redacted before sending to cloud model."),
-                                ),
+                                crate::tui::channel::TuiEvent::Warning(summary),
                             );
                         } else {
-                            println!("  ⚠ {summary} — redacted before sending to cloud model.");
+                            println!("\x1b[31;1m  ⚠ {summary} — redacted before sending to cloud model.\x1b[0m");
                         }
                     }
                 }

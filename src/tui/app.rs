@@ -40,6 +40,8 @@ pub enum UiBlock {
     Diff { path: String, content: String },
     /// Extended-thinking block: stores full text, shown collapsed in history.
     Thinking { char_count: usize },
+    /// Red warning banner (secret redaction notices, etc.).
+    Warning(String),
 }
 
 /// An in-flight block during the current assistant turn.
@@ -190,6 +192,11 @@ pub struct ProviderEntry {
     pub base_url: Option<String>,
     pub needs_key: bool,
     pub coming_soon: bool,
+    /// Custom auth header (e.g. "x-goog-api-key" for Gemini API keys).
+    /// If None, defaults to "Authorization" (Bearer token).
+    pub auth_header: Option<&'static str>,
+    /// Whether credentials were auto-detected (shown as "✓ ready" badge).
+    pub ready: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -462,6 +469,13 @@ impl App {
                 self.messages.push(UiMessage {
                     role: MsgRole::Assistant,
                     blocks: vec![UiBlock::Text(text)],
+                });
+                self.auto_scroll = true;
+            }
+            TuiEvent::Warning(text) => {
+                self.messages.push(UiMessage {
+                    role: MsgRole::Assistant,
+                    blocks: vec![UiBlock::Warning(text)],
                 });
                 self.auto_scroll = true;
             }

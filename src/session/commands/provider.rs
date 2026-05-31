@@ -15,25 +15,33 @@ impl Session {
             base_url:    Option<&'static str>,
             needs_key:   bool,
             coming_soon: bool,
+            /// Custom auth header — e.g. "x-goog-api-key" for Gemini API keys.
+            /// If None, defaults to "Authorization" (Bearer token).
+            auth_header: Option<&'static str>,
+            /// Whether credentials were auto-detected (shown as "✓ ready").
+            ready:       bool,
         }
         #[derive(Clone)]
         enum ProviderKind { Anthropic, OpenAi }
 
+        let gemini_ready = crate::llm_client::auth::check_gcloud_adc().is_some()
+            || crate::llm_client::auth::check_google_api_key_env().is_some();
+
         let providers: Vec<ProviderDef> = vec![
-            ProviderDef { slug: "lm_studio",  name: "LM Studio",                  hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["gemma-4-e4b-it", "qwen2.5-coder-7b-instruct", "mistral-7b-instruct", "Other…"],    base_url: Some("http://localhost:1234/v1/chat/completions"),                                    needs_key: false, coming_soon: false },
-            ProviderDef { slug: "ollama",     name: "Ollama",                     hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["llama3.2", "llama3.1:70b", "codellama", "qwen2.5-coder", "Other…"],                 base_url: Some("http://localhost:11434/v1/chat/completions"),                                   needs_key: false, coming_soon: false },
-            ProviderDef { slug: "anthropic",  name: "Anthropic",                  hint: "claude-sonnet-4-6 / claude-opus-4-7",          kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", "Other…"],               base_url: None,                                                                                needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "claude_code",name: "Claude Code (Pro/Max API)",  hint: "full API via subscription · after 16 Jun 2026", kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7"],                                             base_url: None,                                                                                needs_key: false, coming_soon: true  },
-            ProviderDef { slug: "openai",     name: "OpenAI",                     hint: "gpt-4o / gpt-4o-mini / o3",                    kind: ProviderKind::OpenAi,    models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini", "Other…"],                                 base_url: None,                                                                                needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "gemini",     name: "Google Gemini",              hint: "gemini-2.5-pro / gemini-2.0-flash",            kind: ProviderKind::OpenAi,    models: &["gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash", "Other…"],                 base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),    needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "deepseek",   name: "DeepSeek",                   hint: "deepseek-v4-pro / deepseek-v4-flash",         kind: ProviderKind::OpenAi,    models: &["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "Other…"], base_url: Some("https://api.deepseek.com/v1/chat/completions"),                           needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "groq",       name: "Groq",                       hint: "llama-3.3-70b · fastest inference",            kind: ProviderKind::OpenAi,    models: &["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "Other…"], base_url: Some("https://api.groq.com/openai/v1/chat/completions"),                             needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "mistral",    name: "Mistral",                    hint: "mistral-large / codestral",                    kind: ProviderKind::OpenAi,    models: &["mistral-large-latest", "codestral-latest", "mistral-small-latest", "Other…"],       base_url: Some("https://api.mistral.ai/v1/chat/completions"),                                  needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "xai",        name: "xAI (Grok)",                 hint: "grok-3 / grok-3-mini",                         kind: ProviderKind::OpenAi,    models: &["grok-3", "grok-3-mini", "grok-2", "Other…"],                                       base_url: Some("https://api.x.ai/v1/chat/completions"),                                        needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "together",   name: "Together AI",                hint: "Llama / Qwen / Mistral open models",           kind: ProviderKind::OpenAi,    models: &["meta-llama/Llama-3-70b-chat-hf", "Qwen/Qwen2.5-72B-Instruct-Turbo", "Other…"],    base_url: Some("https://api.together.xyz/v1/chat/completions"),                                needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "perplexity", name: "Perplexity",                 hint: "sonar-pro · web-grounded answers",             kind: ProviderKind::OpenAi,    models: &["sonar-pro", "sonar", "sonar-reasoning", "Other…"],                                  base_url: Some("https://api.perplexity.ai/chat/completions"),                                  needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "cohere",     name: "Cohere",                     hint: "command-r-plus",                               kind: ProviderKind::OpenAi,    models: &["command-r-plus", "command-r", "Other…"],                                            base_url: Some("https://api.cohere.ai/compatibility/v1/chat/completions"),                    needs_key: true,  coming_soon: false },
-            ProviderDef { slug: "custom",     name: "Custom (OpenAI-compatible)", hint: "any OpenAI-compatible endpoint",               kind: ProviderKind::OpenAi,    models: &["Other…"],                                                                           base_url: None,                                                                                needs_key: false, coming_soon: false },
+            ProviderDef { slug: "lm_studio",  name: "LM Studio",                  hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["gemma-4-e4b-it", "qwen2.5-coder-7b-instruct", "mistral-7b-instruct", "Other…"],    base_url: Some("http://localhost:1234/v1/chat/completions"),                                    needs_key: false, coming_soon: false, auth_header: None,       ready: true },
+            ProviderDef { slug: "ollama",     name: "Ollama",                     hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["llama3.2", "llama3.1:70b", "codellama", "qwen2.5-coder", "Other…"],                 base_url: Some("http://localhost:11434/v1/chat/completions"),                                   needs_key: false, coming_soon: false, auth_header: None,       ready: true },
+            ProviderDef { slug: "anthropic",  name: "Anthropic",                  hint: "claude-sonnet-4-6 / claude-opus-4-7",          kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", "Other…"],               base_url: None,                                                                                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "claude_code",name: "Claude Code (Pro/Max API)",  hint: "full API via subscription · after 16 Jun 2026", kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7"],                                             base_url: None,                                                                                needs_key: false, coming_soon: true,  auth_header: None,       ready: false },
+            ProviderDef { slug: "openai",     name: "OpenAI",                     hint: "gpt-4o / gpt-4o-mini / o3",                    kind: ProviderKind::OpenAi,    models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini", "Other…"],                                 base_url: None,                                                                                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "gemini",     name: "Google Gemini",              hint: "gemini-2.5-pro / gemini-2.0-flash",            kind: ProviderKind::OpenAi,    models: &["gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash", "Other…"],                 base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),    needs_key: true,  coming_soon: false, auth_header: Some("x-goog-api-key"), ready: gemini_ready },
+            ProviderDef { slug: "deepseek",   name: "DeepSeek",                   hint: "deepseek-v4-pro / deepseek-v4-flash",         kind: ProviderKind::OpenAi,    models: &["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "Other…"], base_url: Some("https://api.deepseek.com/v1/chat/completions"),                           needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "groq",       name: "Groq",                       hint: "llama-3.3-70b · fastest inference",            kind: ProviderKind::OpenAi,    models: &["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "Other…"], base_url: Some("https://api.groq.com/openai/v1/chat/completions"),                             needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "mistral",    name: "Mistral",                    hint: "mistral-large / codestral",                    kind: ProviderKind::OpenAi,    models: &["mistral-large-latest", "codestral-latest", "mistral-small-latest", "Other…"],       base_url: Some("https://api.mistral.ai/v1/chat/completions"),                                  needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "xai",        name: "xAI (Grok)",                 hint: "grok-3 / grok-3-mini",                         kind: ProviderKind::OpenAi,    models: &["grok-3", "grok-3-mini", "grok-2", "Other…"],                                       base_url: Some("https://api.x.ai/v1/chat/completions"),                                        needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "together",   name: "Together AI",                hint: "Llama / Qwen / Mistral open models",           kind: ProviderKind::OpenAi,    models: &["meta-llama/Llama-3-70b-chat-hf", "Qwen/Qwen2.5-72B-Instruct-Turbo", "Other…"],    base_url: Some("https://api.together.xyz/v1/chat/completions"),                                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "perplexity", name: "Perplexity",                 hint: "sonar-pro · web-grounded answers",             kind: ProviderKind::OpenAi,    models: &["sonar-pro", "sonar", "sonar-reasoning", "Other…"],                                  base_url: Some("https://api.perplexity.ai/chat/completions"),                                  needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "cohere",     name: "Cohere",                     hint: "command-r-plus",                               kind: ProviderKind::OpenAi,    models: &["command-r-plus", "command-r", "Other…"],                                            base_url: Some("https://api.cohere.ai/compatibility/v1/chat/completions"),                    needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "custom",     name: "Custom (OpenAI-compatible)", hint: "any OpenAI-compatible endpoint",               kind: ProviderKind::OpenAi,    models: &["Other…"],                                                                           base_url: None,                                                                                needs_key: false, coming_soon: false, auth_header: None,       ready: false },
         ];
 
         let labels: Vec<String> = providers.iter().map(|p| {
@@ -83,11 +91,22 @@ impl Session {
 
         let existing_entry = config.all_providers.get(def.slug);
 
-        let api_key = if def.needs_key {
+        // Gemini with gcloud ADC: skip API key prompt entirely.
+        let (api_key, credential_method) = if def.slug == "gemini" && def.ready && gemini_ready {
+            // Auto-detected gcloud credentials — no key needed.
+            (String::new(), Some("gcloud_adc".to_string()))
+        } else if def.needs_key {
             let existing_key = existing_entry
                 .and_then(|e| e.api_key.as_deref())
                 .filter(|k| !k.is_empty())
                 .unwrap_or("");
+
+            let hint = if def.slug == "gemini" {
+                "Run 'gcloud auth login' first for a keyless experience. Saved to ~/.agent.toml"
+            } else {
+                "Saved to ~/.agent.toml"
+            };
+
             let prompt = if existing_key.is_empty() {
                 "API key:".to_string()
             } else {
@@ -95,14 +114,14 @@ impl Session {
             };
             match Text::new(&prompt)
                 .with_render_config(cfg)
-                .with_help_message("Saved to ~/.agent.toml")
+                .with_help_message(hint)
                 .prompt_skippable()
             {
-                Ok(Some(k)) if !k.trim().is_empty() => k.trim().to_string(),
-                _ => existing_key.to_string(),
+                Ok(Some(k)) if !k.trim().is_empty() => (k.trim().to_string(), None),
+                _ => (existing_key.to_string(), None),
             }
         } else {
-            String::new()
+            (String::new(), None)
         };
 
         let model_input = {
@@ -143,6 +162,8 @@ impl Session {
             model:    Some(model_input.clone()),
             api_key:  if api_key.is_empty() { None } else { Some(api_key) },
             base_url: base_url.clone(),
+            credential_method,
+            auth_header: def.auth_header.map(|h| h.to_string()),
         });
 
         self.client   = crate::llm_client::create_client(&new_config);

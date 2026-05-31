@@ -80,7 +80,7 @@ struct BlockAccum {
 
 pub(super) struct AnthropicClient {
     http: reqwest::Client,
-    api_key: String,
+    credential: super::CredentialProvider,
     model: String,
     url: String,
     suppress_stream: bool,
@@ -90,7 +90,7 @@ pub(super) struct AnthropicClient {
 
 impl AnthropicClient {
     pub(super) fn new(
-        api_key: String,
+        credential: super::CredentialProvider,
         model: String,
         base_url: Option<String>,
         suppress_stream: bool,
@@ -100,7 +100,7 @@ impl AnthropicClient {
         let url = normalize_anthropic_url(base_url.as_deref());
         Self {
             http: crate::http::client().clone(),
-            api_key,
+            credential,
             model,
             url,
             suppress_stream,
@@ -203,7 +203,8 @@ impl LlmProvider for AnthropicClient {
         let mut before_output = before_output;
         let mut highlighter = crate::stream_highlighter::StreamHighlighter::new();
         highlighter.suppress_print = crate::tui::channel::is_tui_mode();
-        if self.api_key.is_empty() {
+        let api_key = self.credential.get().map_err(|e| anyhow::anyhow!("{e}"))?;
+        if api_key.is_empty() {
             anyhow::bail!("ANTHROPIC_API_KEY is not set");
         }
 
@@ -259,11 +260,12 @@ impl LlmProvider for AnthropicClient {
         if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let n = v["tools"].as_array().map(|t| t.len()).unwrap_or(0);
 
-            let (auth_hdr, auth_val) = if self.bearer_auth {
-                ("Authorization", format!("Bearer {}", self.api_key))
+            let auth_val = if self.bearer_auth {
+                format!("Bearer {}", api_key)
             } else {
-                ("x-api-key", self.api_key.clone())
+                api_key.clone()
             };
+            let auth_hdr = if self.bearer_auth { "Authorization" } else { "x-api-key" };
             let curl = build_curl_block("anthropic", &self.url, auth_hdr, &auth_val, &v);
 
             v["tools"] = serde_json::json!(format!("<{n} tools — omitted>"));
@@ -276,7 +278,6 @@ impl LlmProvider for AnthropicClient {
             }
         }
 
-        let api_key = self.api_key.clone();
         let bearer_auth = self.bearer_auth;
         let resp = send_with_retry(&self.http, |http| {
             let mut req = http.post(&self.url)

@@ -1,4 +1,6 @@
 pub mod anthropic;
+pub mod auth;
+pub mod credentials;
 pub mod openai;
 
 use anyhow::Result;
@@ -6,6 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, OutputFormat, Provider};
+use credentials::CredentialProvider;
 
 use anthropic::AnthropicClient;
 use openai::OpenAiClient;
@@ -163,21 +166,45 @@ pub trait LlmProvider: Send + Sync {
 
 pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
     let suppress = config.output_format == OutputFormat::Json;
+
+    // Look up the active provider entry for credential_method and auth_header.
+    let entry = config.all_providers.get(&config.provider_slug);
+
+    let credential = {
+        let method = entry.and_then(|e| e.credential_method.as_deref());
+        match method {
+            Some("gcloud_adc") => CredentialProvider::GcloudAdc {
+                cached: std::sync::Mutex::new(None),
+            },
+            _ => CredentialProvider::Static(config.api_key.clone()),
+        }
+    };
+
     match config.provider {
         Provider::Anthropic => Box::new(AnthropicClient::new(
-            config.api_key.clone(),
+            credential,
             config.model.clone(),
             config.base_url.clone(),
             suppress,
             config.disable_stream,
         )),
-        Provider::OpenAi => Box::new(OpenAiClient::new(
-            config.api_key.clone(),
-            config.model.clone(),
-            config.base_url.clone(),
-            suppress,
-            config.disable_stream,
-        )),
+        Provider::OpenAi => {
+            // auth_header from the entry only applies to static API keys.
+            // Gcloud ADC always uses Authorization: Bearer (the default).
+            let auth_header = if matches!(credential, CredentialProvider::GcloudAdc { .. }) {
+                None
+            } else {
+                entry.and_then(|e| e.auth_header.clone())
+            };
+            Box::new(OpenAiClient::new(
+                credential,
+                config.model.clone(),
+                config.base_url.clone(),
+                suppress,
+                config.disable_stream,
+                auth_header,
+            ))
+        }
     }
 }
 
@@ -324,5 +351,101 @@ mod url_tests {
     #[test]
     fn anthropic_none_uses_default() {
         assert_eq!(normalize_anthropic_url(None), ANTHROPIC_DEFAULT_URL);
+    }
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+    use crate::config::{Config, ProviderEntry, OutputFormat, Provider as ConfigProvider};
+
+    fn minimal_config() -> Config {
+        Config {
+            provider: ConfigProvider::OpenAi,
+            provider_slug: "gemini".to_string(),
+            model: "gemini-2.0-flash".to_string(),
+            api_key: "".to_string(),
+            base_url: None,
+            output_format: OutputFormat::Text,
+            disable_stream: false,
+            ..Default::default()
+        }
+    }
+
+    fn gemini_entry(credential_method: Option<&str>, auth_header: Option<&str>) -> ProviderEntry {
+        ProviderEntry {
+            kind: Some("openai".to_string()),
+            model: Some("gemini-2.0-flash".to_string()),
+            api_key: None,
+            base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()),
+            credential_method: credential_method.map(|s| s.to_string()),
+            auth_header: auth_header.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn gcloud_adc_forces_authorization_header() {
+        // When credential_method is "gcloud_adc", the auth_header must be
+        // "Authorization" (default) — NOT "x-goog-api-key" — because gcloud
+        // ADC returns OAuth2 Bearer tokens, not API keys.
+        let mut config = minimal_config();
+        config.all_providers.insert(
+            "gemini".to_string(),
+            gemini_entry(Some("gcloud_adc"), Some("x-goog-api-key")),
+        );
+
+        let client = create_client(&config);
+        // Downcast to OpenAiClient to inspect the auth_header.
+        let openai: &OpenAiClient = unsafe { &*(&*client as *const dyn LlmProvider as *const OpenAiClient) };
+
+        assert_eq!(
+            openai.auth_header, "Authorization",
+            "gcloud_adc must use Authorization (Bearer), not x-goog-api-key"
+        );
+        assert!(
+            matches!(openai.credential, CredentialProvider::GcloudAdc { .. }),
+            "credential_method=gcloud_adc must produce GcloudAdc provider"
+        );
+    }
+
+    #[test]
+    fn static_api_key_uses_entry_auth_header() {
+        // When credential_method is absent (static API key), the entry's
+        // auth_header (e.g. "x-goog-api-key" for Gemini API keys) must be used.
+        let mut config = minimal_config();
+        config.api_key = "test-api-key".to_string();
+        config.all_providers.insert(
+            "gemini".to_string(),
+            gemini_entry(None, Some("x-goog-api-key")),
+        );
+
+        let client = create_client(&config);
+        let openai: &OpenAiClient = unsafe { &*(&*client as *const dyn LlmProvider as *const OpenAiClient) };
+
+        assert_eq!(
+            openai.auth_header, "x-goog-api-key",
+            "static API key with Gemini must use x-goog-api-key header"
+        );
+        assert!(
+            matches!(openai.credential, CredentialProvider::Static(_)),
+            "no credential_method must produce Static provider"
+        );
+    }
+
+    #[test]
+    fn no_auth_header_defaults_to_authorization() {
+        // When neither credential_method nor auth_header is set,
+        // the client should default to "Authorization".
+        let mut config = minimal_config();
+        config.api_key = "test-key".to_string();
+        config.all_providers.insert(
+            "gemini".to_string(),
+            gemini_entry(None, None),
+        );
+
+        let client = create_client(&config);
+        let openai: &OpenAiClient = unsafe { &*(&*client as *const dyn LlmProvider as *const OpenAiClient) };
+
+        assert_eq!(openai.auth_header, "Authorization");
     }
 }

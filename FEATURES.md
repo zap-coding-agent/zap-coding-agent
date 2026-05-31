@@ -271,6 +271,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/models` list | `src/session.rs:cmd_models` | lists OpenAI-compatible server models; strips `/chat/completions` suffix to get `/models` URL |
 | Config from file | `src/config.rs` | `~/.agent.toml` |
 | Config from env | `src/config.rs` | `AGENT_*`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
+| Gemini gcloud ADC (keyless) (v0.13.73) | `src/llm_client/auth.rs`, `src/llm_client/credentials.rs`, `src/config.rs`, `src/llm_client/mod.rs`, `src/session/commands/provider.rs`, `src/tui/` | Auto-detects `gcloud auth application-default` credentials; `credential_method = "gcloud_adc"` in `ProviderEntry`; `CredentialProvider::GcloudAdc` shells out to gcloud per-request (50-min cache); `check_gcloud_adc()` runs at CLI/TUI provider picker render (60-sec cache) to show "✓ ready" badge; auth header forced to `Authorization: Bearer` (not `x-goog-api-key`) when using ADC tokens; fallback to `GOOGLE_API_KEY` env var for API key users; TUI provider wizard shows green "✓ ready" for auto-detected Gemini; provider switching persists `credential_method` + `auth_header` to `~/.agent.toml`; 11 unit tests covering env var detection, gcloud cache, ADC credential refresh, and header selection |
 
 ### Tools (src/tools/ or tool_registry.rs)
 | Tool | Notes |

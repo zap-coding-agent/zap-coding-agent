@@ -911,6 +911,48 @@ zap
 
 `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are also read automatically.
 
+### Google Gemini — keyless via gcloud ADC
+
+zap supports **keyless authentication** for Google Gemini using [gcloud Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials). No API key needed — zap fetches short-lived OAuth2 tokens from gcloud automatically.
+
+**Prerequisites:**
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+```
+
+**Then just select Gemini:**
+
+```bash
+zap
+# /provider  →  select "Google Gemini"
+# Auto-detected credentials show a "✓ ready" badge — no API key prompt.
+```
+
+**What happens under the hood:**
+
+- On every request, zap runs `gcloud auth application-default print-access-token` to get a fresh Bearer token
+- Tokens are cached for 50 minutes (gcloud tokens expire after 60 min)
+- The auth header sent is `Authorization: Bearer <token>` (standard OAuth2)
+- The provider entry is persisted to `~/.agent.toml` with `credential_method = "gcloud_adc"`
+
+**Manual config** (if you prefer editing `~/.agent.toml` directly):
+
+```toml
+provider = "gemini"
+
+[providers.gemini]
+kind = "openai"
+model = "gemini-2.0-flash"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+credential_method = "gcloud_adc"
+```
+
+**Using an API key instead:**
+
+Set `GOOGLE_API_KEY` in your environment, or enter the key when prompted by `/provider`. With an API key, requests use the `x-goog-api-key` header instead of Bearer tokens.
+
 ---
 
 ## Usage

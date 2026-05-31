@@ -3,6 +3,7 @@ mod header;
 mod layout;
 mod messages;
 mod overlays;
+mod provider_picker;
 mod diff;
 mod dialogs;
 
@@ -198,7 +199,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     if app.provider_picker.is_some() {
-        overlays::draw_provider_picker(frame, app, size);
+        provider_picker::draw_provider_picker(frame, app, size);
     }
 
     if app.init_wizard.is_some() {
