@@ -48,11 +48,10 @@ pub fn save_project_meta(meta: &ProjectMeta) -> Result<()> {
 
 /// Mark the project as indexed (called after a successful /index run).
 pub fn mark_indexed() {
-    if let Some(mut meta) = load_project_meta() {
-        meta.indexed = true;
-        meta.indexed_at = Some(Utc::now().to_rfc3339());
-        let _ = save_project_meta(&meta);
-    }
+    let mut meta = load_project_meta().unwrap_or_default();
+    meta.indexed = true;
+    meta.indexed_at = Some(Utc::now().to_rfc3339());
+    let _ = save_project_meta(&meta);
 }
 
 // ── context.md ────────────────────────────────────────────────────────────────

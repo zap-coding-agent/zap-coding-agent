@@ -123,9 +123,9 @@ impl Session {
         } else {
             match &project_meta {
                 Some(meta) if !meta.indexed =>
-                    Some("Project not indexed — run /index for fast symbol lookup, or /init to re-run full setup.".into()),
+                    Some("Run /index for fast symbol lookup. Run /init for full project context (LLM analysis).".into()),
                 None =>
-                    Some("Run /init to set up this project — language detection, tree-sitter indexing, and project context.".into()),
+                    Some("Run /index for fast code symbol lookup.".into()),
                 _ => None,
             }
         };

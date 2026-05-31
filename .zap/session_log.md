@@ -1,3 +1,7 @@
+## Session #220 — 2026-05-31
+Goal: hi
+Files: docs/roadmap/provider-auto-detection.md
+
 ## Session #218 — 2026-05-31
 Goal: when I use slash command for provider it takes to cli mode and not tui
 Files: src/tui/app.rs, src/tui/render/overlays.rs, src/tui/render/mod.rs, src/tui/input.rs, src/tui/mod.rs, src/tui/turn_handler.rs
