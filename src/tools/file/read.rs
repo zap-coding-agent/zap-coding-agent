@@ -35,6 +35,22 @@ impl Tool for ReadFileTool {
             .context("read_file: 'path' must be a string")?;
         guard_path(path)?;
 
+        // Catch the common LLM mistake of passing a directory path instead of a file path.
+        if tokio::fs::metadata(path).await.map(|m| m.is_dir()).unwrap_or(false) {
+            let mut rd = tokio::fs::read_dir(path).await
+                .with_context(|| format!("read_file: '{}' is a directory (cannot read)", path))?;
+            let mut names: Vec<String> = vec![];
+            while let Some(e) = rd.next_entry().await? {
+                names.push(e.file_name().to_string_lossy().into_owned());
+            }
+            names.sort();
+            return Ok(format!(
+                "'{}' is a directory, not a file. Use read_file on a specific file inside it:\n{}",
+                path,
+                names.iter().map(|n| format!("  {}/{}", path.trim_end_matches('/'), n)).collect::<Vec<_>>().join("\n")
+            ));
+        }
+
         let raw = tokio::fs::read_to_string(path)
             .await
             .with_context(|| format!("read_file: cannot read '{}'", path))?;
