@@ -1,3 +1,27 @@
+## Session #218 — 2026-05-31
+Goal: when I use slash command for provider it takes to cli mode and not tui
+Files: src/tui/app.rs, src/tui/render/overlays.rs, src/tui/render/mod.rs, src/tui/input.rs, src/tui/mod.rs, src/tui/turn_handler.rs
+
+## Session #217 — 2026-05-31
+Goal: when I use slash provider it takes to cli not tui pls check
+Files: (no files modified)
+
+## Session #216 — 2026-05-31
+Goal: hi
+Files: (no files modified)
+
+## Session #215 — 2026-05-31
+Goal: when I opeend zap session , it did not open last session , it opened some other.
+Files: /Users/sanjeevgulati/personal-repos/ideas/src/session/commands/code.rs, /Users/sanjeevgulati/personal-repos/ideas/Cargo.toml, /Users/sanjeevgulati/personal-repos/ideas/FEATURES.md
+
+## Session #197 — 2026-05-30
+Goal: I want to create video of overview video of zap , can you suggest and do?
+Files: /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_title.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_scene_01.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_scene_02.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_scene_03.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_scene_04.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_scene_05.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/_wrap.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/01_skill_injection.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/02_code_index.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/03_casual.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/04_init.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/scenarios/05_security.sh, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/overview.tape, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/README.md, /tmp/test_tui.tape, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/test_tui.tape, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/test_simple.tape, /Users/sanjeevgulati/personal-repos/ideas/demos/overview/overview_tui.tape
+
+## Session #182 — 2026-05-29
+Goal: what was you wokring on
+Files: /Users/sanjeevgulati/personal-repos/ideas/docs/backlog.md
+
 ## Session #128 — 2026-05-25
 Goal: pls check when I laod particular session , it only shows files changes and not r
 Files: /Users/sanjeevgulati/personal-repos/ideas/src/session/commands.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/mod.rs

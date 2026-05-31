@@ -337,6 +337,68 @@ async fn tui_loop(
                             }
                         }
                         InputAction::CloseSessionPicker => {}
+                        InputAction::SelectProvider(idx) => {
+                            if let Some(ref picker) = app.provider_picker {
+                                if let Some(entry) = picker.entries.get(idx) {
+                                    if entry.coming_soon {
+                                        app.messages.push(UiMessage {
+                                            role: MsgRole::Assistant,
+                                            blocks: vec![UiBlock::Text(format!(
+                                                "{} Claude Code (Pro/Max API) — coming 16 Jun 2026.\nUse Anthropic provider with an API key until then.",
+                                                "◷",
+                                            ))],
+                                        });
+                                        app.auto_scroll = true;
+                                    } else {
+                                        let slug = entry.slug.clone();
+                                        let name = entry.name.clone();
+                                        let model = entry.models.iter()
+                                            .find(|m| m.as_str() != "Other…")
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        let kind_str = match entry.kind {
+                                            app::ProviderKind::Anthropic => "anthropic",
+                                            app::ProviderKind::OpenAi => "openai",
+                                        };
+                                        let provider = match entry.kind {
+                                            app::ProviderKind::Anthropic => crate::config::Provider::Anthropic,
+                                            app::ProviderKind::OpenAi => crate::config::Provider::OpenAi,
+                                        };
+
+                                        let mut new_config = config.clone();
+                                        new_config.provider = provider;
+                                        new_config.provider_slug = slug.clone();
+                                        new_config.model = model.clone();
+                                        new_config.base_url = entry.base_url.clone();
+
+                                        new_config.all_providers.insert(slug.clone(), crate::config::ProviderEntry {
+                                            kind: Some(kind_str.to_string()),
+                                            model: Some(model.clone()),
+                                            api_key: None,
+                                            base_url: entry.base_url.clone(),
+                                        });
+
+                                        session.client = crate::llm_client::create_client(&new_config);
+                                        session.model = model.clone();
+                                        session.base_url = new_config.base_url.clone();
+                                        session.config = new_config.clone();
+
+                                        let _ = new_config.save();
+
+                                        app.model = model.clone();
+                                        app.messages.push(UiMessage {
+                                            role: MsgRole::Assistant,
+                                            blocks: vec![UiBlock::Text(format!(
+                                                "✓ Switched to {} · {}",
+                                                name, model
+                                            ))],
+                                        });
+                                        app.auto_scroll = true;
+                                    }
+                                }
+                            }
+                            app.provider_picker = None;
+                        }
                         InputAction::ClearInput => {}
                         InputAction::SelectMode(is_task) => {
                             if is_task {

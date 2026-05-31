@@ -183,6 +183,29 @@ pub struct PermissionPopup {
     pub response_tx: Option<tokio::sync::oneshot::Sender<super::channel::PermissionDecision>>,
 }
 
+// ── Provider picker ────────────────────────────────────────────────────────────
+
+/// A provider entry shown in the TUI-native /provider picker.
+#[derive(Debug, Clone)]
+pub struct ProviderEntry {
+    pub slug: String,
+    pub name: String,
+    pub hint: String,
+    pub kind: ProviderKind,
+    pub models: Vec<String>,
+    pub base_url: Option<String>,
+    pub needs_key: bool,
+    pub coming_soon: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProviderKind { Anthropic, OpenAi }
+
+pub struct ProviderPickerState {
+    pub entries: Vec<ProviderEntry>,
+    pub selected: usize,
+}
+
 // ── App ────────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -252,6 +275,9 @@ pub struct App {
 
     /// Session picker overlay (None when closed).
     pub session_picker: Option<SessionPickerState>,
+
+    /// Provider picker overlay (None when closed).
+    pub provider_picker: Option<ProviderPickerState>,
 
     /// /init wizard overlay (None when closed).
     pub init_wizard: Option<InitWizardState>,
@@ -334,6 +360,7 @@ impl App {
             mode_picker: None,
             domain_picker: None,
             session_picker: None,
+            provider_picker: None,
             init_wizard: None,
             show_mode_picker_after_init: false,
             quit_confirm: false,

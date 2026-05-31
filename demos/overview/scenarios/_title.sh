@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'
+printf '  \033[1m⚡ zap\033[0m  ·  \033[1mOverview\033[0m\n'
+printf '\n'
+printf '  An AI coding agent built in Rust — skill-first context injection,\n'
+printf '  a hard security boundary, and a single binary with no runtime.\n'
+printf '\n'
+printf '  \033[2m4 features in 4 minutes. Live binary, real AI responses.\033[0m\n'
+printf '\n'
+printf '  \033[38;5;220m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+printf '\n'

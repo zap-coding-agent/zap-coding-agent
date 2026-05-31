@@ -197,6 +197,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         overlays::draw_session_picker(frame, app, size);
     }
 
+    if app.provider_picker.is_some() {
+        overlays::draw_provider_picker(frame, app, size);
+    }
+
     if app.init_wizard.is_some() {
         overlays::draw_init_wizard(frame, app, size);
     }

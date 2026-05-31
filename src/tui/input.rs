@@ -31,6 +31,8 @@ pub enum InputAction {
     ConfirmInit { language: String, do_index: bool, do_understand: bool },
     /// /init wizard cancelled.
     CancelInit,
+    /// Provider picker confirmed — carries the selected entry index.
+    SelectProvider(usize),
     /// Open diff viewer (triggered by /diff command).
     OpenDiffViewer,
     /// Close diff viewer.
@@ -77,6 +79,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Session picker takes priority when open.
     if app.session_picker.is_some() {
         return handle_session_picker_key(app, key);
+    }
+
+    // Provider picker takes priority when open.
+    if app.provider_picker.is_some() {
+        return handle_provider_picker_key(app, key);
     }
 
     // /init wizard takes priority when open.
@@ -605,7 +612,31 @@ fn handle_session_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
     }
 }
 
-/// Handle keys when file browser is open.
+/// Handle keys when the provider picker overlay is open.
+fn handle_provider_picker_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let picker = app.provider_picker.as_mut().unwrap();
+    match key.code {
+        KeyCode::Esc => {
+            app.provider_picker = None;
+            InputAction::None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            picker.selected = picker.selected.saturating_sub(1);
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let max = picker.entries.len().saturating_sub(1);
+            picker.selected = (picker.selected + 1).min(max);
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            let idx = picker.selected;
+            InputAction::SelectProvider(idx)
+        }
+        _ => InputAction::None,
+    }
+}
+
 fn handle_file_browser_key(app: &mut App, key: KeyEvent) -> InputAction {
     let browser = app.file_browser.as_mut().unwrap();
     
