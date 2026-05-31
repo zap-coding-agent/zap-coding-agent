@@ -241,6 +241,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `code-review` | triggered | review, pr review, lgtm, critique… |
 | `debugging` | triggered | debug, error, crash, panic, stacktrace… |
 | `security` | triggered | auth, password, token, jwt, xss, injection… |
+| `understand` | triggered | what is this, summarize, architecture, generate docs, onboard me, tour, orient me… |
 
 ### Corporate / network settings
 | Feature | File | Notes |

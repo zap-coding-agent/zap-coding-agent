@@ -764,4 +764,86 @@ mod trigger_tests {
         assert!(trigger_word_match("the pr is ready", "pr"));
         assert!(trigger_word_match("pr review needed", "pr"));
     }
+
+    // ── understand skill trigger coverage ────────────────────────────────────
+
+    #[test]
+    fn understand_what_is_this() {
+        assert!(trigger_word_match("what is this project", "what is this"));
+        assert!(trigger_word_match("what is this", "what is this"));
+        // must NOT fire on a different "what" phrase
+        assert!(!trigger_word_match("what should i do", "what is this"));
+    }
+
+    #[test]
+    fn understand_explain() {
+        assert!(trigger_word_match("can you explain the codebase", "explain the codebase"));
+        assert!(trigger_word_match("explain this project to me", "explain this project"));
+        assert!(trigger_word_match("explain the project briefly", "explain the project"));
+        // "explaining" contains "explain" as a prefix — inflection fires
+        assert!(trigger_word_match("start by explaining the structure", "explain"));
+        // "explanation" diverges at char 5 ('n' vs 'i') — does NOT match "explain"
+        assert!(!trigger_word_match("give an explanation", "explain"));
+    }
+
+    #[test]
+    fn understand_summarize() {
+        assert!(trigger_word_match("summarize the codebase", "summarize the codebase"));
+        assert!(trigger_word_match("summarize this project", "summarize this"));
+        assert!(trigger_word_match("can you summarize", "summarize"));
+        // "summarizes" contains "summarize" as prefix — fires
+        assert!(trigger_word_match("it summarizes each module", "summarize"));
+        // "summarizing" diverges at char 8 ('i' vs 'e') — does NOT match "summarize"
+        assert!(!trigger_word_match("summarizing the repo", "summarize"));
+    }
+
+    #[test]
+    fn understand_overview() {
+        assert!(trigger_word_match("give me a project overview", "project overview"));
+        assert!(trigger_word_match("codebase overview please", "codebase overview"));
+        assert!(trigger_word_match("give me an overview", "give me an overview"));
+    }
+
+    #[test]
+    fn understand_architecture() {
+        assert!(trigger_word_match("show me the architecture", "architecture"));
+        assert!(trigger_word_match("architecture of this project", "architecture"));
+        assert!(trigger_word_match("how is this structured", "how is this structured"));
+        // must NOT fire on unrelated words containing "arch"
+        assert!(!trigger_word_match("search the archive", "architecture"));
+    }
+
+    #[test]
+    fn understand_docs() {
+        assert!(trigger_word_match("generate docs for this", "generate docs"));
+        assert!(trigger_word_match("generate documentation", "generate documentation"));
+        // "generate" alone should not be a trigger — not in our list, so no test needed,
+        // but verify multi-word triggers work as substrings
+        assert!(trigger_word_match("please generate docs now", "generate docs"));
+    }
+
+    #[test]
+    fn understand_onboard() {
+        assert!(trigger_word_match("onboard me to this codebase", "onboard me"));
+        assert!(trigger_word_match("orient me please", "orient me"));
+        assert!(trigger_word_match("give me a tour of the code", "give me a tour"));
+        assert!(trigger_word_match("walk me through the project", "walk me through"));
+    }
+
+    #[test]
+    fn understand_how_is_structured() {
+        assert!(trigger_word_match("how is this structured", "how is this structured"));
+        assert!(trigger_word_match("how is it structured", "how is it structured"));
+        // "how does zap work" is NOT in trigger list — does not fire
+        assert!(!trigger_word_match("how does zap work exactly", "how is this structured"));
+        assert!(!trigger_word_match("how does zap work exactly", "how is it structured"));
+    }
+
+    #[test]
+    fn understand_no_false_positives() {
+        // "understand" mid-word
+        assert!(!trigger_word_match("misunderstanding the issue", "understand this"));
+        // "overview" not triggered by "overview" appearing in unrelated context
+        assert!(!trigger_word_match("reviewed the pull request overview doc already", "project overview"));
+    }
 }
