@@ -6,6 +6,8 @@ mod overlays;
 mod provider_picker;
 mod diff;
 mod dialogs;
+mod context_viewer;
+mod init_wizard;
 
 // Re-export the public surface that callers outside this module depend on.
 pub use diff::open_diff_viewer;
@@ -203,7 +205,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     if app.init_wizard.is_some() {
-        overlays::draw_init_wizard(frame, app, size);
+        init_wizard::draw_init_wizard(frame, app, size);
     }
 
     if app.diff_viewer.is_some() {
@@ -221,5 +223,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.btw_mode {
         dialogs::draw_btw_input(frame, app, size);
+    }
+
+    if app.gemini_auth_prompt {
+        overlays::draw_gemini_auth_prompt(frame, app, size);
+    }
+
+    if app.api_key_input.is_some() {
+        overlays::draw_api_key_input(frame, app, size);
+    }
+
+    if app.context_viewer.is_some() {
+        context_viewer::draw_context_viewer(frame, app, size);
     }
 }

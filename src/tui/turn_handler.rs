@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::app::{App, AppState, MsgRole, UiBlock, UiMessage};
+use super::app::{App, AppState, ContextTurnEntry, ContextViewerState, DetailBlock, MsgRole, TurnDetail, UiBlock, UiMessage};
 use super::channel::{self, TuiEvent, PermissionDecision};
 use super::input::{handle_key, InputAction};
 use super::render;
@@ -75,12 +75,13 @@ pub(super) async fn handle_tui_slash(
 
         let gemini_ready = crate::llm_client::auth::check_gcloud_adc().is_some()
             || crate::llm_client::auth::check_google_api_key_env().is_some();
+        let claude_code_ready = crate::llm_client::auth::check_claude_code().is_some();
 
         let entries: Vec<ProviderEntry> = vec![
             ProviderEntry { slug: "lm_studio".into(),  name: "LM Studio".into(),                  hint: "local · OpenAI-compatible".into(),             kind: ProviderKind::OpenAi,    models: vec!["gemma-4-e4b-it".into(), "qwen2.5-coder-7b-instruct".into(), "mistral-7b-instruct".into(), "Other…".into()],    base_url: Some("http://localhost:1234/v1/chat/completions".into()),                     needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderEntry { slug: "ollama".into(),     name: "Ollama".into(),                     hint: "local · OpenAI-compatible".into(),             kind: ProviderKind::OpenAi,    models: vec!["llama3.2".into(), "llama3.1:70b".into(), "codellama".into(), "qwen2.5-coder".into(), "Other…".into()],   base_url: Some("http://localhost:11434/v1/chat/completions".into()),                      needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderEntry { slug: "anthropic".into(),  name: "Anthropic".into(),                  hint: "claude-sonnet-4-6 / claude-opus-4-7".into(),   kind: ProviderKind::Anthropic, models: vec!["claude-sonnet-4-6".into(), "claude-opus-4-7".into(), "claude-haiku-4-5".into(), "Other…".into()],    base_url: None,                                                                                 needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
-            ProviderEntry { slug: "claude_code".into(),name: "Claude Code (Pro/Max API)".into(),  hint: "full API via subscription · after 16 Jun 2026".into(), kind: ProviderKind::Anthropic, models: vec!["claude-sonnet-4-6".into(), "claude-opus-4-7".into()],                                            base_url: None,                                                                                 needs_key: false, coming_soon: true,  auth_header: None,       ready: false },
+            ProviderEntry { slug: "claude_code".into(),name: "Claude Code (Pro/Max API)".into(),  hint: if claude_code_ready { "claude-sonnet-4-6 / claude-opus-4-7 · via claude CLI".into() } else { "requires claude CLI · Pro/Max plan".into() }, kind: ProviderKind::Anthropic, models: vec!["claude-sonnet-4-6".into(), "claude-opus-4-7".into()],                                            base_url: None,                                                                                 needs_key: false, coming_soon: !claude_code_ready, auth_header: None, ready: claude_code_ready },
             ProviderEntry { slug: "openai".into(),     name: "OpenAI".into(),                     hint: "gpt-4o / gpt-4o-mini / o3".into(),             kind: ProviderKind::OpenAi,    models: vec!["gpt-4o".into(), "gpt-4o-mini".into(), "o3".into(), "o4-mini".into(), "Other…".into()],    base_url: None,                                                                                 needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderEntry { slug: "gemini".into(),     name: "Google Gemini".into(),              hint: "gemini-2.5-pro / gemini-2.0-flash".into(),     kind: ProviderKind::OpenAi,    models: vec!["gemini-2.0-flash".into(), "gemini-2.5-pro".into(), "gemini-2.5-flash".into(), "Other…".into()],     base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".into()), needs_key: true, coming_soon: false, auth_header: Some("x-goog-api-key"), ready: gemini_ready },
             ProviderEntry { slug: "deepseek".into(),   name: "DeepSeek".into(),                   hint: "deepseek-v4-pro / deepseek-v4-flash".into(),   kind: ProviderKind::OpenAi,    models: vec!["deepseek-v4-pro".into(), "deepseek-v4-flash".into(), "deepseek-chat".into(), "deepseek-reasoner".into(), "Other…".into()], base_url: Some("https://api.deepseek.com/v1/chat/completions".into()),                    needs_key: true, coming_soon: false, auth_header: None,       ready: false },
@@ -93,7 +94,7 @@ pub(super) async fn handle_tui_slash(
             ProviderEntry { slug: "custom".into(),     name: "Custom (OpenAI-compatible)".into(), hint: "any OpenAI-compatible endpoint".into(),         kind: ProviderKind::OpenAi,    models: vec!["Other…".into()],                                                                 base_url: None,                                                                                 needs_key: false, coming_soon: false, auth_header: None,       ready: false },
         ];
 
-        app.provider_picker = Some(ProviderPickerState { entries, selected: 0 });
+        app.provider_picker = Some(ProviderPickerState { entries, selected: 0, is_onboarding: false });
         return Ok(false);
     }
 
@@ -106,6 +107,11 @@ pub(super) async fn handle_tui_slash(
             });
             terminal.draw(|frame| render::draw(frame, app))?;
         }
+        return Ok(false);
+    }
+
+    if cmd == "/context" {
+        app.context_viewer = Some(build_context_viewer(session));
         return Ok(false);
     }
 
@@ -340,4 +346,192 @@ pub(super) async fn run_normal_turn(
     }
 
     Ok(())
+}
+
+/// Snapshot session.messages into a ContextViewerState for the /context overlay.
+pub(super) fn build_context_viewer(session: &Session) -> ContextViewerState {
+    use crate::llm_client::ContentBlock;
+    use crate::session::model_context_limit;
+
+    let window: usize = std::env::var("ZAP_HISTORY_WINDOW")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
+
+    let msgs = &session.messages;
+
+    // Locate every "real user turn" — user message whose first block is Text.
+    let turn_indices: Vec<usize> = msgs
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            m.role == "user"
+                && m.content
+                    .first()
+                    .is_some_and(|b| matches!(b, ContentBlock::Text { .. }))
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    let total_turns = turn_indices.len();
+    let window_start = total_turns.saturating_sub(window);
+
+    fn msg_chars(b: &ContentBlock) -> usize {
+        match b {
+            ContentBlock::Text { text } => text.len(),
+            ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+            ContentBlock::ToolResult { content, .. } => content.len(),
+            _ => 0,
+        }
+    }
+
+    // First pass: compute raw char counts per turn and the grand total across
+    // all messages so we can scale each turn proportionally.
+    let total_chars: usize = msgs
+        .iter()
+        .flat_map(|m| m.content.iter())
+        .map(msg_chars)
+        .sum();
+
+    let total_tokens = session.estimated_context_tokens();
+
+    let mut per_turn: Vec<(usize, usize, String, usize, bool)> = Vec::new(); // (msg_idx, msg_count, preview, chars, in_window)
+    for (turn_idx, &msg_idx) in turn_indices.iter().enumerate() {
+        let next_msg = turn_indices
+            .get(turn_idx + 1)
+            .copied()
+            .unwrap_or(msgs.len());
+        let msg_count = next_msg - msg_idx;
+
+        let preview = msgs[msg_idx]
+            .content
+            .iter()
+            .find_map(|b| {
+                if let ContentBlock::Text { text } = b {
+                    Some(text.chars().take(60).collect::<String>())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        let chars: usize = msgs[msg_idx..next_msg]
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .map(msg_chars)
+            .sum();
+
+        per_turn.push((msg_idx, msg_count, preview, chars, turn_idx >= window_start));
+    }
+
+    // Second pass: scale each turn's char share against the known-correct total.
+    let mut turns = Vec::new();
+    for (msg_idx, msg_count, preview, chars, in_window) in per_turn {
+        let tokens_est = if total_chars > 0 {
+            (total_tokens as f64 * (chars as f64 / total_chars as f64)) as usize
+        } else {
+            chars / 4
+        };
+        let next_msg = msg_idx + msg_count;
+        let detail = build_turn_detail(&session.messages, msg_idx, next_msg, total_tokens, total_chars);
+        turns.push(ContextTurnEntry {
+            msg_index: msg_idx,
+            msg_count,
+            preview,
+            tokens_est,
+            in_window,
+            detail,
+        });
+    }
+
+    ContextViewerState {
+        turns,
+        selected: 0,
+        total_tokens,
+        limit_tokens: model_context_limit(&session.model),
+        context_pct: session.context_fill_pct(),
+        confirm_clear: false,
+        confirm_drop: false,
+        detail_focus: false,
+        detail_scroll: 0,
+    }
+}
+
+fn build_turn_detail(
+    msgs: &[crate::llm_client::Message],
+    msg_idx: usize,
+    next_msg: usize,
+    total_tokens: usize,
+    total_chars: usize,
+) -> TurnDetail {
+    use crate::llm_client::ContentBlock;
+
+    fn block_chars(b: &ContentBlock) -> usize {
+        match b {
+            ContentBlock::Text { text } => text.len(),
+            ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+            ContentBlock::ToolResult { content, .. } => content.len(),
+            _ => 0,
+        }
+    }
+
+    fn chars_to_tokens(chars: usize, total_tokens: usize, total_chars: usize) -> usize {
+        if total_chars > 0 {
+            (total_tokens as f64 * (chars as f64 / total_chars as f64)) as usize
+        } else {
+            chars / 4
+        }
+    }
+
+    // Build a name map from tool_use_id → tool name so ToolResult can show the name.
+    let mut tool_name_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for msg in &msgs[msg_idx..next_msg] {
+        for block in &msg.content {
+            if let ContentBlock::ToolUse { id, name, .. } = block {
+                tool_name_map.insert(id.clone(), name.clone());
+            }
+        }
+    }
+
+    let mut blocks: Vec<DetailBlock> = Vec::new();
+
+    for msg in &msgs[msg_idx..next_msg] {
+        match msg.role.as_str() {
+            "user" => {
+                for block in &msg.content {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            let t = chars_to_tokens(text.len(), total_tokens, total_chars);
+                            blocks.push(DetailBlock::UserText { text: text.clone(), tokens: t });
+                        }
+                        ContentBlock::ToolResult { tool_use_id, content } => {
+                            let tool_name = tool_name_map.get(tool_use_id).cloned().unwrap_or_default();
+                            let t = chars_to_tokens(content.len(), total_tokens, total_chars);
+                            blocks.push(DetailBlock::ToolResult { tool_name, content: content.clone(), tokens: t });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "assistant" => {
+                for block in &msg.content {
+                    match block {
+                        ContentBlock::Text { text } if !text.trim().is_empty() => {
+                            let t = chars_to_tokens(text.len(), total_tokens, total_chars);
+                            blocks.push(DetailBlock::AssistantText { text: text.clone(), tokens: t });
+                        }
+                        ContentBlock::ToolUse { name, input, .. } => {
+                            let json = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
+                            let t = chars_to_tokens(block_chars(block), total_tokens, total_chars);
+                            blocks.push(DetailBlock::ToolCall { name: name.clone(), input_json: json, tokens: t });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    TurnDetail { blocks }
 }

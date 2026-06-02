@@ -176,18 +176,18 @@ Source: https://github.com/opencode-ai/opencode/blob/main/internal/llm/prompt/co
 
 ---
 
-## 3. ZAP — sanjeev23oct/zap
+## 3. ZAP — zap-coding-agent/zap-coding-agent
 
-**Repo:** https://github.com/sanjeev23oct/zap
+**Repo:** https://github.com/zap-coding-agent/zap-coding-agent
 
 ### Primary source files
 
 | File | Purpose |
 |---|---|
-| [`src/context_manager.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/context_manager.rs) | Builds system prompt per turn |
-| [`~/.zap/skills/`](https://github.com/sanjeev23oct/zap/tree/main/skills) | 23 bundled skill files |
-| [`src/skill_manager.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/skill_manager.rs) | Skill discovery, trigger matching, injection |
-| [`src/session/mod.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/session/mod.rs) | Per-turn prompt composition |
+| [`src/context_manager.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/context_manager.rs) | Builds system prompt per turn |
+| [`~/.zap/skills/`](https://github.com/zap-coding-agent/zap-coding-agent/tree/main/skills) | 23 bundled skill files |
+| [`src/skill_manager.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/skill_manager.rs) | Skill discovery, trigger matching, injection |
+| [`src/session/mod.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/session/mod.rs) | Per-turn prompt composition |
 
 ### Two prompt paths
 
@@ -462,6 +462,6 @@ React-specific content:   ~422 tokens
 | Gemini CLI | `promptProvider.ts` | https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/prompts/promptProvider.ts |
 | Gemini CLI | `client.ts` | https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/core/client.ts |
 | OpenCode | `coder.go` | https://raw.githubusercontent.com/opencode-ai/opencode/main/internal/llm/prompt/coder.go |
-| ZAP | `context_manager.rs` | https://raw.githubusercontent.com/sanjeev23oct/zap/main/src/context_manager.rs |
-| ZAP | `skill_manager.rs` | https://raw.githubusercontent.com/sanjeev23oct/zap/main/src/skill_manager.rs |
-| ZAP | `session/mod.rs` | https://raw.githubusercontent.com/sanjeev23oct/zap/main/src/session/mod.rs |
+| ZAP | `context_manager.rs` | https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/src/context_manager.rs |
+| ZAP | `skill_manager.rs` | https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/src/skill_manager.rs |
+| ZAP | `session/mod.rs` | https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/src/session/mod.rs |

@@ -256,7 +256,10 @@ impl LlmProvider for OpenAiClient {
                 .post(&self.url)
                 .header("content-type", "application/json")
                 .body(body_bytes.clone());
-            if !api_key.is_empty() {
+            // GcloudAdc always sends Authorization header (even empty) — Gemini accepts
+            // "Bearer " (empty token) but rejects missing auth entirely (returns 400).
+            let send_header = !api_key.is_empty() || self.credential.always_send_auth_header();
+            if send_header {
                 let value = if auth_header == "Authorization" {
                     format!("Bearer {}", api_key)
                 } else {

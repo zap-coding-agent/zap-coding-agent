@@ -35,3 +35,9 @@ requirements.md
 VISION.md
 v2.md
 COMPARISON.md
+.gstack/
+
+# Demo recordings — large binaries, not for distribution
+*.mp4
+*.gif
+*.mov

@@ -9,52 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent_harness"
-version = "0.13.73"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64",
- "bytes",
- "chrono",
- "clap",
- "colored",
- "crossterm 0.28.1",
- "dirs",
- "futures",
- "futures-util",
- "git2",
- "glob",
- "indicatif",
- "inquire",
- "libc",
- "pulldown-cmark",
- "ratatui",
- "regex",
- "reqwest",
- "rusqlite",
- "rustyline",
- "serde",
- "serde_json",
- "serde_yaml",
- "similar",
- "syntect",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "tree-sitter",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3586,6 +3540,52 @@ dependencies = [
  "quote",
  "syn",
  "synstructure",
+]
+
+[[package]]
+name = "zap-coding-agent"
+version = "0.13.75"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "clap",
+ "colored",
+ "crossterm 0.28.1",
+ "dirs",
+ "futures",
+ "futures-util",
+ "git2",
+ "glob",
+ "indicatif",
+ "inquire",
+ "libc",
+ "pulldown-cmark",
+ "ratatui",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rustyline",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "similar",
+ "syntect",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
 ]
 
 [[package]]

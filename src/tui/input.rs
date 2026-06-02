@@ -58,6 +58,25 @@ pub enum InputAction {
     BtwOpen,
     BtwSubmit(String),
     BtwClose,
+
+    /// Gemini auth prompt responses.
+    LaunchGeminiAuth,
+    GeminiAuthApiKey,
+    CloseGeminiAuthPrompt,
+
+    /// API key input overlay (TUI-native, no TUI suspend needed).
+    ApiKeyChar(char),
+    ApiKeyBackspace,
+    ApiKeySubmit,
+    ApiKeyCancel,
+    ApiKeyModelUp,
+    ApiKeyModelDown,
+
+    /// Context viewer overlay actions.
+    ContextViewerDrop,
+    ContextViewerCompact,
+    /// true = confirmed clear, false = cancelled.
+    ContextViewerClearConfirm(bool),
 }
 
 /// Returns true when the command picker is active (idle + input starts with '/').
@@ -164,6 +183,44 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return InputAction::PermitAllow,
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => return InputAction::PermitDeny,
             KeyCode::Char('a') | KeyCode::Char('A') => return InputAction::PermitAlways,
+            _ => return InputAction::None,
+        }
+    }
+
+    // Context viewer overlay takes priority.
+    if app.context_viewer.is_some() {
+        return handle_context_viewer_key(app, key);
+    }
+
+    // API key / model picker overlay.
+    if let Some(ref pending) = app.api_key_input {
+        if pending.picking_model {
+            match key.code {
+                KeyCode::Enter  => return InputAction::ApiKeySubmit,
+                KeyCode::Esc    => return InputAction::ApiKeyCancel,
+                KeyCode::Up | KeyCode::Char('k') => return InputAction::ApiKeyModelUp,
+                KeyCode::Down | KeyCode::Char('j') => return InputAction::ApiKeyModelDown,
+                _ => return InputAction::None,
+            }
+        } else {
+            match key.code {
+                KeyCode::Enter => return InputAction::ApiKeySubmit,
+                KeyCode::Esc => return InputAction::ApiKeyCancel,
+                KeyCode::Backspace => return InputAction::ApiKeyBackspace,
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return InputAction::ApiKeyChar(c);
+                }
+                _ => return InputAction::None,
+            }
+        }
+    }
+
+    // Gemini auth prompt: Enter/G = launch browser, K = API key instructions, Esc = cancel.
+    if app.gemini_auth_prompt {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('g') | KeyCode::Char('G') => return InputAction::LaunchGeminiAuth,
+            KeyCode::Char('k') | KeyCode::Char('K') => return InputAction::GeminiAuthApiKey,
+            KeyCode::Esc => return InputAction::CloseGeminiAuthPrompt,
             _ => return InputAction::None,
         }
     }
@@ -732,5 +789,101 @@ fn handle_diff_viewer_key(app: &mut App, key: KeyEvent) -> InputAction {
         }
 
         _ => InputAction::None,
+    }
+}
+
+fn handle_context_viewer_key(app: &mut App, key: KeyEvent) -> InputAction {
+    let viewer = app.context_viewer.as_mut().unwrap();
+
+    // Waiting for clear confirmation — only y/Y confirms, everything else cancels.
+    if viewer.confirm_clear {
+        return match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => InputAction::ContextViewerClearConfirm(true),
+            _ => InputAction::ContextViewerClearConfirm(false),
+        };
+    }
+
+    // Waiting for drop confirmation — Enter/y confirms, anything else cancels.
+    if viewer.confirm_drop {
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                viewer.confirm_drop = false;
+                InputAction::ContextViewerDrop
+            }
+            _ => {
+                viewer.confirm_drop = false;
+                InputAction::None
+            }
+        };
+    }
+
+    // d arms the drop confirmation (works from both panels).
+    if key.code == KeyCode::Char('d') {
+        if !viewer.turns.is_empty() {
+            viewer.confirm_drop = true;
+        }
+        return InputAction::None;
+    }
+
+    if viewer.detail_focus {
+        // Detail panel is focused — scroll or return to list.
+        match key.code {
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Tab => {
+                viewer.detail_focus = false;
+                InputAction::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                viewer.detail_scroll = viewer.detail_scroll.saturating_sub(1);
+                InputAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                viewer.detail_scroll = viewer.detail_scroll.saturating_add(1);
+                InputAction::None
+            }
+            KeyCode::PageUp => {
+                viewer.detail_scroll = viewer.detail_scroll.saturating_sub(10);
+                InputAction::None
+            }
+            KeyCode::PageDown => {
+                viewer.detail_scroll = viewer.detail_scroll.saturating_add(10);
+                InputAction::None
+            }
+            KeyCode::Char('c') => InputAction::ContextViewerCompact,
+            KeyCode::Char('x') => {
+                viewer.confirm_clear = true;
+                InputAction::None
+            }
+            _ => InputAction::None,
+        }
+    } else {
+        // List panel is focused.
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.context_viewer = None;
+                InputAction::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                viewer.selected = viewer.selected.saturating_sub(1);
+                viewer.detail_scroll = 0;
+                InputAction::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = viewer.turns.len().saturating_sub(1);
+                viewer.selected = (viewer.selected + 1).min(max);
+                viewer.detail_scroll = 0;
+                InputAction::None
+            }
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => {
+                viewer.detail_focus = true;
+                viewer.detail_scroll = 0;
+                InputAction::None
+            }
+            KeyCode::Char('c') => InputAction::ContextViewerCompact,
+            KeyCode::Char('x') => {
+                viewer.confirm_clear = true;
+                InputAction::None
+            }
+            _ => InputAction::None,
+        }
     }
 }

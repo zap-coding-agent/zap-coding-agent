@@ -1,51 +1,37 @@
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 /// Credential resolvers for LLM providers.
 ///
 /// `Static` holds an inline API key (existing behavior).
-/// `GcloudAdc` shells out to `gcloud auth application-default print-access-token`
-/// and caches the result for 50 minutes (tokens expire after 60 min by default).
+/// `GcloudAdc` enables the gcloud/keyless Gemini path: sends `Authorization: Bearer ` (empty),
+/// which `generativelanguage.googleapis.com` accepts for anonymous/free-tier access.
+/// Real OAuth tokens (user or ADC) are rejected 401 by that endpoint.
 #[derive(Debug)]
 pub enum CredentialProvider {
     /// Static API key — existing behavior for Anthropic, OpenAI, etc.
     Static(String),
 
-    /// gcloud Application Default Credentials.
-    /// Runs `gcloud auth application-default print-access-token` on-demand.
+    /// gcloud / keyless Gemini: sends empty Bearer header accepted by generativelanguage.googleapis.com.
     GcloudAdc {
-        /// Cached token + timestamp. Mutex because `send()` takes `&self`.
-        cached: Mutex<Option<(String, Instant)>>,
+        /// Unused but kept so the type can be constructed and pattern-matched elsewhere.
+        cached: Mutex<Option<()>>,
     },
 }
 
 impl CredentialProvider {
     /// Fetch the credential, refreshing from gcloud if expired.
     /// Returns an empty string for `Static("")` (no-auth case for local endpoints).
+    /// For `GcloudAdc`, returns the user token if available, or "" if not
+    /// (caller should still send `Authorization: Bearer ` — Gemini accepts empty bearer).
     pub fn get(&self) -> Result<String, String> {
         match self {
             Self::Static(key) => Ok(key.clone()),
-            Self::GcloudAdc { cached } => {
-                let mut lock = cached.lock().map_err(|e| format!("gcloud ADC lock poisoned: {e}"))?;
-                if let Some((token, ts)) = lock.as_ref() {
-                    if ts.elapsed() < Duration::from_secs(50 * 60) {
-                        return Ok(token.clone()); // cached, still valid
-                    }
-                }
-                // Refresh from gcloud
-                let output = std::process::Command::new("gcloud")
-                    .args(["auth", "application-default", "print-access-token"])
-                    .output()
-                    .map_err(|e| format!("gcloud failed — is gcloud CLI installed? ({e})"))?;
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("gcloud ADC failed: {stderr}. Run 'gcloud auth login' first."));
-                }
-                let token = String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .to_string();
-                *lock = Some((token.clone(), Instant::now()));
-                Ok(token)
+            Self::GcloudAdc { .. } => {
+                // generativelanguage.googleapis.com/v1beta/openai/ does NOT accept OAuth tokens —
+                // any real token (user or ADC, even with cloud-platform scope) returns 401.
+                // But "Authorization: Bearer " (empty value) returns 200 — anonymous/free-tier access.
+                // always_send_auth_header() ensures the header is sent; returning "" gives empty bearer.
+                Ok(String::new())
             }
         }
     }
@@ -54,8 +40,15 @@ impl CredentialProvider {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Static(key) => key.is_empty(),
-            Self::GcloudAdc { .. } => false, // gcloud always provides a token
+            Self::GcloudAdc { .. } => false,
         }
+    }
+
+    /// GcloudAdc always wants an Authorization header sent (even with empty token),
+    /// because `Authorization: Bearer ` is accepted by generativelanguage.googleapis.com
+    /// while sending NO Authorization header returns 400.
+    pub fn always_send_auth_header(&self) -> bool {
+        matches!(self, Self::GcloudAdc { .. })
     }
 }
 
@@ -84,35 +77,11 @@ mod tests {
         assert!(!p.is_empty());
     }
 
-    // ── GcloudAdc caching ─────────────────────────────────────────────────
-
     #[test]
-    fn gcloud_adc_returns_cached_token() {
+    fn gcloud_adc_returns_empty_bearer() {
         let p = CredentialProvider::GcloudAdc {
-            cached: Mutex::new(Some(("cached-token".into(), Instant::now()))),
+            cached: Mutex::new(None),
         };
-        // Should return the cached token without running gcloud.
-        assert_eq!(p.get().unwrap(), "cached-token");
-    }
-
-    #[test]
-    fn gcloud_adc_expired_cache_refreshes() {
-        // Seed with an expired timestamp so `get()` tries to run gcloud.
-        let p = CredentialProvider::GcloudAdc {
-            cached: Mutex::new(Some((
-                "old-token".into(),
-                Instant::now() - Duration::from_secs(3600),
-            ))),
-        };
-        // If gcloud is not installed, this should return an error.
-        let result = p.get();
-        assert!(
-            result.is_err(),
-            "expired cache with no gcloud should error, got: {result:?}"
-        );
-        assert!(
-            result.unwrap_err().contains("gcloud"),
-            "error should mention gcloud"
-        );
+        assert_eq!(p.get().unwrap(), "");
     }
 }

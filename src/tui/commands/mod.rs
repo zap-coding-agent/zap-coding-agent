@@ -14,6 +14,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/config",            "provider, model, URL"),
     ("/cost",              "token usage & estimated cost"),
     ("/history",           "message count"),
+    ("/context",           "view and manage context — navigate turns, drop, compact, clear"),
     ("/clear",             "clear conversation history"),
     ("/compact",           "summarize and compress history"),
     ("/new",               "start a fresh session (clear history)"),

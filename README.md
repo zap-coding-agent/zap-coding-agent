@@ -1,4 +1,4 @@
-# ⚡ zap
+# ⚡ Zap Coding Agent
 
 > An AI coding agent built in Rust — skill-first context injection, a hard security boundary, and a single binary with no runtime.
 
@@ -795,7 +795,7 @@ After the model asks a clarifying question, short replies like "yes", "ok", "go 
 
 ### macOS ARM — Apple Silicon
 
-1. Download `zap` from the [latest release](https://github.com/sanjeev23oct/zap/releases/latest)
+1. Download `zap` from the [latest release](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest)
 
 2. Make it executable and move it onto your PATH:
 
@@ -814,7 +814,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 
 ```bash
 curl -o ~/.agent.toml \
-  https://raw.githubusercontent.com/sanjeev23oct/zap/main/agent.toml.example
+  https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/agent.toml.example
 ```
 
 5. Run:
@@ -828,7 +828,7 @@ zap
 
 ### Windows x86_64
 
-1. Download `zap-windows-x86_64.exe` from the [latest release](https://github.com/sanjeev23oct/zap/releases/latest)
+1. Download `zap-windows-x86_64.exe` from the [latest release](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest)
 
 2. Rename and move it somewhere on your PATH, e.g.:
 
@@ -847,7 +847,7 @@ zap
 Requires [Rust](https://rustup.rs) 1.75+.
 
 ```bash
-git clone https://github.com/sanjeev23oct/zap
+git clone https://github.com/zap-coding-agent/zap-coding-agent
 cd zap
 cargo build --release
 cp target/release/zap ~/.local/bin/zap
@@ -1046,7 +1046,7 @@ ai-review:
   variables:
     ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY   # set in CI/CD → Variables
   before_script:
-    - curl -L https://github.com/sanjeev23oct/zap/releases/download/latest/zap-linux-x86_64
+    - curl -L https://github.com/zap-coding-agent/zap-coding-agent/releases/download/latest/zap-linux-x86_64
         -o /usr/local/bin/zap && chmod +x /usr/local/bin/zap
   script:
     - zap --auto --goal "review the diff since origin/main, identify bugs or missing tests,
@@ -1611,7 +1611,7 @@ The skill format is already compatible with Claude Code (`CLAUDE.md`-style) and 
 Contributions are welcome — bug fixes, new providers, language support, skill improvements, or anything that makes zap more useful.
 
 **Reporting bugs**
-Open an issue at [github.com/sanjeev23oct/zap/issues](https://github.com/sanjeev23oct/zap/issues). Include your OS, model/provider, the command you ran, and what you expected vs what happened. Attach the relevant lines from `agent_audit.jsonl` if the problem is tool-related.
+Open an issue at [github.com/zap-coding-agent/zap-coding-agent/issues](https://github.com/zap-coding-agent/zap-coding-agent/issues). Include your OS, model/provider, the command you ran, and what you expected vs what happened. Attach the relevant lines from `agent_audit.jsonl` if the problem is tool-related.
 
 **Feature requests**
 Open an issue with the `enhancement` label. Describe the use case, not just the feature — it helps prioritise.

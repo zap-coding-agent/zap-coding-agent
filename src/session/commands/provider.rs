@@ -26,12 +26,13 @@ impl Session {
 
         let gemini_ready = crate::llm_client::auth::check_gcloud_adc().is_some()
             || crate::llm_client::auth::check_google_api_key_env().is_some();
+        let claude_code_ready = crate::llm_client::auth::check_claude_code().is_some();
 
         let providers: Vec<ProviderDef> = vec![
             ProviderDef { slug: "lm_studio",  name: "LM Studio",                  hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["gemma-4-e4b-it", "qwen2.5-coder-7b-instruct", "mistral-7b-instruct", "Other…"],    base_url: Some("http://localhost:1234/v1/chat/completions"),                                    needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderDef { slug: "ollama",     name: "Ollama",                     hint: "local · OpenAI-compatible",                    kind: ProviderKind::OpenAi,    models: &["llama3.2", "llama3.1:70b", "codellama", "qwen2.5-coder", "Other…"],                 base_url: Some("http://localhost:11434/v1/chat/completions"),                                   needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderDef { slug: "anthropic",  name: "Anthropic",                  hint: "claude-sonnet-4-6 / claude-opus-4-7",          kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5", "Other…"],               base_url: None,                                                                                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
-            ProviderDef { slug: "claude_code",name: "Claude Code (Pro/Max API)",  hint: "full API via subscription · after 16 Jun 2026", kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7"],                                             base_url: None,                                                                                needs_key: false, coming_soon: true,  auth_header: None,       ready: false },
+            ProviderDef { slug: "claude_code",name: "Claude Code (Pro/Max API)",  hint: if claude_code_ready { "claude-sonnet-4-6 / claude-opus-4-7 · via claude CLI" } else { "requires claude CLI · Pro/Max plan" }, kind: ProviderKind::Anthropic, models: &["claude-sonnet-4-6", "claude-opus-4-7"],                                             base_url: None,                                                                                needs_key: false, coming_soon: !claude_code_ready, auth_header: None, ready: claude_code_ready },
             ProviderDef { slug: "openai",     name: "OpenAI",                     hint: "gpt-4o / gpt-4o-mini / o3",                    kind: ProviderKind::OpenAi,    models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini", "Other…"],                                 base_url: None,                                                                                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderDef { slug: "gemini",     name: "Google Gemini",              hint: "gemini-2.5-pro / gemini-2.0-flash",            kind: ProviderKind::OpenAi,    models: &["gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash", "Other…"],                 base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),    needs_key: true,  coming_soon: false, auth_header: Some("x-goog-api-key"), ready: gemini_ready },
             ProviderDef { slug: "deepseek",   name: "DeepSeek",                   hint: "deepseek-v4-pro / deepseek-v4-flash",         kind: ProviderKind::OpenAi,    models: &["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "Other…"], base_url: Some("https://api.deepseek.com/v1/chat/completions"),                           needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
@@ -102,7 +103,7 @@ impl Session {
                 .unwrap_or("");
 
             let hint = if def.slug == "gemini" {
-                "Run 'gcloud auth login' first for a keyless experience. Saved to ~/.agent.toml"
+                "Keyless: run 'gcloud auth application-default login'  |  Or get a free key: aistudio.google.com/apikey"
             } else {
                 "Saved to ~/.agent.toml"
             };

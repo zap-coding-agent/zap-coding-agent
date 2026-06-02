@@ -388,14 +388,14 @@ This approach isn't free.
 
 ZAP is open source, written in Rust.
 
-**GitHub:** https://github.com/sanjeev23oct/zap
+**GitHub:** https://github.com/zap-coding-agent/zap-coding-agent
 
 The files described in this post:
 
-- [`src/context_manager.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/context_manager.rs) — prompt composition, casual path
-- [`src/skill_manager.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/skill_manager.rs) — skill discovery, trigger matching, three-tier priority
-- [`src/session/mod.rs`](https://github.com/sanjeev23oct/zap/blob/main/src/session/mod.rs) — per-turn path selection, history window, pruning
-- [`skills/`](https://github.com/sanjeev23oct/zap/tree/main/skills) — the 23 bundled skill files (readable, forkable, replaceable)
+- [`src/context_manager.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/context_manager.rs) — prompt composition, casual path
+- [`src/skill_manager.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/skill_manager.rs) — skill discovery, trigger matching, three-tier priority
+- [`src/session/mod.rs`](https://github.com/zap-coding-agent/zap-coding-agent/blob/main/src/session/mod.rs) — per-turn path selection, history window, pruning
+- [`skills/`](https://github.com/zap-coding-agent/zap-coding-agent/tree/main/skills) — the 23 bundled skill files (readable, forkable, replaceable)
 
 ---
 

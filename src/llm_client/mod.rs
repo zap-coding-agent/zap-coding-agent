@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod auth;
+pub mod claude_code;
 pub mod credentials;
 pub mod openai;
 
@@ -11,6 +12,7 @@ use crate::config::{Config, OutputFormat, Provider};
 use credentials::CredentialProvider;
 
 use anthropic::AnthropicClient;
+use claude_code::ClaudeCodeClient;
 use openai::OpenAiClient;
 
 const MAX_RETRIES: u32 = 5;
@@ -167,6 +169,11 @@ pub trait LlmProvider: Send + Sync {
 pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
     let suppress = config.output_format == OutputFormat::Json;
 
+    // Claude Code: route through the local `claude` CLI subprocess.
+    if config.provider_slug == "claude_code" {
+        return Box::new(ClaudeCodeClient::new(config.model.clone(), suppress));
+    }
+
     // Look up the active provider entry for credential_method and auth_header.
     let entry = config.all_providers.get(&config.provider_slug);
 
@@ -189,8 +196,6 @@ pub fn create_client(config: &Config) -> Box<dyn LlmProvider> {
             config.disable_stream,
         )),
         Provider::OpenAi => {
-            // auth_header from the entry only applies to static API keys.
-            // Gcloud ADC always uses Authorization: Bearer (the default).
             let auth_header = if matches!(credential, CredentialProvider::GcloudAdc { .. }) {
                 None
             } else {

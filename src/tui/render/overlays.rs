@@ -1,6 +1,6 @@
 use ratatui::{prelude::*, widgets::*};
 use ratatui::style::Modifier;
-use super::super::app::{App, InitWizardStep};
+use super::super::app::App;
 use super::super::file_browser::{FileBrowser, GitStatus};
 use super::super::syntax;
 
@@ -366,32 +366,120 @@ pub(super) fn draw_mode_picker(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(rows), inner);
 }
 
-pub(super) fn draw_init_wizard(frame: &mut Frame, app: &App, area: Rect) {
-    let wizard = match app.init_wizard.as_ref() {
-        Some(w) => w,
-        None    => return,
-    };
+pub(super) fn draw_gemini_auth_prompt(frame: &mut Frame, app: &App, area: Rect) {
+    if !app.gemini_auth_prompt { return; }
 
-    let (title, hint, content_h) = match &wizard.step {
-        InitWizardStep::Language          => (" ⚡ Set up this project ", "  Edit   Enter next   Esc skip", 14u16),
-        InitWizardStep::IndexConfirm      => (" ⚡ Set up this project ", "  y/Enter = yes   n = no   Esc back", 10u16),
-        InitWizardStep::UnderstandConfirm => (" ⚡ Set up this project ", "  y/Enter = yes   n = no   Esc back", 10u16),
-    };
-
-    let w = 62u16.min(area.width);
-    let h = (content_h + 2).min(area.height);
+    let w = 60u16.min(area.width);
+    let h = 11u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let overlay = Rect { x, y, width: w, height: h };
 
     frame.render_widget(Clear, overlay);
 
-    let border_c = Color::Rgb(255, 200, 50);
+    let border_c = Color::Rgb(100, 210, 255);
     let accent   = Color::Rgb(100, 210, 255);
-    let muted    = Color::Rgb(100, 95, 125);
-    let dim      = Color::Rgb(70, 65, 90);
-    let body_c   = Color::Rgb(210, 205, 235);
+    let muted    = Color::Rgb(140, 135, 165);
+    let dim      = Color::Rgb(80, 75, 100);
 
+    let title = if app.gemini_reauth {
+        " Google Gemini — re-authenticate "
+    } else {
+        " Google Gemini — sign in "
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .title(Span::styled(
+            title,
+            Style::default().fg(border_c).add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    let hint_area    = Rect { y: inner.y + inner.height.saturating_sub(1), height: 1, ..inner };
+    let content_area = Rect { height: inner.height.saturating_sub(1), ..inner };
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "  Enter/G = open browser   K = API key instructions   Esc = cancel",
+            Style::default().fg(dim),
+        )),
+        hint_area,
+    );
+
+    let action_label = if app.gemini_reauth {
+        "Re-authenticate via gcloud"
+    } else {
+        "Keyless sign-in via gcloud"
+    };
+    let action_hint = if app.gemini_reauth {
+        "Refreshes scopes — fixes 401 errors."
+    } else {
+        "Opens browser — sign in, then return here."
+    };
+
+    let rows = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ◎ ", Style::default().fg(accent)),
+            Span::styled(action_label, Style::default().fg(Color::White).bold()),
+            Span::styled("  (no API key needed)", Style::default().fg(muted)),
+        ]),
+        Line::from(vec![
+            Span::styled("    ", Style::default()),
+            Span::styled(action_hint, Style::default().fg(muted)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Press ", Style::default().fg(muted)),
+            Span::styled("Enter", Style::default().fg(accent).bold()),
+            Span::styled(" or ", Style::default().fg(muted)),
+            Span::styled("G", Style::default().fg(accent).bold()),
+            Span::styled(" to start the sign-in flow.", Style::default().fg(muted)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Press ", Style::default().fg(muted)),
+            Span::styled("K", Style::default().fg(accent).bold()),
+            Span::styled(" instead to use an API key.", Style::default().fg(muted)),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(rows), content_area);
+}
+
+pub(super) fn draw_api_key_input(frame: &mut Frame, app: &App, area: Rect) {
+    let pending = match app.api_key_input.as_ref() {
+        Some(p) => p,
+        None    => return,
+    };
+
+    if pending.picking_model {
+        draw_model_picker(frame, pending, area);
+    } else {
+        draw_key_entry(frame, pending, area);
+    }
+}
+
+fn draw_key_entry(frame: &mut Frame, pending: &crate::tui::app::PendingProviderSwitch, area: Rect) {
+    let w = 64u16.min(area.width);
+    let h = 10u16.min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let border_c = Color::Rgb(255, 200, 80);
+    let accent   = Color::Rgb(255, 200, 80);
+    let muted    = Color::Rgb(140, 135, 165);
+    let dim      = Color::Rgb(80, 75, 100);
+
+    let title = format!(" {} — enter API key ", pending.name);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -405,119 +493,99 @@ pub(super) fn draw_init_wizard(frame: &mut Frame, app: &App, area: Rect) {
     let content_area = Rect { height: inner.height.saturating_sub(1), ..inner };
 
     frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::default().fg(dim))),
+        Paragraph::new(Span::styled(
+            "  Enter = confirm   Backspace = delete   Esc = cancel",
+            Style::default().fg(dim),
+        )),
         hint_area,
     );
 
-    let mut rows: Vec<Line<'static>> = Vec::new();
+    let masked: String = "*".repeat(pending.input.len());
+    let field_text = if pending.input.is_empty() { "_".to_string() } else { masked };
 
-    match &wizard.step {
-        InitWizardStep::Language => {
-            rows.push(Line::from(vec![
-                Span::styled("  Step 1 of 3  ", Style::default().fg(dim)),
-                Span::styled("language", Style::default().fg(border_c).bold()),
-                Span::styled("  ·  index  ·  understand", Style::default().fg(dim)),
-            ]));
-            rows.push(Line::from(""));
-            rows.push(Line::from(Span::styled(
-                "  Init prepares zap to work well in this project:",
-                Style::default().fg(body_c),
-            )));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("Index code symbols", Style::default().fg(body_c).bold()),
-                Span::styled(" — jump to any function/type instantly", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("Write ZAP.md", Style::default().fg(body_c).bold()),
-                Span::styled(" — your project's instructions, loaded every session", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("Build understanding", Style::default().fg(body_c).bold()),
-                Span::styled(" — zap reads your code and learns its structure", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(""));
+    let mut rows = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  API key: ", Style::default().fg(muted)),
+            Span::styled(field_text, Style::default().fg(Color::White).bold()),
+            Span::styled("▎", Style::default().fg(accent)),
+        ]),
+        Line::from(""),
+    ];
 
-            let label  = Span::styled("  Language(s): ", Style::default().fg(Color::Rgb(140, 135, 165)));
-            let text   = wizard.language_input.clone();
-            let cursor = Span::styled("▋", Style::default().fg(border_c));
-            rows.push(Line::from(vec![
-                label,
-                Span::styled(text, Style::default().fg(Color::White).bold()),
-                cursor,
-            ]));
-            rows.push(Line::from(""));
-            let note = if wizard.detected_language.is_empty() {
-                "  no build file detected — type language (e.g. rust, python, typescript)".to_string()
-            } else {
-                format!("  auto-detected from project files: {}", wizard.detected_language)
-            };
-            rows.push(Line::from(Span::styled(note, Style::default().fg(dim))));
-        }
-
-        InitWizardStep::IndexConfirm => {
-            rows.push(Line::from(vec![
-                Span::styled("  Step 2 of 3  ", Style::default().fg(dim)),
-                Span::styled("language  ·  ", Style::default().fg(dim)),
-                Span::styled("index", Style::default().fg(border_c).bold()),
-                Span::styled("  ·  understand", Style::default().fg(dim)),
-            ]));
-            rows.push(Line::from(""));
-            rows.push(Line::from(Span::styled(
-                "  Index code symbols now?  (recommended, ~10–30s)",
-                Style::default().fg(body_c).bold(),
-            )));
-            rows.push(Line::from(""));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("zap parses every file with tree-sitter", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("extracts functions, types, structs, imports", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("stays current: auto-refreshes every 2 min + at session end", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("run /index any time to force a refresh", Style::default().fg(muted)),
-            ]));
-        }
-
-        InitWizardStep::UnderstandConfirm => {
-            rows.push(Line::from(vec![
-                Span::styled("  Step 3 of 3  ", Style::default().fg(dim)),
-                Span::styled("language  ·  index  ·  ", Style::default().fg(dim)),
-                Span::styled("understand", Style::default().fg(border_c).bold()),
-            ]));
-            rows.push(Line::from(""));
-            rows.push(Line::from(Span::styled(
-                "  Let zap read your codebase and write ZAP.md?  (~30–60s)",
-                Style::default().fg(body_c).bold(),
-            )));
-            rows.push(Line::from(""));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("zap reads your source files and fills ZAP.md", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("records architecture, build commands, conventions", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("ZAP.md is loaded into every future session automatically", Style::default().fg(muted)),
-            ]));
-            rows.push(Line::from(vec![
-                Span::styled("  ◎ ", Style::default().fg(accent)),
-                Span::styled("you can edit ZAP.md any time to update zap's context", Style::default().fg(muted)),
-            ]));
-        }
+    if pending.has_existing_key {
+        rows.push(Line::from(vec![
+            Span::styled("  ✓ Key already saved — ", Style::default().fg(muted)),
+            Span::styled("press Enter to keep", Style::default().fg(accent)),
+            Span::styled(", or type a new one.", Style::default().fg(muted)),
+        ]));
+    } else if pending.slug == "gemini" {
+        rows.push(Line::from(vec![
+            Span::styled("  Don't have one? Get it at ", Style::default().fg(muted)),
+            Span::styled("aistudio.google.com/apikey", Style::default().fg(accent)),
+            Span::styled(" — includes credits.", Style::default().fg(muted)),
+        ]));
+    } else {
+        rows.push(Line::from(vec![
+            Span::styled("  Type your key, then press ", Style::default().fg(muted)),
+            Span::styled("Enter", Style::default().fg(accent)),
+            Span::styled(".", Style::default().fg(muted)),
+        ]));
     }
 
     frame.render_widget(Paragraph::new(rows), content_area);
 }
+
+fn draw_model_picker(frame: &mut Frame, pending: &crate::tui::app::PendingProviderSwitch, area: Rect) {
+    let n = pending.models.len().min(8);
+    let h = (n as u16 + 5).min(area.height);
+    let w = 52u16.min(area.width);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let overlay = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, overlay);
+
+    let border_c = Color::Rgb(255, 200, 80);
+    let accent   = Color::Rgb(255, 200, 80);
+    let muted    = Color::Rgb(140, 135, 165);
+    let dim      = Color::Rgb(80, 75, 100);
+
+    let title = format!(" {} — pick model ", pending.name);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_c))
+        .title(Span::styled(title, Style::default().fg(border_c).add_modifier(Modifier::BOLD)));
+
+    let inner = block.inner(overlay);
+    frame.render_widget(block, overlay);
+
+    let hint_area    = Rect { y: inner.y + inner.height.saturating_sub(1), height: 1, ..inner };
+    let content_area = Rect { height: inner.height.saturating_sub(1), ..inner };
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "  ↑↓/jk navigate   Enter = select   Esc = cancel",
+            Style::default().fg(dim),
+        )),
+        hint_area,
+    );
+
+    let rows: Vec<Line> = pending.models.iter().enumerate().map(|(i, m)| {
+        if i == pending.model_sel {
+            Line::from(vec![
+                Span::styled("  ▸ ", Style::default().fg(accent).bold()),
+                Span::styled(m.as_str(), Style::default().fg(Color::White).bold()),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("    ", Style::default()),
+                Span::styled(m.as_str(), Style::default().fg(muted)),
+            ])
+        }
+    }).collect();
+
+    frame.render_widget(Paragraph::new(rows), content_area);
+}
+

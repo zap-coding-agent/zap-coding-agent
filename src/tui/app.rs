@@ -1,5 +1,6 @@
 /// App state for the TUI.
 use super::channel::TuiEvent;
+pub(super) use super::text_parse::parse_text_into_blocks;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,12 @@ pub struct SessionPickerState {
     pub selected: usize,
 }
 
+// ── Context viewer ────────────────────────────────────────────────────────────
+
+pub use crate::tui::context_viewer::{
+    ContextTurnEntry, ContextViewerState, DetailBlock, TurnDetail,
+};
+
 // ── Command output popup ──────────────────────────────────────────────────────
 
 /// A centered popup that displays textual output from inline slash commands
@@ -205,6 +212,8 @@ pub enum ProviderKind { Anthropic, OpenAi }
 pub struct ProviderPickerState {
     pub entries: Vec<ProviderEntry>,
     pub selected: usize,
+    /// True when shown automatically on first launch (no provider configured yet).
+    pub is_onboarding: bool,
 }
 
 // ── App ────────────────────────────────────────────────────────────────────────
@@ -319,6 +328,40 @@ pub struct App {
     pub btw_draft: String,
     /// Cursor position in btw_draft.
     pub btw_cursor: usize,
+
+    /// Gemini auth prompt overlay — shown when user picks Gemini without credentials,
+    /// or when already authenticated (re-auth to fix scope issues).
+    pub gemini_auth_prompt: bool,
+    /// True when the auth prompt is shown for re-authentication (credentials exist but may be wrong).
+    pub gemini_reauth: bool,
+
+    /// Pending provider switch waiting for the user to enter an API key.
+    /// Set instead of immediately switching when a provider needs a key but has none saved.
+    pub api_key_input: Option<PendingProviderSwitch>,
+
+    /// Context viewer overlay (None when closed).
+    pub context_viewer: Option<ContextViewerState>,
+}
+
+/// Holds all state needed to complete a provider switch once the user types their API key.
+pub struct PendingProviderSwitch {
+    pub slug: String,
+    pub name: String,
+    pub models: Vec<String>,
+    pub kind_str: &'static str,
+    pub provider: crate::config::Provider,
+    pub base_url: Option<String>,
+    pub auth_header: Option<String>,
+    /// Characters typed so far (not yet confirmed).
+    pub input: String,
+    /// Whether a key is already saved for this provider (Enter with empty input keeps it).
+    pub has_existing_key: bool,
+    /// Step: false = entering API key, true = picking model.
+    pub picking_model: bool,
+    /// Selected model index (used in model-picking step).
+    pub model_sel: usize,
+    /// Resolved API key (carried from key step to model step).
+    pub resolved_key: Option<String>,
 }
 
 impl App {
@@ -372,6 +415,10 @@ impl App {
             btw_mode: false,
             btw_draft: String::new(),
             btw_cursor: 0,
+            gemini_auth_prompt: false,
+            gemini_reauth: false,
+            api_key_input: None,
+            context_viewer: None,
         }
     }
 
@@ -529,48 +576,3 @@ impl App {
     }
 }
 
-// ── Code-fence parser ──────────────────────────────────────────────────────────
-
-/// Split a raw text string into alternating Text and Code UiBlocks.
-/// Used by finalize_turn() to post-process accumulated streaming text.
-pub fn parse_text_into_blocks(text: &str, blocks: &mut Vec<UiBlock>) {
-    let mut current_text = String::new();
-    let mut in_fence = false;
-    let mut fence_lang = String::new();
-    let mut fence_lines: Vec<String> = Vec::new();
-
-    for line in text.lines() {
-        if !in_fence {
-            if line.trim_start().starts_with("```") {
-                if !current_text.is_empty() {
-                    blocks.push(UiBlock::Text(std::mem::take(&mut current_text)));
-                }
-                in_fence = true;
-                fence_lang = line.trim().trim_start_matches('`').to_string();
-                fence_lines.clear();
-            } else {
-                if !current_text.is_empty() {
-                    current_text.push('\n');
-                }
-                current_text.push_str(line);
-            }
-        } else if line.trim() == "```" || line.trim() == "~~~" {
-            blocks.push(UiBlock::Code {
-                lang: fence_lang.clone(),
-                lines: fence_lines.clone(),
-            });
-            in_fence = false;
-            fence_lang.clear();
-            fence_lines.clear();
-        } else {
-            fence_lines.push(line.to_string());
-        }
-    }
-
-    // Flush unclosed content.
-    if in_fence && !fence_lines.is_empty() {
-        blocks.push(UiBlock::Code { lang: fence_lang, lines: fence_lines });
-    } else if !current_text.is_empty() {
-        blocks.push(UiBlock::Text(current_text));
-    }
-}

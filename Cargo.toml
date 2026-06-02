@@ -1,6 +1,6 @@
 [package]
-name = "agent_harness"
-version = "0.13.74"
+name = "zap-coding-agent"
+version = "0.13.75"
 edition = "2021"
 
 [[bin]]

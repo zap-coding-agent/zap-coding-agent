@@ -24,12 +24,12 @@ async fn main() -> Result<()> {
             std::io::stderr(),
             crossterm::terminal::LeaveAlternateScreen
         );
-        let log = agent_harness::log::log_path();
+        let log = zap_coding_agent::log::log_path();
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
             let _ = writeln!(f, "[PANIC] {info}");
         }
         prev_hook(info);
     }));
 
-    agent_harness::run().await
+    zap_coding_agent::run().await
 }

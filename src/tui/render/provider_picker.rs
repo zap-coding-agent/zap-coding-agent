@@ -17,14 +17,16 @@ pub(super) fn draw_provider_picker(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, overlay);
 
     let border_c = Color::Rgb(100, 210, 255);
+    let title = if picker.is_onboarding {
+        " choose a provider to get started   ↑↓ navigate   Enter select "
+    } else {
+        " switch provider   ↑↓ navigate   Enter select   Esc cancel "
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_c))
-        .title(Span::styled(
-            " switch provider   ↑↓ navigate   Enter select   Esc cancel ",
-            Style::default().fg(Color::Yellow).bold(),
-        ));
+        .title(Span::styled(title, Style::default().fg(Color::Yellow).bold()));
 
     let inner = block.inner(overlay);
     frame.render_widget(block, overlay);

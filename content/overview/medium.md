@@ -28,7 +28,7 @@ Most agents accept this as the cost of doing business. I built ZAP because I did
 
 ## Introducing ZAP — A Skill-First AI Coding Agent Built in Rust
 
-**[ZAP on GitHub →](https://github.com/sanjeev23oct/zap)**
+**[ZAP on GitHub →](https://github.com/zap-coding-agent/zap-coding-agent)**
 
 ZAP is an open-source, terminal-first AI coding agent written in Rust. It's built around one principle: **send the LLM exactly what it needs for this task, and nothing else.**
 
@@ -123,7 +123,7 @@ Each post is self-contained. Read in order or jump to whatever's relevant to you
 
 ## Start Here
 
-**[github.com/sanjeev23oct/zap](https://github.com/sanjeev23oct/zap)** — star it, open an issue, or just read the code.
+**[github.com/zap-coding-agent/zap-coding-agent](https://github.com/zap-coding-agent/zap-coding-agent)** — star it, open an issue, or just read the code.
 
 ---
 

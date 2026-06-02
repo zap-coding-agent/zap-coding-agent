@@ -4,6 +4,7 @@
 /// Channel module provides global TUI event sender for session/stream_highlighter.
 pub mod app;
 pub mod channel;
+pub mod context_viewer;
 pub mod commands;
 pub mod input;
 pub mod render;
@@ -14,6 +15,7 @@ mod git_info;
 mod goal;
 mod lifecycle;
 mod startup;
+mod text_parse;
 mod turn_handler;
 
 use std::io::Stdout;
@@ -97,6 +99,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
 
     startup::replay_last_session_into_app(&mut app, &session);
     startup::push_startup_messages(&mut app, &mut session);
+    startup::maybe_open_onboarding_picker(&mut app, config);
 
     let _result = tui_loop(&mut terminal, &mut app, &mut session, config, &mut rx).await;
 
@@ -336,77 +339,45 @@ async fn tui_loop(
                             }
                         }
                         InputAction::CloseSessionPicker => {}
-                        InputAction::SelectProvider(idx) => {
-                            if let Some(ref picker) = app.provider_picker {
-                                if let Some(entry) = picker.entries.get(idx) {
-                                    if entry.coming_soon {
-                                        app.messages.push(UiMessage {
-                                            role: MsgRole::Assistant,
-                                            blocks: vec![UiBlock::Text(format!(
-                                                "{} Claude Code (Pro/Max API) — coming 16 Jun 2026.\nUse Anthropic provider with an API key until then.",
-                                                "◷",
-                                            ))],
-                                        });
-                                        app.auto_scroll = true;
-                                    } else {
-                                        let slug = entry.slug.clone();
-                                        let name = entry.name.clone();
-                                        let model = entry.models.iter()
-                                            .find(|m| m.as_str() != "Other…")
-                                            .cloned()
-                                            .unwrap_or_default();
-                                        let kind_str = match entry.kind {
-                                            app::ProviderKind::Anthropic => "anthropic",
-                                            app::ProviderKind::OpenAi => "openai",
-                                        };
-                                        let provider = match entry.kind {
-                                            app::ProviderKind::Anthropic => crate::config::Provider::Anthropic,
-                                            app::ProviderKind::OpenAi => crate::config::Provider::OpenAi,
-                                        };
 
-                                        let mut new_config = config.clone();
-                                        new_config.provider = provider;
-                                        new_config.provider_slug = slug.clone();
-                                        new_config.model = model.clone();
-                                        new_config.base_url = entry.base_url.clone();
-
-                                        // For auto-detected Gemini, use gcloud ADC credential method.
-                                        let credential_method = if entry.slug == "gemini" && entry.ready {
-                                            Some("gcloud_adc".to_string())
-                                        } else {
-                                            None
-                                        };
-                                        let auth_header = entry.auth_header.map(|h| h.to_string());
-
-                                        new_config.all_providers.insert(slug.clone(), crate::config::ProviderEntry {
-                                            kind: Some(kind_str.to_string()),
-                                            model: Some(model.clone()),
-                                            api_key: None,
-                                            base_url: entry.base_url.clone(),
-                                            credential_method,
-                                            auth_header,
-                                        });
-
-                                        session.client = crate::llm_client::create_client(&new_config);
-                                        session.model = model.clone();
-                                        session.base_url = new_config.base_url.clone();
-                                        session.config = new_config.clone();
-
-                                        let _ = new_config.save();
-
-                                        app.model = model.clone();
-                                        app.messages.push(UiMessage {
-                                            role: MsgRole::Assistant,
-                                            blocks: vec![UiBlock::Text(format!(
-                                                "✓ Switched to {} · {}",
-                                                name, model
-                                            ))],
-                                        });
-                                        app.auto_scroll = true;
+                        InputAction::ContextViewerDrop => {
+                            if let Some(ref viewer) = app.context_viewer {
+                                if let Some(entry) = viewer.turns.get(viewer.selected) {
+                                    let start = entry.msg_index;
+                                    let end = start + entry.msg_count;
+                                    if end <= session.messages.len() {
+                                        session.messages.drain(start..end);
                                     }
                                 }
                             }
-                            app.provider_picker = None;
+                            // Rebuild viewer with updated indices.
+                            app.context_viewer = Some(turn_handler::build_context_viewer(session));
+                            // Clamp selection in case we dropped the last turn.
+                            if let Some(ref mut v) = app.context_viewer {
+                                let max = v.turns.len().saturating_sub(1);
+                                v.selected = v.selected.min(max);
+                            }
+                            app.context_pct = session.context_fill_pct();
+                        }
+
+                        InputAction::ContextViewerCompact => {
+                            app.context_viewer = None;
+                            session.cmd_compact().await;
+                            app.context_pct = session.context_fill_pct();
+                        }
+
+                        InputAction::ContextViewerClearConfirm(confirmed) => {
+                            if confirmed {
+                                app.context_viewer = None;
+                                session.cmd_clear();
+                                app.context_pct = 0;
+                            } else if let Some(ref mut v) = app.context_viewer {
+                                v.confirm_clear = false;
+                            }
+                        }
+
+                        InputAction::SelectProvider(idx) => {
+                            lifecycle::handle_select_provider(app, config, idx);
                         }
                         InputAction::ClearInput => {}
                         InputAction::SelectMode(is_task) => {
@@ -462,40 +433,7 @@ async fn tui_loop(
                         }
                         InputAction::CancelInit => {}
                         InputAction::PasteImage => {
-                            let tmp = "/tmp/zap_clipboard_paste.png";
-                            let ok = crate::session::commands::paste_clipboard_image(tmp);
-                            if ok && std::path::Path::new(tmp).exists() {
-                                match std::fs::read(tmp) {
-                                    Ok(bytes) => {
-                                        use base64::Engine;
-                                        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                        let kb = bytes.len() / 1024;
-                                        session.staged_images.push(("image/png".to_string(), data));
-                                        app.messages.push(UiMessage {
-                                            role: MsgRole::Assistant,
-                                            blocks: vec![UiBlock::Text(format!(
-                                                "✓ Image attached ({} KB) — it will be sent with your next message.", kb
-                                            ))],
-                                        });
-                                        app.auto_scroll = true;
-                                    }
-                                    Err(e) => {
-                                        app.messages.push(UiMessage {
-                                            role: MsgRole::Assistant,
-                                            blocks: vec![UiBlock::Text(format!("✗ Failed to read clipboard image: {}", e))],
-                                        });
-                                        app.auto_scroll = true;
-                                    }
-                                }
-                            } else {
-                                app.messages.push(UiMessage {
-                                    role: MsgRole::Assistant,
-                                    blocks: vec![UiBlock::Text(
-                                        "✗ No image in clipboard. Copy a screenshot first, then press Ctrl+V again.".to_string(),
-                                    )],
-                                });
-                                app.auto_scroll = true;
-                            }
+                            lifecycle::handle_paste_image(app, session);
                         }
                         InputAction::OpenDiffViewer => {
                             app.diff_viewer = crate::tui::render::open_diff_viewer();
@@ -565,6 +503,77 @@ async fn tui_loop(
                         InputAction::BtwSubmit(_) => {}
                         InputAction::None => {}
                         InputAction::SecretAllow | InputAction::SecretDeny => {}
+                        InputAction::ApiKeyChar(c) => {
+                            if let Some(ref mut pending) = app.api_key_input {
+                                pending.input.push(c);
+                            }
+                        }
+                        InputAction::ApiKeyBackspace => {
+                            if let Some(ref mut pending) = app.api_key_input {
+                                pending.input.pop();
+                            }
+                        }
+                        InputAction::ApiKeyCancel => {
+                            app.api_key_input = None;
+                        }
+                        InputAction::ApiKeyModelUp => {
+                            if let Some(ref mut p) = app.api_key_input {
+                                p.model_sel = p.model_sel.saturating_sub(1);
+                            }
+                        }
+                        InputAction::ApiKeyModelDown => {
+                            if let Some(ref mut p) = app.api_key_input {
+                                let max = p.models.len().saturating_sub(1);
+                                p.model_sel = (p.model_sel + 1).min(max);
+                            }
+                        }
+                        InputAction::ApiKeySubmit => {
+                            if let Some(ref mut pending) = app.api_key_input {
+                                if pending.picking_model {
+                                    // Model step confirmed — complete the switch.
+                                    let chosen = pending.models.get(pending.model_sel)
+                                        .filter(|m| m.as_str() != "Other…")
+                                        .cloned()
+                                        .unwrap_or_else(|| pending.models.first().cloned().unwrap_or_default());
+                                    let pending = app.api_key_input.take().unwrap();
+                                    let current_config = session.config.clone();
+                                    lifecycle::apply_provider_switch(
+                                        session, app, &current_config,
+                                        pending.slug, pending.name, chosen,
+                                        pending.kind_str, pending.provider,
+                                        pending.base_url, pending.auth_header,
+                                        pending.resolved_key,
+                                    );
+                                } else {
+                                    // Key step confirmed — resolve key and advance to model pick.
+                                    let typed = pending.input.trim().to_string();
+                                    let api_key = if typed.is_empty() {
+                                        if pending.has_existing_key {
+                                            session.config.all_providers.get(&pending.slug)
+                                                .and_then(|e| e.api_key.clone())
+                                                .filter(|k| !k.is_empty())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        Some(typed)
+                                    };
+                                    pending.resolved_key = api_key;
+                                    pending.picking_model = true;
+                                    pending.model_sel = 0;
+                                }
+                            }
+                        }
+                        InputAction::CloseGeminiAuthPrompt => {
+                            app.gemini_auth_prompt = false;
+                            app.gemini_reauth = false;
+                        }
+                        InputAction::GeminiAuthApiKey => {
+                            lifecycle::handle_gemini_auth_apikey(app);
+                        }
+                        InputAction::LaunchGeminiAuth => {
+                            lifecycle::handle_gemini_auth_launch(terminal, session, app, config)?;
+                        }
                     }
                 }
                 Event::Resize(_, _) => { terminal.autoresize()?; }
