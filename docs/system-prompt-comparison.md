@@ -259,26 +259,72 @@ Single large system prompt (~11,000 characters), always sent in full:
 
 ---
 
-## 7. What Zap Does Better
+## 7. Token Cost Comparison — How Much Extra Are Others Sending?
 
-1. **Skill-based dynamic injection** — Others always send massive bloated prompts. Zap only injects git instructions when you actually mention git. Saves 500–3000 tokens per turn on unrelated queries.
+### Per-turn totals (typical session)
+
+| Agent | Tokens/turn | vs Zap |
+|---|---|---|
+| Claude Code | 8,000–20,000 | +6,000–12,000 |
+| Gemini CLI | 3,000–6,000 | +1,250–4,250 |
+| OpenCode | 2,000–5,000 | +250–3,250 |
+| Cline | ~2,750 (fixed) | +1,000 |
+| **Zap** | **1,750–8,000** | — |
+
+At 1,000 turns (a heavy session), Claude Code pays 6M–12M extra tokens vs zap purely on system prompt overhead. At ~$3/M input tokens on Sonnet, that is $18–$36 extra per heavy session just for the system prompt.
+
+### Breaking down what others send — bloat vs real gap
+
+**Genuinely not bloat — zap should add these:**
+
+| Missing from zap | Tokens | Why it matters |
+|---|---|---|
+| Today's date | ~8 | LLM reasons from training cutoff (18+ months ago) without it |
+| Current git branch | ~10 | Wrong-branch edits are silently committed |
+| Platform + env block | ~60 | Version and path reasoning requires context |
+| **Total** | **~80** | Cheap insurance against systematic errors |
+
+**Bloat when always-on — zap's skill approach is better:**
+
+| Always-on in other agents | Tokens | Zap's approach |
+|---|---|---|
+| Claude Code git workflow | ~800 | `git` skill injected only on keyword match |
+| Claude Code tool descriptions (67+ tools) | ~3,000–5,000 | API schema only — no duplication in prompt |
+| Claude Code Bash sub-sections (30+) | ~2,000 | Partial coverage via skills |
+| OpenCode/Cline base instructions | ~1,500 | Covered by zap's core system prompt |
+
+Claude Code sends its 800-token git commit protocol on **every turn** — including "what does this function do?" Those tokens are wasted on non-git queries. Zap injects git instructions only when git keywords appear in the input. For a session with 100 turns of which 20 involve git, zap saves 80 × 800 = 64,000 tokens on git guidance alone.
+
+### The honest verdict
+
+Zap is leaner by design and that is mostly correct. The "bloat" in Claude Code and Cline comes from always-on tool descriptions and workflow protocols that do not need to be in every prompt. Zap's skill-injection architecture handles this better.
+
+What zap is actually missing is the **~80-token environment block** — date, branch, platform. This is not a design tradeoff, it is a pure oversight. Every other agent sends it. The cost is negligible; the benefit (accurate version reasoning, correct branch awareness) is real.
+
+The one legitimate quality gap — not a token gap — is the compression prompt. Gemini CLI's structured XML schema with injection hardening (see Section 9B) produces a more reliable compact than zap's prose request, regardless of token count.
+
+---
+
+## 8. What Zap Does Better
+
+1. **Skill-based dynamic injection** — Others always send massive bloated prompts. Zap only injects git instructions when you actually mention git. Saves 500–3,000 tokens per turn on unrelated queries.
 2. **Casual turn optimization** — Saves 1,700+ tokens on greetings and acks. Others pay full price on "ok".
 3. **Project understanding** — `.zap/understanding.md` is a structured technical reference. Others only have CLAUDE.md which is user-written.
 4. **Sub-agent support** — Cline and OpenCode don't support parallel sub-agents.
 
-## 8. What Zap Is Missing (priority order)
+## 9. What Zap Is Missing (priority order)
 
-1. **Today's date** — Low cost (5 tokens), high value. LLM needs this for version reasoning.
-2. **Current git branch** — Low cost, prevents wrong-branch mistakes.
-3. **Edit failure recovery** — Gemini CLI has this; prevents dumb retries when edit_file fails.
-4. **Context compression guidance** — Needed as conversations grow past the window.
+1. **Today's date** — ~8 tokens, high value. LLM needs this for version reasoning.
+2. **Current git branch** — ~10 tokens, prevents wrong-branch mistakes.
+3. **Compression prompt quality** — Gemini CLI's structured XML schema + injection hardening produces better compacts than zap's prose request.
+4. **Edit failure recovery** — Gemini CLI has this; prevents dumb retries when edit_file fails.
 5. **Subdirectory CLAUDE.md discovery** — Monorepo projects (packages/X/CLAUDE.md) not picked up.
 
 ---
 
 ---
 
-## 9. Concrete Examples — Verbatim Prompt Text Others Send That Zap Does Not
+## 10. Concrete Examples — Verbatim Prompt Text Others Send That Zap Does Not
 
 > Sources: `google-gemini/gemini-cli` (open source, `packages/core/src/prompts/snippets.ts`),
 > `opencode-ai/opencode` (open source, `internal/llm/prompt/coder.go`),
