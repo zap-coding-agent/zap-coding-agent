@@ -319,14 +319,80 @@ The useful-but-missing content is **~80 tokens** of environment context (date an
 
 ---
 
-## 8. What Zap Does Better
+## 8. Does the Extra Content Actually Improve Quality?
+
+The most important question is not how many tokens others spend — it is whether those extra tokens produce better results. The answer for the bulk of the bloat is **no**.
+
+### Tool descriptions inline (3,000–5,000 tokens, Claude Code / Cline / OpenCode)
+
+Claude Code embeds full descriptions of all 67+ tools directly in the system prompt. Zap sends tool definitions only via the API tool-calling schema, not repeated in the system prompt.
+
+**Quality impact: none.** The LLM receives identical information about available tools in both cases. The API schema and the inline description communicate the same thing through different channels. Claude Code's own documentation acknowledges that prompt caching makes repeated tool schemas "essentially free from turn 2 onward" — meaning the content itself is not what matters, the delivery method is. Zap's approach is architecturally cleaner with identical outcomes.
+
+### Always-on git workflow protocol (800 tokens, Claude Code)
+
+Claude Code sends its full commit safety protocol on every single turn — HEREDOC format, `-uall` memory warning, `--amend` invariant — even when you are asking about a Python type error.
+
+**Quality impact: none on non-git turns.** The git protocol is invisible to the LLM on a turn about debugging — it contributes nothing to the response. On git turns, zap's injected `git` skill covers the same safety rules. The outcome for git operations is the same; zap just does not pay 800 tokens per debugging turn for instructions that do not apply.
+
+### Bash sub-sections, 30+ edge-case rules (2,000 tokens, Claude Code)
+
+Claude Code's Bash tool description includes extensive rules: do not use `-i` interactive flags, do not use `vim`, always quote paths with spaces, chain commands with `&&` not newlines, avoid `sleep` polling, etc.
+
+**Quality impact: none.** These behaviors are part of Claude's training data — Claude already knows not to call `vim` in a non-interactive shell. Restating them in the system prompt does not improve the behavior; it pads the prompt. Users do not see better shell command quality from Claude Code vs zap on these edge cases.
+
+### Provider-specific base prompt (1,500 tokens, OpenCode anthropic.txt)
+
+OpenCode sends a full instruction block covering tone, conciseness, code conventions, security practices, and task approach — always, on every turn.
+
+**Quality impact: none.** Zap's core system prompt covers the same ground: concise responses, no narration, security rules, task-tracking discipline. The content is equivalent; OpenCode just sends it as a monolith while zap assembles it from modular sections. Behavioral outcomes are indistinguishable.
+
+### Autonomous loop / learning mode / plan mode instructions (350+ tokens, Claude Code)
+
+Claude Code always injects instructions for features like unattended loop behavior, learning mode, and plan mode.
+
+**Quality impact: none for standard interactive sessions.** These instructions only matter when those modes are active. Standard interactive use — which is the overwhelming majority of sessions — gains nothing from having them in context. They are pure overhead.
+
+### Browser automation instructions (400 tokens, Claude Code)
+
+Full browser automation guidance is always present in Claude Code's system prompt.
+
+**Quality impact: none unless you are actually automating a browser.** Zap does not have browser tools, making these tokens irrelevant by definition — but even for Claude Code users not running browser tasks, this content adds no value to the response.
+
+---
+
+### The two things that DO have a real (small) quality impact
+
+| Extra content | Quality difference | Severity |
+|---|---|---|
+| Today's date | LLM reasons from training cutoff (~18 months ago). Version comparisons, "is this library current?" questions, date arithmetic can be wrong. | Low-medium — affects a specific class of queries |
+| Current git branch | LLM cannot know which branch it is on without being told. Wrong-branch edits are possible. | Low — rare in practice, user usually mentions branch |
+
+These two are genuine gaps, not bloat. Combined they are ~18 tokens. Everything else in others' prompts that zap omits has no measurable quality impact on typical queries.
+
+### Summary
+
+| Category | Tokens (others) | Quality impact of omitting |
+|---|---|---|
+| Tool descriptions inline | 3,000–5,000 | None — API schema carries same info |
+| Always-on git workflow | 800 | None on non-git turns; skill injection covers git turns |
+| Bash edge-case rules | 2,000 | None — redundant with model training |
+| Base instruction prose | 1,500 | None — zap's core prompt covers same ground |
+| Inactive feature instructions | 750+ | None — features not in use |
+| **Today's date + branch** | **~18** | **Small but real** |
+
+The conclusion is direct: **other agents pay thousands of tokens per turn for content that does not improve output quality**. Zap's skill-injection design eliminates that overhead without sacrificing anything that matters.
+
+---
+
+## 10. What Zap Does Better
 
 1. **Skill-based dynamic injection** — Others always send massive bloated prompts. Zap only injects git instructions when you actually mention git. Saves 500–3,000 tokens per turn on unrelated queries.
 2. **Casual turn optimization** — Saves 1,700+ tokens on greetings and acks. Others pay full price on "ok".
 3. **Project understanding** — `.zap/understanding.md` is a structured technical reference. Others only have CLAUDE.md which is user-written.
 4. **Sub-agent support** — Cline and OpenCode don't support parallel sub-agents.
 
-## 9. What Zap Is Missing (priority order)
+## 11. What Zap Is Missing (priority order)
 
 1. **Today's date** — ~8 tokens, high value. LLM needs this for version reasoning.
 2. **Current git branch** — ~10 tokens, prevents wrong-branch mistakes.
@@ -338,7 +404,7 @@ The useful-but-missing content is **~80 tokens** of environment context (date an
 
 ---
 
-## 10. Concrete Examples — Verbatim Prompt Text Others Send That Zap Does Not
+## 12. Concrete Examples — Verbatim Prompt Text Others Send That Zap Does Not
 
 > Sources: `google-gemini/gemini-cli` (open source, `packages/core/src/prompts/snippets.ts`),
 > `opencode-ai/opencode` (open source, `internal/llm/prompt/coder.go`),
