@@ -73,8 +73,10 @@ pub(super) fn select_tools_for_turn<'a>(
 ///
 /// 1. **Sliding window** — only the last `ZAP_HISTORY_WINDOW` real user turns
 ///    (default 8) are included, bounding token cost.
-/// 2. **Tool-result pruning** — ToolResult blocks outside the last 2 complete
-///    exchanges are replaced with a one-line stub to avoid inflating the prompt.
+/// 2. **Drop summary** — when turns fall off the window, a synthetic summary
+///    message pair is prepended so the LLM retains key context from early turns.
+/// 3. **Tool-result pruning** — ToolResult blocks outside the last 2 complete
+///    exchanges are replaced with a stub + 150-char preview.
 pub(super) fn windowed_history(messages: &[Message]) -> Vec<Message> {
     let window: usize = std::env::var("ZAP_HISTORY_WINDOW")
         .ok()
@@ -103,8 +105,9 @@ pub(super) fn windowed_history(messages: &[Message]) -> Vec<Message> {
     };
 
     const PRUNE_THRESHOLD: usize = 300;
+    const PRUNE_PREVIEW:   usize = 150;
 
-    messages[start..].iter().enumerate()
+    let windowed: Vec<Message> = messages[start..].iter().enumerate()
         .map(|(rel_i, msg)| {
             let abs_i = start + rel_i;
             if abs_i < prune_before {
@@ -113,9 +116,10 @@ pub(super) fn windowed_history(messages: &[Message]) -> Vec<Message> {
                         ContentBlock::ToolResult { tool_use_id, content }
                             if content.len() > PRUNE_THRESHOLD =>
                         {
+                            let preview: String = content.chars().take(PRUNE_PREVIEW).collect();
                             ContentBlock::ToolResult {
                                 tool_use_id: tool_use_id.clone(),
-                                content: format!("[pruned — {} chars]", content.len()),
+                                content: format!("[pruned — {} chars]\n{}", content.len(), preview),
                             }
                         }
                         other => other.clone(),
@@ -126,7 +130,114 @@ pub(super) fn windowed_history(messages: &[Message]) -> Vec<Message> {
                 msg.clone()
             }
         })
-        .collect()
+        .collect();
+
+    if start == 0 {
+        return windowed;
+    }
+
+    // Turns were dropped — prepend a synthetic summary so the LLM knows what it missed.
+    let summary = build_drop_summary(&messages[..start]);
+    let mut result = Vec::with_capacity(windowed.len() + 2);
+    result.push(Message::user_text(summary));
+    result.push(Message {
+        role:    "assistant".to_string(),
+        content: vec![ContentBlock::Text {
+            text: "Understood — I have the context from the earlier turns.".to_string(),
+        }],
+    });
+    result.extend(windowed);
+    result
+}
+
+/// Build a concise text summary of dropped turns without calling the LLM.
+///
+/// Shows up to 5 of the most recent dropped turns (oldest first), with short
+/// previews of the user request and assistant response, plus tool names used.
+fn build_drop_summary(dropped: &[Message]) -> String {
+    const USER_PREVIEW: usize = 200;
+    const ASST_PREVIEW: usize = 250;
+    const MAX_TOOLS:    usize = 5;
+    const MAX_TURNS:    usize = 5;
+
+    let real_positions: Vec<usize> = dropped.iter().enumerate()
+        .filter(|(_, m)| {
+            m.role == "user"
+                && m.content.first()
+                    .is_some_and(|b| matches!(b, ContentBlock::Text { .. }))
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    let total = real_positions.len();
+    let show_start = total.saturating_sub(MAX_TURNS);
+
+    let header = if total > MAX_TURNS {
+        format!(
+            "[History summary — {} earlier turns condensed, showing last {}]",
+            total, MAX_TURNS
+        )
+    } else {
+        format!(
+            "[History summary — {} earlier turn{} condensed]",
+            total, if total == 1 { "" } else { "s" }
+        )
+    };
+
+    let mut parts = vec![header];
+
+    for (idx, &pos) in real_positions[show_start..].iter().enumerate() {
+        let turn_num = show_start + idx + 1;
+        let next_pos = real_positions.get(show_start + idx + 1).copied().unwrap_or(dropped.len());
+
+        let user_text = dropped[pos].content.iter()
+            .find_map(|b| if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+            .unwrap_or("");
+        let user_preview: String = user_text.chars().take(USER_PREVIEW).collect();
+        let user_suffix = if user_text.chars().count() > USER_PREVIEW { "…" } else { "" };
+
+        let mut asst_preview = String::new();
+        let mut tool_names: Vec<String> = Vec::new();
+
+        for msg in &dropped[pos + 1..next_pos] {
+            for block in &msg.content {
+                match block {
+                    ContentBlock::Text { text } if msg.role == "assistant" && asst_preview.is_empty() => {
+                        asst_preview = text.chars().take(ASST_PREVIEW).collect();
+                        if text.chars().count() > ASST_PREVIEW { asst_preview.push('…'); }
+                    }
+                    ContentBlock::ToolUse { name, input, .. } if tool_names.len() < MAX_TOOLS => {
+                        let file_hint = input.get("path")
+                            .or_else(|| input.get("file_path"))
+                            .and_then(|v| v.as_str())
+                            .map(|p| {
+                                // Trim to basename to keep it short
+                                std::path::Path::new(p)
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(p)
+                                    .to_string()
+                            })
+                            .map(|f| format!("({})", f))
+                            .unwrap_or_default();
+                        tool_names.push(format!("{}{}", name, file_hint));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut entry = format!("Turn {}: {}{}", turn_num, user_preview, user_suffix);
+        if !asst_preview.is_empty() {
+            entry.push_str(&format!("\n  → {}", asst_preview));
+        }
+        if !tool_names.is_empty() {
+            entry.push_str(&format!("\n  [{}]", tool_names.join(", ")));
+        }
+        parts.push(entry);
+    }
+
+    parts.join("\n\n")
 }
 
 #[cfg(test)]
@@ -196,7 +307,6 @@ mod tests {
 
     #[test]
     fn tool_results_pruned_outside_window() {
-        // Build 3 real user turns with an oversized tool result before the window.
         let big = "x".repeat(400);
         let mut msgs = vec![
             user_text("turn1"),
@@ -205,8 +315,6 @@ mod tests {
             tool_result("id2", &big),
             user_text("turn3"),
         ];
-        // With window=8 and 3 real turns, prune_before = real_turn_indices[1] = 2.
-        // The tool result at index 1 should be pruned.
         let history = windowed_history(&msgs);
         let pruned = history.iter().any(|m| {
             m.content.iter().any(|b| {
@@ -216,7 +324,6 @@ mod tests {
             })
         });
         assert!(pruned, "oversized tool result should be pruned");
-        // The last tool result (within window) must NOT be pruned.
         let last_tool = history.iter().rev().find(|m| {
             m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
         });
@@ -226,6 +333,85 @@ mod tests {
             }).unwrap();
             assert!(!content.starts_with("[pruned"), "recent tool result must not be pruned");
         }
-        drop(msgs.pop()); // suppress unused warning
+        drop(msgs.pop());
+    }
+
+    #[test]
+    fn pruned_tool_result_includes_preview() {
+        let big = "abcdefghij".repeat(50); // 500 chars
+        let msgs = vec![
+            user_text("turn1"),
+            tool_result("id1", &big),
+            user_text("turn2"),
+            tool_result("id2", "short"),
+            user_text("turn3"),
+        ];
+        let history = windowed_history(&msgs);
+        // Find the pruned tool result
+        let pruned_content = history.iter().find_map(|m| {
+            m.content.iter().find_map(|b| {
+                if let ContentBlock::ToolResult { content, .. } = b {
+                    if content.starts_with("[pruned") { Some(content.clone()) } else { None }
+                } else { None }
+            })
+        });
+        let content = pruned_content.expect("pruned result should exist");
+        assert!(content.contains("500 chars"), "should report original length");
+        // Preview of first 150 chars of "abcdefghij" * 50 = "abcdefghijabcdefghij..."
+        assert!(content.contains("abcdefghij"), "should include content preview");
+    }
+
+    #[test]
+    fn no_drop_summary_within_window() {
+        // 5 real turns — all fit inside default window of 8, no summary injected
+        let msgs: Vec<Message> = (0..5).map(|i| user_text(&format!("turn {}", i))).collect();
+        let history = windowed_history(&msgs);
+        let has_summary = history.iter().any(|m| {
+            m.content.iter().any(|b| {
+                if let ContentBlock::Text { text } = b {
+                    text.contains("[History summary")
+                } else { false }
+            })
+        });
+        assert!(!has_summary, "no summary when all turns fit in window");
+        assert_eq!(history.len(), 5);
+    }
+
+    #[test]
+    fn drop_summary_injected_when_window_slides() {
+        fn make_exchange(user: &str, asst: &str) -> Vec<Message> {
+            vec![
+                user_text(user),
+                Message {
+                    role: "assistant".to_string(),
+                    content: vec![ContentBlock::Text { text: asst.to_string() }],
+                },
+            ]
+        }
+
+        // Build 10 exchanges (>8 window default) → turns 1-2 drop off
+        let mut msgs: Vec<Message> = Vec::new();
+        for i in 1..=10 {
+            msgs.extend(make_exchange(
+                &format!("user message {}", i),
+                &format!("assistant reply {}", i),
+            ));
+        }
+
+        let history = windowed_history(&msgs);
+
+        // First message should be the summary
+        let first = &history[0];
+        let first_text = first.content.iter().find_map(|b| {
+            if let ContentBlock::Text { text } = b { Some(text.as_str()) } else { None }
+        }).unwrap_or("");
+        assert!(first_text.contains("[History summary"), "first message should be summary");
+        assert!(first_text.contains("Turn 1"), "summary should reference dropped turns");
+
+        // Second message should be the synthetic assistant ack
+        assert_eq!(history[1].role, "assistant");
+
+        // The windowed portion should follow (8 real turns × 2 messages + 2 synthetic = 18 total)
+        assert_eq!(history.len(), 2 + 16, "2 synthetic + 8 turns × 2 messages");
     }
 }
