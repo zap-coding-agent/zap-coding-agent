@@ -68,9 +68,9 @@ pub(super) fn draw_context_viewer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list_block, list_area);
 
     let detail_title = if let Some(t) = viewer.turns.get(viewer.selected) {
-        let pct = if viewer.total_tokens > 0 { (t.tokens_est * 100) / viewer.total_tokens } else { 0 };
-        let pct_str = if pct == 0 && t.tokens_est > 0 { "<1%".to_string() } else { format!("{}%", pct) };
-        format!(" Detail  {}  {} of context ", fmt_tokens(t.tokens_est), pct_str)
+        let cumul: usize = viewer.turns[..=viewer.selected].iter().map(|x| x.tokens_est).sum();
+        let cumul_pct = if viewer.limit_tokens > 0 { (cumul * 100) / viewer.limit_tokens } else { 0 }.min(100);
+        format!(" Detail  {} this  (prev + this = {}  {}% of limit) ", fmt_tokens(t.tokens_est), fmt_tokens(cumul), cumul_pct)
     } else {
         " Detail ".to_string()
     };
