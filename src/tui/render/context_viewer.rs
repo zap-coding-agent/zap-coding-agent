@@ -136,11 +136,19 @@ fn draw_turn_list(frame: &mut Frame, viewer: &ContextViewerState, area: Rect) {
     let scroll = if viewer.selected >= visible { viewer.selected + 1 - visible } else { 0 };
     let dim = Style::default().fg(Color::DarkGray);
 
+    // Pre-compute cumulative token sum at each turn for the running context % column.
+    let cumulative: Vec<usize> = viewer.turns.iter()
+        .scan(0usize, |acc, t| { *acc += t.tokens_est; Some(*acc) })
+        .collect();
+
     let mut lines: Vec<Line> = Vec::new();
     for (i, turn) in viewer.turns.iter().enumerate().skip(scroll).take(visible) {
         let is_sel = i == viewer.selected;
         let tok_label = fmt_tokens(turn.tokens_est);
-        let pct = if viewer.total_tokens > 0 { (turn.tokens_est * 100) / viewer.total_tokens } else { 0 };
+        // own%: this turn's share of total stored history
+        let own_pct = if viewer.total_tokens > 0 { (turn.tokens_est * 100) / viewer.total_tokens } else { 0 };
+        // cum%: running total as % of the model's context limit (always grows turn-by-turn)
+        let cum_pct = if viewer.limit_tokens > 0 { (cumulative[i] * 100) / viewer.limit_tokens } else { 0 }.min(100);
 
         let (win_sym, win_style) = if turn.in_window {
             ("▓", Style::default().fg(Color::Green))
@@ -148,7 +156,8 @@ fn draw_turn_list(frame: &mut Frame, viewer: &ContextViewerState, area: Rect) {
             ("░", dim)
         };
 
-        let right_w: usize = 14;
+        // right_w: tok(7) + own%(5) + "/"(1) + cum%(4) + " "(1) + sym(1) = 19
+        let right_w: usize = 19;
         let prefix_w: usize = 3;
         let preview_w = (area.width as usize).saturating_sub(prefix_w + right_w).max(4);
         let preview: String = turn.preview.chars().take(preview_w).collect();
@@ -164,11 +173,21 @@ fn draw_turn_list(frame: &mut Frame, viewer: &ContextViewerState, area: Rect) {
             Style::default().fg(Color::Gray)
         };
 
+        let cum_color = if dropping { Color::Red } else if cum_pct < 50 {
+            Color::Green
+        } else if cum_pct < 80 {
+            Color::Yellow
+        } else {
+            Color::Red
+        };
+
         lines.push(Line::from(vec![
             Span::styled(if dropping { "✕ " } else if is_sel { "▶ " } else { "  " }, cursor_style),
             Span::styled(format!("{:<preview_w$}", preview), text_style),
             Span::styled(format!(" {:>6}", tok_label), if dropping { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Cyan) }),
-            Span::styled(format!(" {:>3}%", pct), if dropping { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Yellow) }),
+            Span::styled(format!(" {:>3}%", own_pct), if dropping { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Yellow) }),
+            Span::styled("/", dim),
+            Span::styled(format!("{:>3}%", cum_pct), Style::default().fg(cum_color)),
             Span::styled(" ", dim),
             Span::styled(win_sym, win_style),
         ]));
