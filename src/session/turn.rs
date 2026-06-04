@@ -79,6 +79,12 @@ impl Session {
 
         let is_casual = is_casual_message(input) && !needs_prior_context(input, &self.messages);
 
+        // Summarize any turns that just slid off the context window (non-casual only).
+        // Must run before the inner tool-loop so the summary is ready for injection.
+        if !is_casual {
+            self.maybe_summarize_dropped_turns().await;
+        }
+
         let matched_skills: Vec<&crate::skill_manager::Skill> = if is_casual {
             Vec::new()
         } else {
@@ -204,7 +210,27 @@ impl Session {
             let effective_msgs_owned: Vec<Message> = if is_casual {
                 self.messages.last().cloned().into_iter().collect()
             } else {
-                windowed_history(&self.messages)
+                let windowed = windowed_history(&self.messages);
+                if self.dropped_summary.is_empty() {
+                    windowed
+                } else {
+                    // Prepend the LLM-generated summary of dropped turns so the model
+                    // retains context from before the sliding window start.
+                    let mut msgs = Vec::with_capacity(windowed.len() + 2);
+                    msgs.push(Message::user_text(format!(
+                        "[Context from earlier in this session — turns that slid off the \
+                         context window]\n\n{}",
+                        &self.dropped_summary
+                    )));
+                    msgs.push(Message {
+                        role:    "assistant".to_string(),
+                        content: vec![crate::llm_client::ContentBlock::Text {
+                            text: "Understood — I have the earlier context.".to_string(),
+                        }],
+                    });
+                    msgs.extend(windowed);
+                    msgs
+                }
             };
             let effective_messages: &[Message] = &effective_msgs_owned;
             let result = self.client

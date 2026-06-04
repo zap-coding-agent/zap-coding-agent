@@ -78,6 +78,8 @@ fn print_conversation(messages: &[Message]) {
 impl Session {
     pub fn cmd_clear(&mut self) {
         self.messages.clear();
+        self.dropped_summary.clear();
+        self.last_window_start = 0;
         println!("  {} History cleared.", "✓".green());
     }
 
@@ -121,7 +123,25 @@ impl Session {
         } else {
             Self::make_spinner()
         };
-        let mut temp = self.messages.clone();
+        // If there is a running dropped_summary from the sliding window, prepend it
+        // so the compaction LLM sees the full session context, not just the window.
+        let mut temp: Vec<Message> = if !self.dropped_summary.is_empty() {
+            let mut v = Vec::with_capacity(self.messages.len() + 2);
+            v.push(Message::user_text(format!(
+                "[Earlier session context — turns that slid off the window before now]\n\n{}",
+                &self.dropped_summary
+            )));
+            v.push(Message {
+                role:    "assistant".to_string(),
+                content: vec![ContentBlock::Text {
+                    text: "Understood — I have the earlier context.".to_string(),
+                }],
+            });
+            v.extend_from_slice(&self.messages);
+            v
+        } else {
+            self.messages.clone()
+        };
         temp.push(Message::user_text(
             "Please provide a concise summary of this conversation so far. \
              Include: the original task or goal, key decisions made, files created or \
@@ -154,6 +174,9 @@ impl Session {
                         text: "Understood. I have the context from our previous conversation.".to_string(),
                     }],
                 });
+                // The dropped_summary is now fully incorporated into the compact summary.
+                self.dropped_summary.clear();
+                self.last_window_start = 0;
                 if let Some(u) = resp.usage {
                     self.session_usage.input_tokens  += u.input_tokens;
                     self.session_usage.output_tokens += u.output_tokens;

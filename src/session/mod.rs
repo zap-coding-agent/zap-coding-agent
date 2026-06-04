@@ -2,6 +2,7 @@ pub mod commands;
 mod casual;
 mod history;
 mod preview;
+mod summarizer;
 mod tools;
 mod turn;
 
@@ -61,6 +62,13 @@ pub struct Session {
     pub startup_notices: Vec<String>,
     /// Per-turn skill trace: (turn_number, input_preview, skill_names, reason_if_none).
     pub skill_trace: Vec<(usize, String, Vec<String>, Option<String>)>,
+    /// LLM-generated summary of turns that have slid off the context window.
+    /// Prepended as a synthetic message pair on every non-casual turn so the LLM
+    /// retains decisions made before the window start.
+    pub dropped_summary: String,
+    /// Message index marking the start of the previous context window.
+    /// Used to detect which turns newly slid off and need summarization.
+    pub last_window_start: usize,
 }
 
 impl Session {
@@ -323,6 +331,8 @@ impl Session {
             files_changed: Vec::new(),
             startup_notices,
             skill_trace: Vec::new(),
+            dropped_summary: String::new(),
+            last_window_start: 0,
         })
     }
 
