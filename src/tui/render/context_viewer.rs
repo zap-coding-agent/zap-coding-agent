@@ -277,7 +277,8 @@ fn draw_turn_detail(frame: &mut Frame, viewer: &ContextViewerState, area: Rect) 
         return;
     }
 
-    let scroll = viewer.detail_scroll.min(all_lines.len().saturating_sub(1));
+    let max_scroll = all_lines.len().saturating_sub(area.height as usize);
+    let scroll = viewer.detail_scroll.min(max_scroll);
     let para = Paragraph::new(all_lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
