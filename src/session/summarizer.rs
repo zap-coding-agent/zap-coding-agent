@@ -1,6 +1,14 @@
 use crate::llm_client::{ContentBlock, Message};
 use super::Session;
 
+/// Max chars per tool result before it is truncated for the summarizer input.
+/// Prevents huge file reads from blowing the summarizer's context window.
+const SUMMARIZER_TOOL_RESULT_CAP: usize = 500;
+
+/// If the total char count of pruned messages exceeds this, fall back to
+/// text-only summarization rather than risking an oversized LLM call.
+const SUMMARIZER_INPUT_CHAR_CAP: usize = 40_000;
+
 impl Session {
     /// Called once per user turn before the LLM loop.
     ///
@@ -8,8 +16,8 @@ impl Session {
     /// have dropped off the front). For each newly-dropped batch, calls the LLM to produce
     /// a concise bullet-point summary and appends it to `self.dropped_summary`.
     ///
-    /// Falls back to a text-only summary if the LLM call fails, so a slow or unavailable
-    /// model never blocks the turn.
+    /// Falls back to a text-only summary if the LLM call fails or the input is too large,
+    /// so a slow or unavailable model never blocks the turn.
     pub async fn maybe_summarize_dropped_turns(&mut self) {
         let window: usize = std::env::var("ZAP_HISTORY_WINDOW")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(8);
@@ -33,12 +41,36 @@ impl Session {
         }
 
         let newly_dropped = self.messages[self.last_window_start..current_start].to_vec();
+        let pruned_for_llm = prune_for_summarizer(&newly_dropped);
 
-        let new_section = match self.call_drop_summarizer(&newly_dropped).await {
-            Ok(s)  => s,
-            Err(e) => {
-                crate::log::write("WARN", &format!("drop-summary LLM call failed: {e}"));
-                Self::text_drop_summary(&newly_dropped)
+        // Notify the user so a sudden pause doesn't look like a hang.
+        emit_notice("⟳ Summarizing dropped context…");
+
+        let total_chars: usize = pruned_for_llm.iter()
+            .flat_map(|m| &m.content)
+            .map(|b| match b {
+                ContentBlock::Text { text }              => text.len(),
+                ContentBlock::ToolResult { content, .. } => content.len(),
+                ContentBlock::ToolUse { input, .. }      => input.to_string().len(),
+                _                                        => 0,
+            })
+            .sum();
+
+        let new_section = if total_chars > SUMMARIZER_INPUT_CHAR_CAP {
+            // Batch still too large after pruning — use text fallback to avoid an
+            // oversized LLM call. This happens when a single turn has massive text output.
+            crate::log::write("WARN", &format!(
+                "drop-summary input too large after pruning ({} chars > cap {}); using text fallback",
+                total_chars, SUMMARIZER_INPUT_CHAR_CAP
+            ));
+            Self::text_drop_summary(&newly_dropped)
+        } else {
+            match self.call_drop_summarizer(&pruned_for_llm).await {
+                Ok(s)  => s,
+                Err(e) => {
+                    crate::log::write("WARN", &format!("drop-summary LLM call failed: {e}"));
+                    Self::text_drop_summary(&newly_dropped)
+                }
             }
         };
 
@@ -58,14 +90,19 @@ impl Session {
                  decisions made:\n\n{}",
                 current
             ))];
-            if let Ok(compressed) = self.call_drop_summarizer(&recompress_msg).await {
-                self.dropped_summary = format!("[Compressed history]\n{}", compressed);
+            match self.call_drop_summarizer(&recompress_msg).await {
+                Ok(compressed) => {
+                    self.dropped_summary = format!("[Compressed history]\n{}", compressed);
+                }
+                Err(e) => {
+                    // Re-compression failure is non-fatal: summary stays large but correct.
+                    crate::log::write("WARN", &format!("drop-summary re-compression failed: {e}"));
+                }
             }
-            // If re-compression also fails, leave the existing summary as-is.
         }
     }
 
-    /// Call the LLM with a focused summarization prompt for a slice of dropped messages.
+    /// Call the LLM with a focused summarization prompt for a slice of (already-pruned) messages.
     ///
     /// Takes `&mut self` (not `&self`) so the future is `Send` — `&Session` is `!Send`
     /// because rusqlite's connection cache uses `RefCell` (which is `!Sync`).
@@ -106,7 +143,7 @@ impl Session {
         Ok(text)
     }
 
-    /// Zero-cost text fallback used when the LLM summarizer fails.
+    /// Zero-cost text fallback used when the LLM summarizer fails or the input is too large.
     /// Extracts first 200 chars of each real user turn + first 250 chars of the
     /// paired assistant reply, plus the names of tools called.
     pub(super) fn text_drop_summary(dropped: &[Message]) -> String {
@@ -166,5 +203,40 @@ impl Session {
             parts.push(entry);
         }
         parts.join("\n\n")
+    }
+}
+
+/// Strip tool results down to `SUMMARIZER_TOOL_RESULT_CAP` chars before sending
+/// to the summarizer LLM. File reads and shell outputs can be enormous; the
+/// summarizer only needs to know they happened and what they roughly contained.
+fn prune_for_summarizer(messages: &[Message]) -> Vec<Message> {
+    messages.iter().map(|msg| {
+        let pruned: Vec<ContentBlock> = msg.content.iter().map(|block| {
+            match block {
+                ContentBlock::ToolResult { tool_use_id, content }
+                    if content.len() > SUMMARIZER_TOOL_RESULT_CAP =>
+                {
+                    let preview: String = content.chars().take(SUMMARIZER_TOOL_RESULT_CAP).collect();
+                    ContentBlock::ToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        content: format!("[truncated — {} chars total]\n{}", content.len(), preview),
+                    }
+                }
+                other => other.clone(),
+            }
+        }).collect();
+        Message { role: msg.role.clone(), content: pruned }
+    }).collect()
+}
+
+/// Emit a notice through whichever output channel is active (TUI or CLI).
+fn emit_notice(msg: &str) {
+    if crate::tui::channel::is_tui_mode() {
+        crate::tui::channel::tui_send(
+            crate::tui::channel::TuiEvent::Notice(msg.to_string())
+        );
+    } else {
+        use colored::Colorize;
+        println!("  {} {}", "⟳".truecolor(200, 150, 60), msg.dimmed());
     }
 }
