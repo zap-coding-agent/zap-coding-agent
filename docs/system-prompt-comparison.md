@@ -259,49 +259,63 @@ Single large system prompt (~11,000 characters), always sent in full:
 
 ---
 
-## 7. Token Cost Comparison — How Much Extra Are Others Sending?
+## 7. Prompt Bloat — How Bad Is It in Other Agents?
 
-### Per-turn totals (typical session)
+### Per-turn system prompt size
 
-| Agent | Tokens/turn | vs Zap |
+| Agent | Tokens/turn | Notes |
 |---|---|---|
-| Claude Code | 8,000–20,000 | +6,000–12,000 |
-| Gemini CLI | 3,000–6,000 | +1,250–4,250 |
-| OpenCode | 2,000–5,000 | +250–3,250 |
-| Cline | ~2,750 (fixed) | +1,000 |
-| **Zap** | **1,750–8,000** | — |
+| Claude Code | 8,000–20,000 | Balloons further with active tools and CLAUDE.md |
+| Gemini CLI | 3,000–6,000 | |
+| OpenCode | 2,000–5,000 | |
+| Cline | ~2,750 | Fixed — never changes regardless of what you're doing |
+| **Zap** | **1,750–8,000** | Scales with matched skills; casual turns drop to ~15 |
 
-At 1,000 turns (a heavy session), Claude Code pays 6M–12M extra tokens vs zap purely on system prompt overhead. At ~$3/M input tokens on Sonnet, that is $18–$36 extra per heavy session just for the system prompt.
+At 1,000 turns (a heavy working session), Claude Code pays **6M–12M extra input tokens** vs zap on system prompt overhead alone. At ~$3/M input tokens on Sonnet that is **$18–$36 extra per session** for instructions the LLM mostly doesn't need on that turn.
 
-### Breaking down what others send — bloat vs real gap
+### What is actually bloated — and why
 
-**Genuinely not bloat — zap should add these:**
+The bulk of other agents' token spend is **always-on content** that is irrelevant to most queries:
 
-| Missing from zap | Tokens | Why it matters |
+| Always-on in other agents | Tokens | When it is actually needed |
 |---|---|---|
-| Today's date | ~8 | LLM reasons from training cutoff (18+ months ago) without it |
-| Current git branch | ~10 | Wrong-branch edits are silently committed |
-| Platform + env block | ~60 | Version and path reasoning requires context |
-| **Total** | **~80** | Cheap insurance against systematic errors |
+| Claude Code: 67+ tool descriptions inlined in prompt | ~3,000–5,000 | Only when using that specific tool |
+| Claude Code: Bash sub-sections (30+) | ~2,000 | Only for complex shell operations |
+| Claude Code: git commit + PR creation protocol | ~800 | Only when doing git work |
+| Claude Code: WebFetch / WebSearch instructions | ~300 | Only when fetching URLs |
+| Claude Code: browser automation instructions | ~400 | Only for UI testing |
+| Cline: full XML tool descriptions for all 11 tools | ~1,500 | Every turn, regardless of tools used |
+| OpenCode: full base instruction block | ~1,500 | Even for "what does this function do?" |
 
-**Bloat when always-on — zap's skill approach is better:**
+**The git protocol example is the clearest:** Claude Code sends its 800-token commit safety protocol — HEREDOC format, `-uall` memory warning, `--amend` invariant, never-stage-.env rule, parallel tool call pattern — on every single turn. "Explain this function" gets the full git workflow. "What is a closure?" gets the full git workflow. In a 100-turn session where 20 turns involve git, **80 turns pay 800 tokens each for instructions that do nothing** = 64,000 wasted tokens on git guidance alone.
 
-| Always-on in other agents | Tokens | Zap's approach |
+### How zap avoids this
+
+Zap's **skill-based injection** is the architectural answer to prompt bloat:
+
+- `git` skill (~800 tokens): injected only when input contains `commit`, `branch`, `merge`, `push`, `PR`, etc.
+- `security` skill (~600 tokens): injected only when input contains `vulnerability`, `XSS`, `auth`, etc.
+- `debugging` skill (~500 tokens): injected only for `bug`, `error`, `crash`, `exception`
+- **Casual turns** ("ok", "thanks", "yes"): entire system prompt drops to ~15 tokens
+
+For a typical session — 100 turns, 20 git-related, 10 debugging, 5 security — zap injects:
+- 20 × 800 (git) + 10 × 500 (debug) + 5 × 600 (security) = **27,000 tokens of skill content**
+- Claude Code pays the equivalent of those tokens on **every one of the 100 turns** = 140,000 tokens
+
+**Skill injection is not a missing feature — it is a deliberate response to the bloat problem.**
+
+### What the other agents' extra tokens actually buy
+
+Not all of it is waste. Some content in larger prompts is genuinely useful:
+
+| Useful content in other agents | Tokens | In zap? |
 |---|---|---|
-| Claude Code git workflow | ~800 | `git` skill injected only on keyword match |
-| Claude Code tool descriptions (67+ tools) | ~3,000–5,000 | API schema only — no duplication in prompt |
-| Claude Code Bash sub-sections (30+) | ~2,000 | Partial coverage via skills |
-| OpenCode/Cline base instructions | ~1,500 | Covered by zap's core system prompt |
+| Today's date | ~8 | ❌ Missing |
+| Current git branch | ~10 | ❌ Missing |
+| Platform + working directory | ~60 | ✅ In environment section |
+| Structured compression schema (Gemini CLI) | ~600 | ❌ Zap's /compact uses plain prose |
 
-Claude Code sends its 800-token git commit protocol on **every turn** — including "what does this function do?" Those tokens are wasted on non-git queries. Zap injects git instructions only when git keywords appear in the input. For a session with 100 turns of which 20 involve git, zap saves 80 × 800 = 64,000 tokens on git guidance alone.
-
-### The honest verdict
-
-Zap is leaner by design and that is mostly correct. The "bloat" in Claude Code and Cline comes from always-on tool descriptions and workflow protocols that do not need to be in every prompt. Zap's skill-injection architecture handles this better.
-
-What zap is actually missing is the **~80-token environment block** — date, branch, platform. This is not a design tradeoff, it is a pure oversight. Every other agent sends it. The cost is negligible; the benefit (accurate version reasoning, correct branch awareness) is real.
-
-The one legitimate quality gap — not a token gap — is the compression prompt. Gemini CLI's structured XML schema with injection hardening (see Section 9B) produces a more reliable compact than zap's prose request, regardless of token count.
+The useful-but-missing content is **~80 tokens** of environment context (date and branch). Everything else is either already covered by zap or is bloat that skill injection avoids by design.
 
 ---
 
