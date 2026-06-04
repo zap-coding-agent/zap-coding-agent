@@ -329,7 +329,11 @@ impl Session {
     pub fn make_spinner() -> ThinkingSpinner { ThinkingSpinner::new() }
 
     pub fn estimated_context_tokens(&self) -> usize {
-        let chars: usize = self.messages.iter().map(|m| {
+        Self::tokens_for_messages(&self.messages)
+    }
+
+    fn tokens_for_messages(messages: &[Message]) -> usize {
+        let chars: usize = messages.iter().map(|m| {
             m.content.iter().map(|b| match b {
                 ContentBlock::Text { text }              => text.len(),
                 ContentBlock::ToolUse { input, .. }      => input.to_string().len(),
@@ -343,7 +347,8 @@ impl Session {
     }
 
     pub fn context_fill_pct(&self) -> u8 {
-        let tokens = self.estimated_context_tokens();
+        let effective = history::windowed_history(&self.messages);
+        let tokens = Self::tokens_for_messages(&effective);
         let limit = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
