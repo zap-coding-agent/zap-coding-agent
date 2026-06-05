@@ -11,11 +11,15 @@ impl Session {
         };
 
         if let Some(start) = self.system.find("## Agent Memory\n") {
-            // Find the end: next section header or end-of-string.
+            // Find where this block ends. tail[1..] skips the leading '#' so the
+            // search for "\n\n## " cannot match the block's own opening "##".
+            // `rel` is the position of the "\n\n## " separator in tail[1..], which
+            // means position rel+1 in tail.  We stop there — do NOT consume the
+            // "\n\n" itself; it must stay so the next section isn't run on directly.
             let tail = &self.system[start..];
-            let block_len = tail[1..] // skip the '#' at `start` to avoid matching it
+            let block_len = tail[1..]
                 .find("\n\n## ")
-                .map(|rel| rel + 1 + "\n\n".len()) // include the \n\n separator
+                .map(|rel| rel + 1)   // stop before the \n\n separator
                 .unwrap_or(tail.len());
             let end = start + block_len;
             self.system.replace_range(start..end, &new_block);

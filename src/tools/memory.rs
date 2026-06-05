@@ -94,7 +94,11 @@ impl Tool for MemoryDeleteTool {
         let key = input["key"].as_str()
             .ok_or_else(|| anyhow::anyhow!("key is required"))?;
 
-        crate::persistence::init()?.delete_memory(key)?;
+        let store = crate::persistence::init()?;
+        if store.get_memory(key)?.is_none() {
+            return Ok(format!("Key '{}' not found in memory.", key));
+        }
+        store.delete_memory(key)?;
         MEMORY_DIRTY.store(true, Ordering::Relaxed);
         Ok(format!("Deleted memory key: {}", key))
     }
