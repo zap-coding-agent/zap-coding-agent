@@ -287,6 +287,47 @@ The bulk of other agents' token spend is **always-on content** that is irrelevan
 | Cline: full XML tool descriptions for all 11 tools | ~1,500 | Every turn, regardless of tools used |
 | OpenCode: full base instruction block | ~1,500 | Even for "what does this function do?" |
 
+### The 67 tool descriptions — what is actually in those 3,000–5,000 tokens
+
+Every turn Claude Code sends the full prose description of every tool it has registered — not just the JSON schema, but a paragraph (sometimes many paragraphs) of usage rules embedded directly in the system prompt. Here is the full breakdown:
+
+| Category | Tools (all sent every turn) | Est. tokens |
+|---|---|---|
+| **Shell** | Bash (30+ sub-sections: sandboxing, interactive flags, path quoting, git, sleep-polling rules, background processes, stderr handling…) | ~2,000 |
+| **File ops** | Read, Write, Edit, MultiEdit, NotebookRead, NotebookEdit, Glob, LS | ~600 |
+| **Search** | Grep, WebFetch, WebSearch | ~250 |
+| **Task / planning** | TodoRead, TodoWrite, EnterPlanMode, ExitPlanMode | ~300 |
+| **Orchestration** | Agent, Task, TaskOutput, TaskStop, EnterWorktree, ExitWorktree, Monitor | ~400 |
+| **Scheduling** | CronCreate, CronDelete, CronList, ScheduleWakeup | ~200 |
+| **Notifications / remote** | PushNotification, RemoteTrigger, AskUserQuestion | ~150 |
+| **Skills / slash commands** | /ship, /review, /plan, /investigate, /qa, /batch, /rename, /morning-checkin, /dream, /design-sync, /ultrareview + 10+ more | ~400 |
+| **MCP tools** | Gmail (authenticate, complete\_authentication), Google Calendar, Google Drive, Slack, + any registered MCP server tools | ~300–1,000 |
+| **Meta** | ToolSearch, Skill, ToolUsage, HelpSearch | ~100 |
+| **Total** | **67+ tools** | **~4,700–5,900 tokens** |
+
+To make the per-tool weight concrete, here is the **Read** tool description verbatim — one of the shorter entries at ~80 tokens:
+
+```
+Reads a file from the local filesystem. You can access any file directly by using this tool.
+By default, it reads up to 2000 lines starting from the beginning of the file.
+When you already know which part of the file you need, only read that part.
+Results are returned using cat -n format, with line numbers starting at 1.
+This tool allows Claude Code to read images (eg PNG, JPG, etc). When reading an image
+the contents are presented visually as Claude Code is a multimodal LLM.
+This tool can read PDF files (.pdf). For large PDFs (more than 10 pages), you MUST provide
+the pages parameter to read specific page ranges (e.g., pages: "1-5"). Maximum 20 pages per request.
+This tool can read Jupyter notebooks (.ipynb files) and returns all cells with their outputs.
+This tool can only read files, not directories. To list files in a directory, use the shell tool.
+```
+
+That is **Read — one of the simplest tools.** Bash runs to ~2,000 tokens by itself. Multiply across 67 tools and you reach the 3,000–5,000 token floor — present on every single turn whether you are reading one file, writing a CSS class, or asking what a function does.
+
+**None of this content adapts to the turn.** "Explain this function" sends the full CronDelete and EnterWorktree descriptions. "Add a border radius" sends the full Bash sandboxing rules and the full NotebookEdit schema. The 67 descriptions are a fixed overhead, not a usage-proportional cost.
+
+In zap, tools are described only via the API tool-calling schema — a compact JSON structure that the LLM receives at inference time, not a pre-loaded prose block. The information content is identical (the LLM knows what parameters each tool takes and what it does); the token cost inside the system prompt is zero.
+
+---
+
 **The git protocol example is the clearest:** Claude Code sends its 800-token commit safety protocol — HEREDOC format, `-uall` memory warning, `--amend` invariant, never-stage-.env rule, parallel tool call pattern — on every single turn. "Explain this function" gets the full git workflow. "What is a closure?" gets the full git workflow. In a 100-turn session where 20 turns involve git, **80 turns pay 800 tokens each for instructions that do nothing** = 64,000 wasted tokens on git guidance alone.
 
 ### How zap avoids this
