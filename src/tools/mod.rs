@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub mod agent;
 pub mod file;
+pub mod memory;
 pub mod search;
 pub mod shell;
 pub mod todo;
@@ -13,6 +14,7 @@ pub mod undo;
 pub mod web;
 
 pub use agent::SpawnAgentTool;
+pub use memory::take_dirty_flag;
 pub use todo::{clear_todos, global_todos};
 
 // ── Tool trait ────────────────────────────────────────────────────────────────
@@ -61,6 +63,7 @@ impl ToolRegistry {
         use undo::UndoEditTool;
         use web::{WebFetchTool, WebSearchTool};
 
+        use memory::{MemoryDeleteTool, MemorySetTool};
         use todo::{TodoReadTool, TodoWriteTool};
 
         let mut r = Self { tools: HashMap::new(), pending_mcp: HashMap::new(), mcp_tool_names: std::collections::HashSet::new() };
@@ -80,6 +83,8 @@ impl ToolRegistry {
         r.register(Arc::new(WebSearchTool));
         r.register(Arc::new(TodoWriteTool));
         r.register(Arc::new(TodoReadTool));
+        r.register(Arc::new(MemorySetTool));
+        r.register(Arc::new(MemoryDeleteTool));
         r
     }
 

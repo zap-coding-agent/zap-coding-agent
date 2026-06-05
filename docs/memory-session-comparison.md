@@ -1,9 +1,11 @@
 # Memory & Session Persistence: Zap vs Claude Code
 
 > Sourced from zap source code: `src/persistence.rs`, `src/project.rs`,
-> `src/context_manager.rs`, `src/tools/mod.rs`, `src/session/mod.rs`,
-> `src/session/turn.rs`, `src/session/commands/memory.rs`.
+> `src/context_manager.rs`, `src/tools/mod.rs`, `src/tools/memory.rs`,
+> `src/session/mod.rs`, `src/session/turn.rs`, `src/session/memory_refresh.rs`,
+> `src/session/commands/memory.rs`.
 > Claude Code behavior: observed directly (this document was written running inside Claude Code).
+> **Updated 2026-06-05:** `memory_set` and `memory_delete` tools implemented in v0.13.84.
 
 ---
 
@@ -155,12 +157,12 @@ Recursive upward (to git root) AND downward into subdirectories. `~/.claude/CLAU
 | **Memory storage** | SQLite `memory` table (key-value) | Typed `.md` files in project dir |
 | **Memory human-readable without tools** | Via `sqlite3` CLI or `/memory list` | ✅ Plain markdown, any editor |
 | **Memory types** | ❌ Flat key-value only | ✅ user / feedback / project / reference |
-| **Memory auto-save by LLM** | ❌ No `memory_set` tool — user must type `/memory set` | ✅ LLM saves proactively mid-conversation |
+| **Memory auto-save by LLM** | ✅ `memory_set` tool — LLM saves proactively (v0.13.84) | ✅ LLM saves proactively mid-conversation |
 | **Memory in system prompt** | ✅ All entries injected every non-casual turn | ✅ MEMORY.md index always in context |
 | **Memory relevance filtering** | ❌ All entries injected always | ❌ All entries loaded (index truncated at 200 lines) |
 | **Memory descriptions** | ❌ Raw key=value | ✅ One-line description per entry |
 | **Memory stale-detection guidance** | ❌ None | ✅ Prompt instructs: verify file paths before acting |
-| **New memory visible this session** | ❌ Next session only | ✅ Claude knows what it wrote immediately |
+| **New memory visible this session** | ✅ Patched into system prompt after tool round (v0.13.84) | ✅ Claude knows what it wrote immediately |
 | **Session handoff file** | ✅ `.zap/context.md` (goal + files + what's next) | ❌ None |
 | **Session log with file tracking** | ✅ `.zap/session_log.md` | ❌ None |
 | **LLM-generated project knowledge** | ✅ `.zap/understanding.md` (from `/init`) | ❌ None |
@@ -175,39 +177,34 @@ Recursive upward (to git root) AND downward into subdirectories. `~/.claude/CLAU
 
 ---
 
-## 4. The Actual Gaps
+## 4. Gap Analysis
 
-### Real gap 1: No `memory_set` tool (the auto-save gap)
+### ✅ IMPLEMENTED (v0.13.84): `memory_set` and `memory_delete` tools
 
-This is the only substantive behavioral gap. In Claude Code, when the LLM observes "user prefers bundled PRs", it writes a memory file directly — a tool call with no user involvement. In zap:
+**Files:** `src/tools/memory.rs`, `src/session/memory_refresh.rs`
 
-- There is **no `memory_set` tool** in `ToolRegistry::new()` (verified: `src/tools/mod.rs:57–83`)
-- The system prompt tells the LLM it *can* use `/memory set key value` but this is a CLI slash command, not a tool call
-- The LLM would have to output text like "you should run `/memory set ...`" and the user has to type it
+The LLM now has two new tools:
 
-**Fix:** add a `MemorySetTool` and `MemoryDeleteTool` to `src/tools/`. Roughly 40 lines each, identical pattern to `TodoWriteTool`.
+| Tool | Behaviour |
+|---|---|
+| `memory_set(key, value)` | Writes to `agent.db`, sets `MEMORY_DIRTY` flag, returns confirmation |
+| `memory_delete(key)` | Removes from `agent.db`, sets `MEMORY_DIRTY` flag, returns confirmation |
 
----
+After each tool round in `session/turn.rs`, the session checks `take_dirty_flag()`. If set, `patch_memory_in_system()` finds the `## Agent Memory` block in `self.system` and replaces it with a fresh DB read. The next LLM call in the same session sees updated facts.
 
-### Real gap 2: New memory not visible mid-session
-
-If a user runs `/memory set` mid-session (or if the LLM had a `memory_set` tool), the DB is updated immediately but `self.system` is not rebuilt — the new fact won't appear in the LLM's context until next session.
-
-**Fix:** when memory changes, rebuild `self.system` via `context_manager::build_system_prompt()`. Or maintain a `session_memory_patch` string appended to each turn until next full rebuild.
+The `memory_set` description explicitly instructs the LLM to use it **proactively without being asked** — matching Claude Code's auto-save behaviour.
 
 ---
 
-### Minor gap: flat key-value vs typed memories
+### Remaining minor gaps
 
-Claude Code's 4 types (user/feedback/project/reference) exist to help the agent decide *how* to use a fact and *when* it's still valid. In practice, for the number of memory entries a single project accumulates, flat key-value works fine — the LLM sees everything and can reason about it.
+**Flat key-value vs typed memories**
 
-This gap matters only if memory grows large (100+ entries) where filtering by type becomes useful. Not a current problem.
+Claude Code's 4 types (user/feedback/project/reference) help decide *how* to use a fact and *when* it's stale. For current memory volumes (tens of entries per project), flat key-value is fine — the LLM sees everything and can reason about it. This gap matters only above ~100 entries.
 
----
+**No stale-memory guidance in system prompt**
 
-### Minor gap: no stale-memory guidance
-
-Claude Code's system prompt explicitly tells it: "verify file paths and function names in memory before acting — they may not exist anymore." Zap's system prompt has no equivalent warning. For large projects with significant refactoring, stale keys can mislead.
+Claude Code tells the LLM: "verify file paths and function names in memory before acting — they may not exist anymore." Zap has no equivalent. Low-priority until memory accumulates significantly.
 
 ---
 
@@ -231,15 +228,10 @@ These are not gaps in zap — they are features Claude Code lacks entirely:
 
 ## 6. Summary
 
-The user's hypothesis is accurate: **the SQLite vs markdown distinction is not a real gap** for power users — `sqlite3` queries are as fast and more powerful than grepping markdown files, and `/memory list` works for casual inspection.
+**SQLite vs markdown:** not a real gap. `sqlite3 ~/.zap/agent.db "SELECT * FROM memory;"` is as accessible as grepping markdown. `/memory list` works in-session. The format is an implementation detail, not a capability difference.
 
-The **one real behavioral gap** is the absence of a `memory_set` LLM tool. Everything else in zap's persistence system is either equivalent to or ahead of Claude Code.
+**Auto-save:** was a real gap. Now closed in v0.13.84. Zap's LLM can call `memory_set` and `memory_delete` directly — no user involvement needed. The description instructs the LLM to do so proactively. The dirty-flag + patch mechanism ensures new facts appear in the same session without restart.
 
-The two-line implementation gap:
-```rust
-// Add to ToolRegistry::new() in src/tools/mod.rs:
-r.register(Arc::new(MemorySetTool));
-r.register(Arc::new(MemoryDeleteTool));
-```
+**What remains:** two minor style gaps (typed memories, stale-memory guidance) that don't affect practical capability at current memory scales.
 
-Plus `src/tools/memory.rs` (~80 lines) implementing the `Tool` trait, calling `crate::persistence::init()?.set_memory(key, val)`. A follow-on: rebuild `self.system` after a successful `memory_set` call so the new fact is available immediately without restarting.
+**Overall verdict:** zap's persistence system now matches or exceeds Claude Code on every substantive feature. The areas where zap leads — code symbol index, conversation branching, session handoff, LLM summarization, context viewer, audit log — are not available in Claude Code at all.

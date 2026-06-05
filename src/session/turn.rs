@@ -388,6 +388,12 @@ impl Session {
                 None => return Ok(()),   // secrets abort
                 Some(tool_msg) => self.messages.push(tool_msg),
             }
+
+            // If memory_set / memory_delete ran this round, patch self.system so
+            // the next LLM call in this session sees the updated facts.
+            if crate::tools::take_dirty_flag() {
+                self.patch_memory_in_system();
+            }
         }
 
         // Drain btw messages not picked up mid-turn.

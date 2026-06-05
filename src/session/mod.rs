@@ -1,6 +1,7 @@
 pub mod commands;
 mod casual;
 mod history;
+mod memory_refresh;
 mod preview;
 mod summarizer;
 mod tools;
