@@ -40,11 +40,37 @@ impl Session {
             return; // window hasn't moved since last turn
         }
 
+        // Only summarize when the context is actually filling up. A session with many
+        // short turns can easily have 20+ turns at 10% fill — no point spending an LLM
+        // call just because the turn count passed the window threshold.
+        // ZAP_SUMMARIZE_THRESHOLD controls the fill % trigger (default 75).
+        let fill_threshold: u8 = std::env::var("ZAP_SUMMARIZE_THRESHOLD")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(75);
+        if self.context_fill_pct() < fill_threshold {
+            return;
+        }
+
         let newly_dropped = self.messages[self.last_window_start..current_start].to_vec();
+
+        // Don't fire an LLM call for a single dropped turn — batch until at least N real
+        // turns have accumulated. last_window_start is intentionally NOT updated here so
+        // the batch keeps growing on subsequent calls.
+        let min_batch: usize = std::env::var("ZAP_SUMMARIZE_MIN_BATCH")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(3);
+        let real_in_batch = newly_dropped.iter()
+            .filter(|m| {
+                m.role == "user"
+                    && m.content.first()
+                        .is_some_and(|b| matches!(b, ContentBlock::Text { .. }))
+            })
+            .count();
+        if real_in_batch < min_batch {
+            return;
+        }
+
         let pruned_for_llm = prune_for_summarizer(&newly_dropped);
 
-        // Notify the user so a sudden pause doesn't look like a hang.
-        emit_notice("⟳ Summarizing dropped context…");
+        emit_notice("⟳ Summarizing older history…");
 
         let total_chars: usize = pruned_for_llm.iter()
             .flat_map(|m| &m.content)

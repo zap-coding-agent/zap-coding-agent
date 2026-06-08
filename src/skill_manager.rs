@@ -105,6 +105,7 @@ impl Skill {
             if t.contains(' ') {
                 // Multi-word trigger: consecutive words with word boundaries
                 let trig_words: Vec<&str> = t.split_whitespace().collect();
+                if trig_words.is_empty() { return false; }
                 let query_words: Vec<&str> = lower.split_whitespace().collect();
                 query_words.windows(trig_words.len()).any(|w| w == trig_words.as_slice())
             } else {
@@ -286,7 +287,6 @@ pub fn rank_and_truncate_skills<'a>(
     // Always keep pinned first
     let mut result: Vec<&Skill> = pinned;
     let mut used: usize = result.iter().map(|s| s.tokens()).sum();
-    let _remaining = budget_tokens.saturating_sub(used);
 
     for skill in rest {
         let t = skill.tokens();

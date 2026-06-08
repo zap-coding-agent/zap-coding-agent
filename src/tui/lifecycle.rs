@@ -177,7 +177,7 @@ pub(super) fn handle_paste_image(
         if !trimmed.is_empty() {
             let byte_idx = super::input::char_to_byte_idx(&app.input, app.cursor);
             app.input.insert_str(byte_idx, trimmed);
-            app.cursor = app.input.chars().count();
+            app.cursor += trimmed.chars().count();
             app.picker_sel = 0;
             return;
         } else {
