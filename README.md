@@ -786,60 +786,27 @@ After the model asks a clarifying question, short replies like "yes", "ok", "go 
 
 ## Install
 
-| Platform | Status |
+### macOS / Linux — one-liner
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.sh | bash
+```
+
+The script detects your OS and architecture, downloads the latest release, installs to `~/.local/bin`, and patches your shell config if needed. On macOS it also runs `codesign --sign -` automatically (required on macOS 26 Tahoe).
+
+| Platform | Binary |
 |---|---|
-| macOS ARM (Apple Silicon) | Available |
-| Windows x86_64 | Available |
-| macOS Intel | Coming soon |
-| Linux x86_64 | Coming soon |
-
-### macOS ARM — Apple Silicon
-
-1. Download `zap` from the [latest release](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest)
-
-2. Make it executable and move it onto your PATH:
-
-```bash
-chmod +x zap
-mv zap ~/.local/bin/zap
-```
-
-3. If `~/.local/bin` is not already on your PATH, add it:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-```
-
-4. Copy the example config:
-
-```bash
-curl -o ~/.agent.toml \
-  https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/agent.toml.example
-```
-
-5. Run:
-
-```bash
-zap
-```
-
-> **macOS Gatekeeper note:** On macOS 15+ you may see `zsh: killed zap` on first run.
-> Fix: `codesign --sign - ~/.local/bin/zap`
+| macOS Apple Silicon (ARM64) | `zap-macos-arm64.tar.gz` |
+| Linux x86_64 | `zap-linux-x86_64.tar.gz` |
+| macOS Intel | Build from source (see below) |
 
 ### Windows x86_64
 
-1. Download `zap-windows-x86_64.exe` from the [latest release](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest)
-
-2. Rename and move it somewhere on your PATH, e.g.:
+Download `zap-windows-x86_64.zip` from the [latest release](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest), extract, and move `zap.exe` somewhere on your PATH:
 
 ```powershell
-Move-Item zap-windows-x86_64.exe C:\Users\You\bin\zap.exe
-```
-
-3. Run:
-
-```powershell
-zap
+Expand-Archive zap-windows-x86_64.zip .
+Move-Item pkg\zap.exe "$env:USERPROFILE\.local\bin\zap.exe"
 ```
 
 ### Build from source
@@ -848,10 +815,9 @@ Requires [Rust](https://rustup.rs) 1.75+.
 
 ```bash
 git clone https://github.com/zap-coding-agent/zap-coding-agent
-cd zap
+cd zap-coding-agent
 cargo build --release
 cp target/release/zap ~/.local/bin/zap
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
 ---
