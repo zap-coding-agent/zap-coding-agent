@@ -263,13 +263,19 @@ impl Session {
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let code_index = {
-            let idx = crate::code_index::CodeIndex::open(&cwd)
-                .or_else(|_| crate::code_index::CodeIndex::open(&std::env::temp_dir()))
-                .or_else(|_| crate::code_index::CodeIndex::open_in_memory())
-                .unwrap_or_else(|e| {
-                    crate::log::write("WARN ", &format!("code index unavailable: {e}"));
-                    crate::code_index::CodeIndex::open_in_memory().expect("SQLite in-memory always works")
-                });
+            // Only open the file-backed DB if it already exists — creating a new
+            // SQLite database with WAL mode takes 200-500ms on macOS APFS and adds
+            // noticeable latency to the first LLM turn. For new/unindexed projects,
+            // start with an in-memory index; `cmd_index` upgrades to file-backed.
+            let db_exists = cwd.join(".zap").join("code.db").exists();
+            let idx = if db_exists {
+                crate::code_index::CodeIndex::open(&cwd)
+                    .unwrap_or_else(|_| crate::code_index::CodeIndex::open_in_memory()
+                        .expect("SQLite in-memory always works"))
+            } else {
+                crate::code_index::CodeIndex::open_in_memory()
+                    .expect("SQLite in-memory always works")
+            };
             let arc = Arc::new(Mutex::new(idx));
             crate::code_index::set_global(arc.clone());
             arc

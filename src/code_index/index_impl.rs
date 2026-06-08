@@ -75,6 +75,10 @@ impl CodeIndex {
 
     pub fn db_path(&self) -> &Path { &self.db_path }
 
+    pub fn is_in_memory(&self) -> bool {
+        self.db_path == std::path::Path::new(":memory:")
+    }
+
     pub fn needs_reindex(&self, path: &Path) -> bool {
         let mtime = file_mtime(path).unwrap_or(0);
         let path_str = path.to_string_lossy();

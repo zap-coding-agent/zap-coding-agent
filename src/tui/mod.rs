@@ -77,22 +77,6 @@ pub async fn run_tui(config: &Config) -> Result<()> {
         let _ = crate::project::save_project_meta(&meta);
     }
 
-    if session.domain_scope.is_empty() && !is_new_project {
-        let domain_options = crate::skill_manager::all_domain_skill_names(&session.skills);
-        if !domain_options.is_empty() {
-            let project_name = std::env::current_dir()
-                .ok()
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                .unwrap_or_else(|| ".".to_string());
-            let mut picker = app::DomainPickerState::new(domain_options, project_name);
-            let ext_detected = crate::skill_manager::detect_from_extensions(&session.skills);
-            for (i, opt) in picker.options.iter().enumerate() {
-                if ext_detected.contains(opt) { picker.checked[i] = true; }
-            }
-            app.domain_picker = Some(picker);
-        }
-    }
-
     let (dirty, ahead, behind) = git_info::git_status();
     app.git_dirty = dirty;
     app.git_ahead = ahead;

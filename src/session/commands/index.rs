@@ -298,6 +298,13 @@ impl Session {
 
         println!("  {} tree-sitter scanning {}…", "◎".truecolor(100, 200, 255), target.display().to_string().cyan());
         if let Ok(mut guard) = self.code_index.lock() {
+            // Upgrade in-memory index to file-backed on first /index run.
+            if guard.is_in_memory() {
+                match crate::code_index::CodeIndex::open(&cwd) {
+                    Ok(file_idx) => { *guard = file_idx; }
+                    Err(e) => println!("  {} could not create code.db: {e}", "⚠".truecolor(255, 200, 60)),
+                }
+            }
             match guard.index_dir(&target) {
                 Ok((files, syms)) => {
                     println!("  {} tree-sitter: {} file(s) indexed · {} symbol(s) extracted",
