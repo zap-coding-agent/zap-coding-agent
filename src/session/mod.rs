@@ -8,6 +8,7 @@ mod tools;
 mod turn;
 
 pub use history::model_context_limit;
+pub use casual::is_topic_shift;
 
 use anyhow::Result;
 use colored::Colorize;

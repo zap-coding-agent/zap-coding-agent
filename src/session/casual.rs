@@ -2,7 +2,7 @@ use crate::llm_client::{ContentBlock, Message};
 
 /// Heuristic: returns true when the message looks like a fresh topic rather than
 /// a continuation of the current conversation.
-pub(super) fn is_topic_shift(input: &str, messages: &[Message]) -> bool {
+pub fn is_topic_shift(input: &str, messages: &[Message]) -> bool {
     let user_texts: Vec<&str> = messages.iter()
         .filter(|m| m.role == "user")
         .flat_map(|m| m.content.iter())

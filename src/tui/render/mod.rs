@@ -114,14 +114,25 @@ pub const SIDEBAR_W: u16 = 22;
 /// Max rows the command picker occupies (excluding its own border).
 const PICKER_MAX_ROWS: usize = 8;
 
+/// Count the actual visual lines the input text occupies, accounting for
+/// both explicit newlines and word-wrap at content_w columns.
+pub(crate) fn visual_line_count(text: &str, content_w: usize) -> usize {
+    if content_w == 0 { return 1; }
+    if text.is_empty() { return 1; }
+    text.split('\n')
+        .map(|seg| {
+            let chars = seg.chars().count();
+            if chars == 0 { 1 } else { chars.div_ceil(content_w) }
+        })
+        .sum()
+}
+
 fn input_height(app: &App, available_width: u16) -> Constraint {
-    let prefix_len = 2u16;
-    let border_w = 2u16;
-    let content_w = available_width.saturating_sub(prefix_len + border_w).max(1);
-    let chars = app.input.chars().count().max(1) as u16;
-    let lines = chars.div_ceil(content_w);
-    let lines = lines.clamp(1, 6);
-    Constraint::Length(lines + 2)
+    let prefix_len = 2usize;
+    let border_w  = 2usize;
+    let content_w = (available_width as usize).saturating_sub(prefix_len + border_w).max(1);
+    let lines = visual_line_count(&app.input, content_w).clamp(1, 3);
+    Constraint::Length(lines as u16 + 2)
 }
 
 pub fn draw(frame: &mut Frame, app: &App) {

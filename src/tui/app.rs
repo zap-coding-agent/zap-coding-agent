@@ -341,6 +341,15 @@ pub struct App {
 
     /// Context viewer overlay (None when closed).
     pub context_viewer: Option<ContextViewerState>,
+
+    /// Previously sent user prompts (newest last), for Up/Down history navigation.
+    pub prompt_history: Vec<String>,
+    /// Index into prompt_history when navigating with Up/Down (None = not navigating).
+    pub history_idx: Option<usize>,
+
+    /// Pending message held for topic-shift confirmation.
+    /// When Some, user must confirm before the message is sent.
+    pub topic_shift_confirm: Option<String>,
 }
 
 /// Holds all state needed to complete a provider switch once the user types their API key.
@@ -419,6 +428,9 @@ impl App {
             gemini_reauth: false,
             api_key_input: None,
             context_viewer: None,
+            prompt_history: Vec::new(),
+            history_idx: None,
+            topic_shift_confirm: None,
         }
     }
 

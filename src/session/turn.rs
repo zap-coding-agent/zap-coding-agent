@@ -28,17 +28,15 @@ impl Session {
             input
         };
 
-        if self.turn_count >= 3 && is_topic_shift(input, &self.messages) {
-            if crate::tui::channel::is_tui_mode() {
-                crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
-                    "💡 Looks like a new topic — consider /new to start fresh or /branch to fork.".to_string()
-                ));
-            } else {
-                println!(
-                    "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
-                    "💡".bright_yellow(), "/branch".cyan(), "/exit".cyan(),
-                );
-            }
+        // In CLI mode only — TUI intercepts topic shifts before the turn starts.
+        if !crate::tui::channel::is_tui_mode()
+            && self.turn_count >= 3
+            && is_topic_shift(input, &self.messages)
+        {
+            println!(
+                "  {} Looks like a new topic — consider {} to fork or {} for a fresh session.",
+                "💡".bright_yellow(), "/branch".cyan(), "/exit".cyan(),
+            );
         }
 
         let disable_compact = std::env::var("DISABLE_COMPACT").is_ok();

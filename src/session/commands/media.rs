@@ -105,14 +105,18 @@ end try"#
     {
         // Escape single quotes in path for PowerShell string context
         let safe_dest = dest.replace('\'', "''");
+        // Single-line script: PowerShell line continuation is backtick, not backslash.
+        // Save requires an explicit ImageFormat to avoid GDI+ "generic error".
         let script = format!(
-            r#"Add-Type -Assembly System.Windows.Forms; \
-$img = [System.Windows.Forms.Clipboard]::GetImage(); \
-if ($img -eq $null) {{ exit 1 }}; \
-$img.Save('{safe_dest}'); exit 0"#
+            "Add-Type -Assembly System.Windows.Forms; \
+             $img = [System.Windows.Forms.Clipboard]::GetImage(); \
+             if ($img -eq $null) {{ exit 1 }}; \
+             $img.Save('{safe_dest}', [System.Drawing.Imaging.ImageFormat]::Png); \
+             exit 0"
         );
         return std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false);

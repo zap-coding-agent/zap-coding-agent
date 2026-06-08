@@ -178,7 +178,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | `/index db` | `src/session/commands.rs:cmd_index` | Shows agent.db summary: session count, memory entries, branches, last 10 sessions and all memory key-value pairs |
 | Ctrl+Q confirmation | `src/tui/input.rs`, `src/tui/app.rs` | First Ctrl+Q shows "Press Ctrl+Q again to quit" notice; any other key cancels; second Ctrl+Q quits — prevents accidental exits |
 | Extended thinking (`/think`) | `src/session/commands.rs:cmd_think`, `src/llm_client.rs`, `src/tui/` | `/think on` (8k budget), `/think off`, `/think <N>` tokens; thinking streams in TUI as dimmed italic text with last 3 lines visible; collapses to "🧠 Thinking (N chars)" after turn completes; thinking blocks preserved in multi-turn history (with Anthropic signature); OpenAI providers ignore the budget; budget clamped to MAX_TOKENS-1 to satisfy Anthropic constraint; /think handled inline in TUI (no suspend/Press-Enter) |
-| Topic-shift detection | `src/session/mod.rs:is_topic_shift` | vocabulary overlap heuristic; suggests `/branch` or `/exit` |
+| Topic-shift confirmation | `src/session/casual.rs:is_topic_shift`, `src/tui/actions.rs`, `src/tui/render/layout.rs` | Detected before the turn starts (TUI only); status bar shows [Enter] send / [b] branch / [any] cancel — message never lost; CLI keeps the post-hoc print |
+| Prompt history (Up/Down) | `src/tui/input.rs`, `src/tui/app.rs` | Up arrow cycles through previously sent prompts (newest-first); Down goes forward; typing breaks out of history mode |
+| Ctrl+Z drop last turn | `src/tui/input.rs`, `src/tui/actions.rs` | Idle + empty input: removes last user+assistant pair from session.messages, restores prompt to input box |
+| Multi-line input badge | `src/tui/render/mod.rs:visual_line_count`, `src/tui/render/layout.rs` | Input box capped at 3 rows; when pasted content exceeds that, border shows ↕ N lines; cursor tracks newlines + word-wrap correctly |
+| TUI action handler module | `src/tui/actions.rs` | InputAction match extracted from mod.rs → keeps mod.rs under 600 lines |
 | `/compact` | `src/session/commands.rs:cmd_compact` | summarises history in-place |
 | Command output popup | `src/tui/render.rs:draw_command_popup` | Inline slash commands show output in centered overlay instead of dumping into chat; Esc dismisses, ↑↓/PgUp/PgDn scrolls |
 

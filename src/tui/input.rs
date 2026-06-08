@@ -72,6 +72,14 @@ pub enum InputAction {
     ApiKeyModelUp,
     ApiKeyModelDown,
 
+    /// Ctrl+Z: remove the last user turn and its assistant response from session history.
+    DropLastTurn,
+
+    /// Topic-shift confirmation responses: send anyway, open /branch, or cancel.
+    TopicShiftSend,
+    TopicShiftBranch,
+    TopicShiftCancel,
+
     /// Context viewer overlay actions.
     ContextViewerDrop,
     ContextViewerCompact,
@@ -113,6 +121,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     // Diff viewer takes priority when open.
     if app.diff_viewer.is_some() {
         return handle_diff_viewer_key(app, key);
+    }
+
+    // Topic-shift confirmation — intercept all keys until resolved.
+    if app.topic_shift_confirm.is_some() {
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => InputAction::TopicShiftSend,
+            KeyCode::Char('b') | KeyCode::Char('B') => InputAction::TopicShiftBranch,
+            _ => InputAction::TopicShiftCancel,
+        };
     }
 
     // Btw input box — active during a turn, Ctrl+B to open, Enter to submit, Esc to close.
@@ -294,6 +311,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
 
+    // Ctrl+Z: drop the last turn from session history (idle only, input must be empty)
+    if key.code == KeyCode::Char('z') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(app.state, AppState::Idle) && app.input.is_empty() {
+            return InputAction::DropLastTurn;
+        }
+        return InputAction::None;
+    }
+
     // Ctrl+N: start a new session (idle only)
     if key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(app.state, AppState::Idle) {
@@ -361,6 +386,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             if picker_active(app) {
                 app.picker_sel = app.picker_sel.saturating_sub(1);
                 InputAction::None
+            } else if matches!(app.state, AppState::Idle) && !app.prompt_history.is_empty() {
+                // History navigation: Up goes to older prompts.
+                let new_idx = match app.history_idx {
+                    None => app.prompt_history.len() - 1,
+                    Some(i) => i.saturating_sub(1),
+                };
+                app.history_idx = Some(new_idx);
+                app.input = app.prompt_history[new_idx].clone();
+                app.cursor = app.input.chars().count();
+                InputAction::None
             } else {
                 InputAction::ScrollUp(3)
             }
@@ -371,6 +406,19 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
                 let count = filter_commands(&app.input, &app.skill_names).len();
                 if count > 0 {
                     app.picker_sel = (app.picker_sel + 1).min(count - 1);
+                }
+                InputAction::None
+            } else if matches!(app.state, AppState::Idle) && app.history_idx.is_some() {
+                // History navigation: Down goes to newer prompts, then clears input.
+                let new_idx = app.history_idx.unwrap() + 1;
+                if new_idx >= app.prompt_history.len() {
+                    app.history_idx = None;
+                    app.input.clear();
+                    app.cursor = 0;
+                } else {
+                    app.history_idx = Some(new_idx);
+                    app.input = app.prompt_history[new_idx].clone();
+                    app.cursor = app.input.chars().count();
                 }
                 InputAction::None
             } else {
@@ -455,7 +503,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             let byte_idx = char_to_byte_idx(&app.input, app.cursor);
             app.input.insert(byte_idx, c);
             app.cursor += 1;
-            app.picker_sel = 0; // reset selection when typing
+            app.picker_sel = 0;
+            app.history_idx = None; // typing breaks out of history navigation
             InputAction::None
         }
 
