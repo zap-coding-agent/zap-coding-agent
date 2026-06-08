@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p pkg
-          cp zap README.md FEATURES.md pkg/
+          cp zap README.md FEATURES.md install.sh pkg/
           tar -czf "${{ matrix.artifact }}.tar.gz" -C pkg .
 
       - name: Package Windows ZIP (binary + docs)
@@ -126,8 +126,8 @@ jobs:
 
             | Platform | Download | Contents |
             |---|---|---|
-            | macOS Apple Silicon (ARM) | `zap-macos-arm64.tar.gz` | `zap` binary + README.md + FEATURES.md |
-            | Linux x86_64 | `zap-linux-x86_64.tar.gz` | `zap` binary + README.md + FEATURES.md |
+            | macOS Apple Silicon (ARM) | `zap-macos-arm64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
+            | Linux x86_64 | `zap-linux-x86_64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
             | Windows x86_64 | `zap-windows-x86_64.zip` | `zap.exe` + README.md + FEATURES.md |
 
             **Commit:** `${{ github.sha }}`

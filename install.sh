@@ -39,52 +39,73 @@ case "$OS" in
     ;;
 esac
 
-# ── Resolve latest release URL ────────────────────────────────────────────────
 header "Installing zap"
-info "Detecting latest release…"
 
-if command -v curl &>/dev/null; then
-  FETCH="curl -fsSL"
-elif command -v wget &>/dev/null; then
-  FETCH="wget -qO-"
-else
-  die "curl or wget is required"
+# ── Local binary detection (extracted package) ────────────────────────────────
+# When install.sh is run from an extracted release package, the binary sits
+# next to this script. Detect that and skip the network download entirely.
+# Falls back to GitHub download when piped via curl or run standalone.
+BINARY=""
+SCRIPT_DIR=""
+VERSION="unknown"
+
+# BASH_SOURCE[0] is empty/"-" when piped through stdin (curl|bash).
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "-" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 fi
 
-RELEASE_JSON=$($FETCH "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) \
-  || die "Failed to reach GitHub API — check your internet connection"
-
-# Extract version and download URL from JSON without requiring jq.
-VERSION=$(printf '%s' "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-DOWNLOAD_URL=$(printf '%s' "$RELEASE_JSON" \
-  | grep '"browser_download_url"' \
-  | grep "$ARTIFACT" \
-  | head -1 \
-  | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
-
-[[ -n "$VERSION"      ]] || die "Could not determine latest release version"
-[[ -n "$DOWNLOAD_URL" ]] || die "No download found for $ARTIFACT in release $VERSION"
-
-info "Found $VERSION ($ARTIFACT)"
-
-# ── Download ──────────────────────────────────────────────────────────────────
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-ARCHIVE="$TMP/$ARTIFACT"
-info "Downloading…"
-if command -v curl &>/dev/null; then
-  curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE"
+if [[ -n "$SCRIPT_DIR" ]] && [[ -f "$SCRIPT_DIR/$BIN_NAME" ]]; then
+  # ── Extracted-package path: use local binary ──────────────────────────────
+  BINARY="$SCRIPT_DIR/$BIN_NAME"
+  chmod +x "$BINARY"
+  # Try to read version from binary; fall back gracefully if it fails.
+  VERSION="$("$BINARY" --version 2>/dev/null | head -1 || echo "local")"
+  info "Using local binary: $BIN_NAME  ($VERSION)"
 else
-  wget -q --show-progress "$DOWNLOAD_URL" -O "$ARCHIVE"
-fi
-ok "Downloaded"
+  # ── Download path: fetch from GitHub releases ─────────────────────────────
+  info "Detecting latest release…"
 
-# ── Extract ───────────────────────────────────────────────────────────────────
-tar -xzf "$ARCHIVE" -C "$TMP"
-BINARY="$TMP/$BIN_NAME"
-[[ -f "$BINARY" ]] || die "Binary '$BIN_NAME' not found in archive"
-chmod +x "$BINARY"
+  if command -v curl &>/dev/null; then
+    FETCH="curl -fsSL"
+  elif command -v wget &>/dev/null; then
+    FETCH="wget -qO-"
+  else
+    die "curl or wget is required"
+  fi
+
+  RELEASE_JSON=$($FETCH "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) \
+    || die "Failed to reach GitHub API — check your internet connection"
+
+  # Extract version and download URL from JSON without requiring jq.
+  VERSION=$(printf '%s' "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+  DOWNLOAD_URL=$(printf '%s' "$RELEASE_JSON" \
+    | grep '"browser_download_url"' \
+    | grep "$ARTIFACT" \
+    | head -1 \
+    | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
+
+  [[ -n "$VERSION"      ]] || die "Could not determine latest release version"
+  [[ -n "$DOWNLOAD_URL" ]] || die "No download found for $ARTIFACT in release $VERSION"
+
+  info "Found $VERSION ($ARTIFACT)"
+
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+
+  ARCHIVE="$TMP/$ARTIFACT"
+  info "Downloading…"
+  if command -v curl &>/dev/null; then
+    curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$ARCHIVE"
+  else
+    wget -q --show-progress "$DOWNLOAD_URL" -O "$ARCHIVE"
+  fi
+  ok "Downloaded"
+
+  tar -xzf "$ARCHIVE" -C "$TMP"
+  BINARY="$TMP/$BIN_NAME"
+  [[ -f "$BINARY" ]] || die "Binary '$BIN_NAME' not found in archive"
+  chmod +x "$BINARY"
+fi
 
 # ── macOS codesign (required on macOS Tahoe 26.x+) ───────────────────────────
 if [[ "$OS" == "Darwin" ]]; then
