@@ -280,6 +280,7 @@ pub fn print_banner(config: &crate::config::Config) {
 
 pub async fn run() -> Result<()> {
     let args = Args::parse();
+    crate::log::rotate_logs(); // trim llm.log + llm_requests/ to last 24 h (background)
     let mut config = crate::config::Config::load()?;
 
     if args.output_format.eq_ignore_ascii_case("json") {
