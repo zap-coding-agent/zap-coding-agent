@@ -267,6 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_reports_done_count() {
+        let _g = async_lock().lock().await;
         let input = serde_json::json!({ "todos": [
             { "id": 1, "content": "Step A", "status": "done",        "priority": "high"   },
             { "id": 2, "content": "Step B", "status": "in_progress", "priority": "medium" },
@@ -274,12 +275,15 @@ mod tests {
         ]});
         let result = TodoWriteTool.execute(input).await.unwrap();
         assert!(result.contains("1/3"), "expected '1/3 done', got: {result}");
+        clear_todos();
     }
 
     #[tokio::test]
     async fn write_empty_array_reports_zero() {
+        let _g = async_lock().lock().await;
         let result = TodoWriteTool.execute(serde_json::json!({ "todos": [] })).await.unwrap();
         assert!(result.contains("0/0"), "got: {result}");
+        clear_todos();
     }
 
     #[tokio::test]
@@ -289,8 +293,10 @@ mod tests {
 
     #[tokio::test]
     async fn write_missing_fields_use_defaults() {
+        let _g = async_lock().lock().await;
         let result = TodoWriteTool.execute(serde_json::json!({ "todos": [{ "id": 1 }] })).await.unwrap();
         assert!(result.contains("0/1"), "got: {result}");
+        clear_todos();
     }
 
     // ── TodoRead::execute (async lock held across both write + read) ──────────
