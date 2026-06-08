@@ -42,23 +42,46 @@ impl Session {
         }
 
         let disable_compact = std::env::var("DISABLE_COMPACT").is_ok();
-        let ctx_pct = self.context_fill_pct();
         let ctx_limit_k = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .or_else(|| self.config.budget.map(|b| b as usize))
             .unwrap_or_else(|| model_context_limit(&self.model)) / 1000;
-        let ctx_used_k = (self.estimated_context_tokens() / 1000).max(1);
+
+        // Project skill token cost before compaction check.
+        // This prevents a situation where the context looks fine (e.g. 75%) but the
+        // matched skills push it past 100%, causing an LLM context overflow error.
+        let is_casual = is_casual_message(input) && !needs_prior_context(input, &self.messages);
+        let projected_skill_tokens: usize = if is_casual {
+            0
+        } else {
+            let ms = crate::skill_manager::match_skills_scoped(input, &self.skills, &self.domain_scope);
+            let mut injected: Vec<&crate::skill_manager::Skill> = ms.into_iter().collect();
+            for skill in &self.skills {
+                if self.pinned_skills.contains(&skill.name)
+                    && !injected.iter().any(|s| s.name == skill.name)
+                {
+                    injected.push(skill);
+                }
+            }
+            crate::skill_manager::rank_and_truncate_skills(injected, self.config.skill_token_budget, &self.pinned_skills)
+                .iter().map(|s| s.tokens()).sum()
+        };
+
+        let base_ctx = self.estimated_context_tokens();
+        let projected_ctx = base_ctx + projected_skill_tokens;
+        let ctx_pct = self.context_fill_pct_with(projected_ctx);
+        let proj_ctx_k = (projected_ctx / 1000).max(1);
 
         if self.config.budget.is_some() && ctx_pct >= 100 {
             if crate::tui::channel::is_tui_mode() {
                 crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
-                    format!("✗ Token budget exhausted (~{}k tokens). Use /new to start fresh or /compact to free space.", ctx_used_k)
+                    format!("✗ Token budget exhausted (~{}k tokens). Use /new to start fresh or /compact to free space.", proj_ctx_k)
                 ));
             } else {
                 println!(
                     "  {} Token budget exhausted (~{}k tokens). Start a new session or use /compact.",
-                    "✗".red().bold(), ctx_used_k
+                    "✗".red().bold(), proj_ctx_k
                 );
             }
             return Ok(());
@@ -66,18 +89,21 @@ impl Session {
         if !disable_compact && ctx_pct >= 90 && self.compact_failures < 3 {
             if crate::tui::channel::is_tui_mode() {
                 crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Notice(
-                    format!("⟳ Context {}% (~{}k/{}k) — compacting…", ctx_pct, ctx_used_k, ctx_limit_k)
+                    format!("⟳ Context {}% (~{}k/{}k) — compacting…", ctx_pct, proj_ctx_k, ctx_limit_k)
                 ));
             } else {
                 println!(
                     "  {} Context {}% (~{}k/{}k) — compacting…",
-                    "⟳".truecolor(200, 150, 60), ctx_pct, ctx_used_k, ctx_limit_k,
+                    "⟳".truecolor(200, 150, 60), ctx_pct, proj_ctx_k, ctx_limit_k,
                 );
             }
             self.cmd_compact().await;
         }
 
-        let is_casual = is_casual_message(input) && !needs_prior_context(input, &self.messages);
+        // is_casual was computed above in the compaction block — reuse it.
+        // maybe_summarize_dropped_turns runs before skill injection so the summary is available.
+        // match_skills_scoped + rank_and_truncate were called above for projected token calc;
+        // matched_skills below recomputes the effective list to inject this turn.
 
         // Summarize any turns that just slid off the context window (non-casual only).
         // Must run before the inner tool-loop so the summary is ready for injection.
@@ -96,7 +122,8 @@ impl Session {
                     ms.push(skill);
                 }
             }
-            ms
+            // Apply token budget: rank + truncate if total exceeds config.skill_token_budget
+            crate::skill_manager::rank_and_truncate_skills(ms, self.config.skill_token_budget, &self.pinned_skills)
         };
         let skill_tokens_this_turn: usize = matched_skills.iter().map(|s| s.tokens()).sum();
 

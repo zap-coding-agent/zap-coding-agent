@@ -78,6 +78,11 @@ pub struct Config {
     /// Set in ~/.agent.toml as: skill_paths = [".kiro/skills", "~/shared-skills"]
     /// Precedence (lowest → highest): bundled → ~/.zap/skills/ → skill_paths (left→right) → .zap/skills/
     pub skill_paths: Vec<String>,
+    /// Maximum tokens allowed for triggered skills per turn (default 4000).
+    /// When matched skills exceed this, they are ranked by priority→source→tokens
+    /// and the highest-scoring skills are kept while the rest are dropped.
+    /// Set in ~/.agent.toml as: skill_token_budget = 2000
+    pub skill_token_budget: usize,
     /// Extra directories whose .md files are loaded as always-on project context
     /// (appended to ZAP.md / CLAUDE.md in the system prompt). Frontmatter is stripped.
     /// Set in ~/.agent.toml as: context_paths = [".kiro/steering", ".claude/context"]
@@ -118,6 +123,7 @@ struct FileConfig {
     tls_skip_verify: Option<bool>,
     timeout_secs:    Option<u64>,
     skill_paths:     Option<Vec<String>>,
+    skill_token_budget: Option<usize>,
     context_paths:   Option<Vec<String>>,
     disable_stream:  Option<bool>,
 }
@@ -239,6 +245,7 @@ impl Config {
             .unwrap_or(120);
 
         let skill_paths    = file.skill_paths.unwrap_or_default();
+        let skill_token_budget = file.skill_token_budget.unwrap_or(4000);
         let context_paths  = file.context_paths.unwrap_or_default();
 
         let disable_stream = env::var("AGENT_DISABLE_STREAM")
@@ -249,7 +256,7 @@ impl Config {
             permission_mode, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
-            budget: None, skill_paths, context_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
+            budget: None, skill_paths, skill_token_budget, context_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
             provider_slug, all_providers,
         })
     }
@@ -353,6 +360,7 @@ impl Default for Config {
             timeout_secs: 120,
             budget: None,
             skill_paths: vec![],
+            skill_token_budget: 4000,
             context_paths: vec![],
             disable_stream: false,
             skip_domain_prompt: false,

@@ -368,6 +368,17 @@ impl Session {
         ((tokens * 100) / limit).min(100) as u8
     }
 
+    /// Same as `context_fill_pct` but accepts a pre-computed token count (e.g. including
+    /// projected skill tokens) so the compaction check can be skill-aware.
+    pub fn context_fill_pct_with(&self, tokens: usize) -> u8 {
+        let limit = std::env::var("ZAP_MAX_CONTEXT_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .or_else(|| self.config.budget.map(|b| b as usize))
+            .unwrap_or_else(|| model_context_limit(&self.model));
+        ((tokens * 100) / limit).min(100) as u8
+    }
+
     // ── Slash dispatcher ──────────────────────────────────────────────────────
 
     /// Returns true if the session should end.

@@ -71,6 +71,7 @@ pub struct Skill {
     pub name:           String,
     pub description:    String,
     pub license:        Option<String>,
+    pub priority:       u8,      // 0 = normal, 1-9 = higher priority (default 0)
     pub triggers:       Vec<String>,
     pub token_estimate: usize,
     pub content:        String,
@@ -94,15 +95,18 @@ impl Skill {
 
     /// Returns true if any trigger keyword appears in the query (case-insensitive).
     ///
-    /// Multi-word triggers (containing a space) use substring match.
-    /// Single-word triggers require a word-start boundary so "review" does not
-    /// fire on "preview" or "irrelevant", but still fires on "reviewing".
+    /// Multi-word triggers must appear as consecutive whole words (not substring).
+    /// Single-word triggers use the existing word-start boundary match so "review"
+    /// fires on "reviewing" but not "preview".
     pub fn matches(&self, query: &str) -> bool {
         let lower = query.to_lowercase();
         self.triggers.iter().any(|t| {
             let t = t.to_lowercase();
             if t.contains(' ') {
-                lower.contains(t.as_str())
+                // Multi-word trigger: consecutive words with word boundaries
+                let trig_words: Vec<&str> = t.split_whitespace().collect();
+                let query_words: Vec<&str> = lower.split_whitespace().collect();
+                query_words.windows(trig_words.len()).any(|w| w == trig_words.as_slice())
             } else {
                 trigger_word_match(&lower, &t)
             }
@@ -245,6 +249,57 @@ pub fn match_skills<'a>(query: &str, skills: &'a [Skill]) -> Vec<&'a Skill> {
     matched
 }
 
+/// Sort matched skills by priority (desc), then source tier (project > external > global > bundled),
+/// then token count (ascending — prefer smaller skills), and truncate to fit within `budget_tokens`.
+/// Pinned skills are always kept (they count against the budget but are never dropped).
+pub fn rank_and_truncate_skills<'a>(
+    skills: Vec<&'a Skill>,
+    budget_tokens: usize,
+    pinned_names: &std::collections::HashSet<String>,
+) -> Vec<&'a Skill> {
+    if skills.is_empty() || budget_tokens == 0 {
+        return skills;
+    }
+
+    // Separate pinned — they're non-negotiable.
+    let (pinned, mut rest): (Vec<&Skill>, Vec<&Skill>) = skills
+        .into_iter()
+        .partition(|s| pinned_names.contains(&s.name));
+
+    // Source tier ordinal: higher = more authoritative
+    fn source_rank(source: &SkillSource) -> u8 {
+        match source {
+            SkillSource::Bundled       => 0,
+            SkillSource::Global        => 1,
+            SkillSource::External(_)   => 2,
+            SkillSource::Project       => 3,
+        }
+    }
+
+    // Sort rest: priority desc → source desc → tokens asc
+    rest.sort_by(|a, b| {
+        b.priority.cmp(&a.priority)
+            .then_with(|| source_rank(&b.source).cmp(&source_rank(&a.source)))
+            .then_with(|| a.tokens().cmp(&b.tokens()))
+    });
+
+    // Always keep pinned first
+    let mut result: Vec<&Skill> = pinned;
+    let mut used: usize = result.iter().map(|s| s.tokens()).sum();
+    let _remaining = budget_tokens.saturating_sub(used);
+
+    for skill in rest {
+        let t = skill.tokens();
+        if used + t <= budget_tokens || result.is_empty() {
+            // Always keep at least one skill even if it exceeds budget
+            result.push(skill);
+            used += t;
+        }
+    }
+
+    result
+}
+
 /// Build the skill injection string for the system prompt.
 pub fn build_skill_prompt(skills: &[&Skill]) -> String {
     if skills.is_empty() {
@@ -308,6 +363,7 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
                 name,
                 description:    fm.description,
                 license:        fm.license,
+                priority:       fm.priority,
                 triggers:       fm.triggers,
                 token_estimate: fm.tokens,
                 content:        body,
@@ -322,6 +378,7 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
         name,
         description:    String::new(),
         license:        None,
+        priority:       0,
         triggers:       Vec::new(),
         token_estimate: 0,
         content:        raw,
@@ -333,6 +390,7 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
 struct ParsedFrontmatter {
     description: String,
     license:     Option<String>,
+    priority:    u8,           // 0 = normal, 1-9 = higher priority (default 0)
     triggers:    Vec<String>,
     tokens:      usize,
     category:    Option<SkillCategory>,
@@ -341,6 +399,7 @@ struct ParsedFrontmatter {
 fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
     let mut description = String::new();
     let mut license     = None;
+    let mut priority     = 0u8;
     let mut triggers    = Vec::new();
     let mut tokens      = 0usize;
     let mut category    = None;
@@ -354,6 +413,10 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
             let lic = line.trim_start_matches("license:")
                 .trim().trim_matches('"').trim_matches('\'').to_string();
             if !lic.is_empty() { license = Some(lic); }
+        } else if line.starts_with("priority:") {
+            let val = line.trim_start_matches("priority:").trim();
+            let clean: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
+            priority = clean.parse().unwrap_or(0).min(9);
         } else if line.starts_with("trigger:") {
             let val = line.trim_start_matches("trigger:").trim();
             let inner = val.trim_matches(|c| c == '[' || c == ']');
@@ -376,7 +439,7 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
         }
     }
 
-    ParsedFrontmatter { description, license, triggers, tokens, category }
+    ParsedFrontmatter { description, license, priority, triggers, tokens, category }
 }
 
 // ── Bundled default skills ────────────────────────────────────────────────────
@@ -426,6 +489,7 @@ fn bundled_skills() -> Vec<Skill> {
                     name:           name.to_string(),
                     description:    fm.description,
                     license:        fm.license,
+                    priority:       fm.priority,
                     triggers:       fm.triggers,
                     token_estimate: fm.tokens,
                     content:        body,

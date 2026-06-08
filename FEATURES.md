@@ -443,6 +443,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Image attach | `src/session.rs:cmd_attach` | staged until next message |
 | Clipboard image paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
 | Ctrl+V text paste (v0.13.87) | `src/tui/lifecycle.rs:handle_paste_image`, `src/session/commands/media.rs` | Ctrl+V now detects clipboard content: images → attaches (with 128-byte guard against corrupt tiny files); text → inserts into input at cursor. Added `paste_clipboard_text()` with pbpaste (macOS), Get-Clipboard -Raw with UTF-8 encoding (Windows), wl-paste/xclip (Linux). |
+| Skill production-grade hardening (v0.13.88) | `src/skill_manager.rs`, `src/session/turn.rs`, `src/config.rs`, `src/session/mod.rs` | Multi-word trigger word-boundary: `"literature review"` no longer falsely triggers code-review. Skill priority field (`priority: 0-9` in frontmatter). Token budget enforcement: `skill_token_budget` config (default 4000) caps per-turn skill tokens; `rank_and_truncate_skills()` sorts by priority→source tier→tokens. Compaction skill-awareness: compaction check includes projected skill tokens. |
 | `/help` | `src/tui/commands.rs:help_text` | grouped command reference; includes goal, deploy, index quality, diff, attach, paste, skill log, remote |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |
