@@ -75,7 +75,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path pkg | Out-Null
-          Copy-Item zap.exe, README.md, FEATURES.md pkg/
+          Copy-Item zap.exe, README.md, FEATURES.md, install.ps1 pkg/
           Compress-Archive -Path pkg/* -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Upload artifact
@@ -128,7 +128,7 @@ jobs:
             |---|---|---|
             | macOS Apple Silicon (ARM) | `zap-macos-arm64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
             | Linux x86_64 | `zap-linux-x86_64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
-            | Windows x86_64 | `zap-windows-x86_64.zip` | `zap.exe` + README.md + FEATURES.md |
+            | Windows x86_64 | `zap-windows-x86_64.zip` | `zap.exe` + `install.ps1` + README.md + FEATURES.md |
 
             **Commit:** `${{ github.sha }}`
             **Version:** v${{ steps.ver.outputs.version }}
@@ -143,9 +143,10 @@ jobs:
 
             **Windows x86_64**
             ```powershell
-            # Download zap-windows-x86_64.zip, extract, add zap.exe to your PATH.
+            # Download zap-windows-x86_64.zip, extract, then run the installer.
             Expand-Archive zap-windows-x86_64.zip .
-            Move-Item pkg\zap.exe "$env:USERPROFILE\.local\bin\zap.exe"
+            cd pkg
+            .\install.ps1
             ```
           files: |
             artifacts/zap-macos-arm64/zap-macos-arm64.tar.gz
