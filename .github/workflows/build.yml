@@ -21,6 +21,12 @@ jobs:
             binary_ext: ""
             upload_file: zap-macos-arm64.tar.gz
 
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: zap-linux-x86_64
+            binary_ext: ""
+            upload_file: zap-linux-x86_64.tar.gz
+
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: zap-windows-x86_64
@@ -56,7 +62,7 @@ jobs:
         shell: bash
         run: cp "target/${{ matrix.target }}/release/zap${{ matrix.binary_ext }}" "zap${{ matrix.binary_ext }}"
 
-      - name: Package macOS tar.gz (binary + docs)
+      - name: Package tar.gz (binary + docs)
         if: matrix.binary_ext == ''
         shell: bash
         run: |
@@ -121,6 +127,7 @@ jobs:
             | Platform | Download | Contents |
             |---|---|---|
             | macOS Apple Silicon (ARM) | `zap-macos-arm64.tar.gz` | `zap` binary + README.md + FEATURES.md |
+            | Linux x86_64 | `zap-linux-x86_64.tar.gz` | `zap` binary + README.md + FEATURES.md |
             | Windows x86_64 | `zap-windows-x86_64.zip` | `zap.exe` + README.md + FEATURES.md |
 
             **Commit:** `${{ github.sha }}`
@@ -129,19 +136,18 @@ jobs:
             ---
             ### Install
 
-            **macOS (Apple Silicon)**
+            **macOS / Linux (one-liner)**
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.ver.outputs.version }}/zap-macos-arm64.tar.gz | tar -xz
-            chmod +x zap && mv zap ~/.local/bin/zap
-            codesign --sign - ~/.local/bin/zap   # required on macOS Tahoe (26.x)
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
             **Windows x86_64**
             ```powershell
-            # Download zap-windows-x86_64.zip, then:
+            # Download zap-windows-x86_64.zip, extract, add zap.exe to your PATH.
             Expand-Archive zap-windows-x86_64.zip .
-            Move-Item zap.exe C:\Users\You\bin\zap.exe
+            Move-Item pkg\zap.exe "$env:USERPROFILE\.local\bin\zap.exe"
             ```
           files: |
             artifacts/zap-macos-arm64/zap-macos-arm64.tar.gz
+            artifacts/zap-linux-x86_64/zap-linux-x86_64.tar.gz
             artifacts/zap-windows-x86_64/zap-windows-x86_64.zip
