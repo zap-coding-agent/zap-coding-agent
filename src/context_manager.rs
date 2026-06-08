@@ -51,50 +51,83 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         platform, shell, cwd
     ));
 
-    // ── Code navigation strategy ──────────────────────────────────────────────
-    sections.push(
-        "## Code Navigation Strategy\n\
-         \n\
-         **Strict tool order — do not skip steps:**\n\
-         \n\
-         1. **`code_map`** — call this first on any source file or directory before \
-            reading it. Returns functions, structs, classes, and line numbers so you \
-            know exactly which lines to read. Do NOT call `read_file` on a large source \
-            file you have not yet `code_map`ped.\n\
-            **Exception:** small config/manifest files (`Cargo.toml`, `package.json`, \
-            `go.mod`, `Makefile`, `.env`, `docker-compose.yml`, `pyproject.toml`) may \
-            be read directly with `read_file` — they contain no symbols worth mapping \
-            and a full read costs nothing.\n\
-         2. **`find_definition`** — when you know a symbol name, jump directly to its \
-            definition. Saves a `search_code` + `read_file` round-trip.\n\
-         3. **`search_code`** — pattern/regex search (ripgrep). Use only when the \
-            symbol name is unknown or you need non-definition matches.\n\
-         4. **`read_file` with `offset`/`limit`** — last resort, targeted. After \
-            `code_map` tells you the line range, read only those lines.\n\
-         \n\
-         **`list_directory` — severely restricted:**\n\
-         - Call it AT MOST ONCE per turn, only on the project root `'.'`\n\
-         - It is non-recursive (one level only) — do NOT chain calls across subdirectories\n\
-         - Do NOT use it to enumerate files; use `code_map` on directories instead\n\
-         - Only use it when the project has no index and `code_map` returns nothing\n\
-         \n\
-         **The index is your primary tool.** `code_map` + `find_definition` cover \
-         90% of navigation tasks. Reaching for `read_file` or `search_code` first \
-         wastes tool calls and context — always check the index first.\n\
-         \n\
-         **If `code_map` or `find_definition` return 0 results:**\n\
-         - The project may not be indexed — do NOT conclude it is empty.\n\
-         - Fall back to ONE `list_directory '.'` call only, then `search_code` → `read_file`.\n\
-         - Tell the user they can run `/index` to enable fast symbol lookup.\n\
-         \n\
-         **Never explore these directories** — dependencies/build output only: \
-         `node_modules`, `target`, `dist`, `build`, `bin`, `obj`, \
-         `out`, `.git`, `__pycache__`, `.venv`, `venv`, `coverage`, `.next`."
-            .to_string(),
-    );
+    // ── Code navigation strategy — differs based on whether the index is built ──
+    let db_exists = std::path::Path::new(".zap/code.db").exists();
+
+    // Detect which manifest files actually exist so we don't suggest reading
+    // Cargo.toml in an HTML project or package.json in a Rust project.
+    let manifest_list: Vec<&str> = [
+        "Cargo.toml", "package.json", "go.mod", "pyproject.toml",
+        "composer.json", "pom.xml", "build.gradle", "Makefile",
+    ].iter().copied().filter(|f| std::path::Path::new(f).exists()).collect();
+    let manifest_note = if manifest_list.is_empty() {
+        "small config/data files (`.env`, `docker-compose.yml`, etc.)".to_string()
+    } else {
+        format!("project manifest files ({}) and small config files", manifest_list.join(", "))
+    };
+
+    if db_exists {
+        sections.push(format!(
+            "## Code Navigation Strategy\n\
+             \n\
+             **Strict tool order — do not skip steps:**\n\
+             \n\
+             1. **`code_map`** — call this first on any source file or directory before \
+                reading it. Returns functions, structs, classes, and line numbers so you \
+                know exactly which lines to read. Do NOT call `read_file` on a large source \
+                file you have not yet `code_map`ped.\n\
+                **Exception:** {manifest_note} may be read directly with `read_file`.\n\
+             2. **`find_definition`** — when you know a symbol name, jump directly to its \
+                definition. Saves a `search_code` + `read_file` round-trip.\n\
+             3. **`search_code`** — pattern/regex search (ripgrep). Use only when the \
+                symbol name is unknown or you need non-definition matches.\n\
+             4. **`read_file` with `offset`/`limit`** — last resort, targeted. After \
+                `code_map` tells you the line range, read only those lines.\n\
+             \n\
+             **`list_directory` — severely restricted:**\n\
+             - Call it AT MOST ONCE per turn, only on the project root `'.'`\n\
+             - It is non-recursive — do NOT chain calls across subdirectories\n\
+             - Do NOT use it to enumerate files; use `code_map` on directories instead\n\
+             \n\
+             **The index is your primary tool.** `code_map` + `find_definition` cover \
+             90% of navigation tasks. Always check the index first.\n\
+             \n\
+             **Never explore these directories** — dependencies/build output only: \
+             `node_modules`, `target`, `dist`, `build`, `bin`, `obj`, \
+             `out`, `.git`, `__pycache__`, `.venv`, `venv`, `coverage`, `.next`."
+        ));
+    } else {
+        sections.push(format!(
+            "## Code Navigation Strategy\n\
+             \n\
+             **Code index not built** — `code_map` and `find_definition` have no data. \
+             Skip them entirely. Use this order instead:\n\
+             \n\
+             1. **`list_directory '.'`** — see what's in the project root (one call only)\n\
+             2. **`search_code`** — ripgrep pattern search across the filesystem; \
+                this is your primary tool until the index is built\n\
+             3. **`read_file`** — read specific files once you know which ones matter\n\
+             \n\
+             {}\
+             \n\
+             **Do NOT call `code_map` or `find_definition`** — they will return empty \
+             results and waste tool calls. Go straight to `search_code` + `read_file`.\n\
+             \n\
+             The user can run `/index` to build the code index and unlock `code_map` \
+             and `find_definition`. Mention this if they ask about symbol lookup.\n\
+             \n\
+             **Never explore:** `node_modules`, `target`, `dist`, `build`, `.git`, \
+             `__pycache__`, `.venv`, `venv`.",
+            if manifest_list.is_empty() {
+                String::new()
+            } else {
+                format!("**Manifest files present:** {} — read these with `read_file` to understand the tech stack.\n\n", manifest_list.join(", "))
+            }
+        ));
+    }
 
     // ── Search, discovery, and reasoning ─────────────────────────────────────
-    sections.push(
+    let search_strategy = if db_exists {
         "## Search and Discovery\n\
          \n\
          **Known symbol name → `find_definition`** (index hit, done)\n\
@@ -104,16 +137,30 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          2. If those miss: `code_map` on the relevant directory — scan symbols for the real name\n\
          3. Last resort: `search_code` with alternation `(auth|sso|login|iam|oauth)`\n\
          \n\
-         **\"Where is X used?\" / \"What does this codebase use for X?\"**\n\
-         The index shows WHERE things are DEFINED — not where they are USED. \
-         Follow `find_definition` with `search_code` for instantiation, imports, \
-         and method calls. Never infer usage from comments; only code references count.\n\
+         **\"Where is X used?\"** Follow `find_definition` with `search_code` for \
+         instantiation, imports, and method calls.\n\
          \n\
          **End every answer with one line on how you found it:**\n\
          Index hit → `Found via index: Symbol at file:line` \
          · Fallback → `Not in index — found via search`"
-            .to_string(),
-    );
+            .to_string()
+    } else {
+        "## Search and Discovery\n\
+         \n\
+         **Code index not built — use grep-based search only:**\n\
+         \n\
+         **Known symbol name → `search_code` with the exact name**\n\
+         \n\
+         **Concept without an exact name** (\"authentication\", \"caching\"):\n\
+         1. `search_code` with alternation e.g. `(auth|login|sso)`\n\
+         2. `read_file` on the most relevant hit (targeted lines only)\n\
+         \n\
+         **Do NOT use `find_definition` or `code_map`** — no index data exists.\n\
+         \n\
+         **End every answer with:** `Not in index — found via search`"
+            .to_string()
+    };
+    sections.push(search_strategy);
 
     // ── Reasoning and investigation ───────────────────────────────────────────
     sections.push(
@@ -356,18 +403,32 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
         let stats_note = understanding
             .map(|u| format!("\n{}", u))
             .unwrap_or_default();
+        let orient_steps = if db_exists {
+            format!(
+                "1. `code_map '.'` — full project structure with symbols in one call\n\
+                 2. `read_file` on the manifest ({}) for tech stack\n\
+                 3. `code_map` on 1-2 key source dirs if step 1 wasn't enough\n\
+                 4. `read_file` on the entry point (targeted lines only) if still unclear",
+                if manifest_list.is_empty() { "if one exists".to_string() } else { manifest_list.join(", ") }
+            )
+        } else {
+            format!(
+                "1. `list_directory '.'` — see the project structure\n\
+                 2. `read_file` on the manifest ({}) for tech stack\n\
+                 3. `search_code` with a relevant keyword to find key files\n\
+                 4. `read_file` on the most relevant file (targeted lines only)\n\
+                 \n\
+                 Note: code index not built — do NOT use `code_map` or `find_definition`.",
+                if manifest_list.is_empty() { "if one exists".to_string() } else { manifest_list.join(", ") }
+            )
+        };
         sections.push(format!(
             "## Project Orientation{stats_note}\n\
              \n\
              No pre-computed analysis exists for this project yet. \
              **Before answering any question that requires project knowledge, \
              orient yourself in at most 4 tool calls:**\n\
-             1. `code_map '.'` — one call gives the full project structure with symbols; \
-                do NOT use `list_directory` to enumerate files\n\
-             2. `read_file` on the manifest only (`Cargo.toml`, `package.json`, `go.mod`) \
-                — for tech stack and build commands\n\
-             3. `code_map` on 1-2 key source dirs if step 1 wasn't enough detail\n\
-             4. `read_file` on the entry point (targeted lines only) if still unclear\n\
+             {orient_steps}\n\
              \n\
              Answer from what you concretely discover — do not guess or fabricate \
              project details. Distinguish clearly between what you read from source \
@@ -500,68 +561,7 @@ fn load_zap_md(context_paths: &[String]) -> Option<String> {
     if sections.is_empty() { None } else { Some(sections.join("\n\n")) }
 }
 
-/// Strip YAML/TOML frontmatter (--- ... ---) from the top of a markdown file.
-fn strip_frontmatter(raw: &str) -> &str {
-    let s = raw.trim_start();
-    if !s.starts_with("---") { return s; }
-    let after = &s[3..];
-    // Find the closing ---
-    if let Some(pos) = after.find("\n---") {
-        after[pos + 4..].trim_start_matches('\n')
-    } else {
-        s
-    }
-}
-
-fn expand_tilde(p: &str) -> std::path::PathBuf {
-    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    std::path::PathBuf::from(p)
-}
-
-/// Return the user's home directory.
-/// Checks $HOME first (Unix), then %USERPROFILE% (Windows), then %HOMEDRIVE%+%HOMEPATH%.
-fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .or_else(|_| {
-            let drive = std::env::var("HOMEDRIVE").unwrap_or_default();
-            let path  = std::env::var("HOMEPATH").unwrap_or_default();
-            if drive.is_empty() && path.is_empty() { Err(std::env::VarError::NotPresent) }
-            else { Ok(format!("{}{}", drive, path)) }
-        })
-        .ok()
-        .map(std::path::PathBuf::from)
-}
-
-fn git_status_summary() -> Option<String> {
-    let mut child = std::process::Command::new("git")
-        .args(["status", "--short"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-
-    // Kill and skip if git takes more than 2 seconds (large repo).
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                return None;
-            }
-            _ => std::thread::sleep(std::time::Duration::from_millis(50)),
-        }
-    }
-
-    let out = child.wait_with_output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
-}
+use crate::context_utils::{expand_tilde, git_status_summary, home_dir, strip_frontmatter};
 
 #[cfg(test)]
 mod tests {

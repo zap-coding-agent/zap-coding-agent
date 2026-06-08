@@ -1,6 +1,6 @@
 [package]
 name = "zap-coding-agent"
-version = "0.13.97"
+version = "0.13.98"
 edition = "2021"
 
 [[bin]]
