@@ -138,11 +138,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          3. Last resort: `search_code` with alternation `(auth|sso|login|iam|oauth)`\n\
          \n\
          **\"Where is X used?\"** Follow `find_definition` with `search_code` for \
-         instantiation, imports, and method calls.\n\
-         \n\
-         **End every answer with one line on how you found it:**\n\
-         Index hit → `Found via index: Symbol at file:line` \
-         · Fallback → `Not in index — found via search`"
+         instantiation, imports, and method calls."
             .to_string()
     } else {
         "## Search and Discovery\n\
@@ -155,9 +151,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
          1. `search_code` with alternation e.g. `(auth|login|sso)`\n\
          2. `read_file` on the most relevant hit (targeted lines only)\n\
          \n\
-         **Do NOT use `find_definition` or `code_map`** — no index data exists.\n\
-         \n\
-         **End every answer with:** `Not in index — found via search`"
+         **Do NOT use `find_definition` or `code_map`** — no index data exists."
             .to_string()
     };
     sections.push(search_strategy);
