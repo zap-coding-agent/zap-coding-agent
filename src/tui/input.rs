@@ -400,8 +400,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             if picker_active(app) {
                 app.picker_sel = app.picker_sel.saturating_sub(1);
                 InputAction::None
-            } else if matches!(app.state, AppState::Idle) && !app.prompt_history.is_empty() {
-                // History navigation: Up goes to older prompts.
+            } else if matches!(app.state, AppState::Idle)
+                && !app.input.is_empty()
+                && !app.prompt_history.is_empty()
+            {
+                // History navigation: only when the user has already typed something.
+                // From an empty prompt, Up scrolls the content area instead.
                 let new_idx = match app.history_idx {
                     None => app.prompt_history.len() - 1,
                     Some(i) => i.saturating_sub(1),
@@ -422,8 +426,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
                     app.picker_sel = (app.picker_sel + 1).min(count - 1);
                 }
                 InputAction::None
-            } else if matches!(app.state, AppState::Idle) && app.history_idx.is_some() {
-                // History navigation: Down goes to newer prompts, then clears input.
+            } else if matches!(app.state, AppState::Idle)
+                && !app.input.is_empty()
+                && app.history_idx.is_some()
+            {
+                // History navigation forward (only when already in history mode).
                 let new_idx = app.history_idx.unwrap() + 1;
                 if new_idx >= app.prompt_history.len() {
                     app.history_idx = None;

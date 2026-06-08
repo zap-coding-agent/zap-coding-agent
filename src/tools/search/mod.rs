@@ -3,6 +3,7 @@ use async_trait::async_trait;
 
 use super::Tool;
 
+mod symbols;
 mod search_impl;
 use search_impl::{build_code_map, find_symbol_definition, search_with_rg_or_grep};
 

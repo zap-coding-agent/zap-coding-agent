@@ -352,6 +352,11 @@ pub(super) async fn build_code_map(path: &str, max_depth: usize, file_type: Opti
     let canonical = strip_unc_prefix(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
     let index_syms = crate::code_index::global_symbols_in_path(&canonical.to_string_lossy());
 
+    // Check if the index is in-memory (not yet built — user hasn't run /index).
+    let index_not_built = crate::code_index::global_index()
+        .map(|arc| arc.lock().ok().map(|g| g.is_in_memory()).unwrap_or(false))
+        .unwrap_or(false);
+
     if !index_syms.is_empty() {
         crate::log::write("INDEX", &format!("hit · code_map · '{}' · {} symbol(s)", path, index_syms.len()));
         let _ = crate::audit::record(&format!("index_hit op=code_map path={} symbols={}", path, index_syms.len()));
@@ -401,9 +406,23 @@ pub(super) async fn build_code_map(path: &str, max_depth: usize, file_type: Opti
     walk_dir_for_map(p, 0, max_depth, file_type, &mut output)?;
 
     if output.is_empty() {
-        return Ok(format!("No source files found in '{}'", path));
+        let hint = if index_not_built {
+            " Run /index to build the code index for faster, deeper exploration."
+        } else {
+            ""
+        };
+        return Ok(format!(
+            "No source files found in '{path}' (hidden directories and build artifacts are skipped).{hint}\n\
+             Use list_directory to inspect the directory contents directly."
+        ));
     }
-    Ok(output.join("\n"))
+
+    let index_note = if index_not_built {
+        "\n# Note: code index not yet built — symbol lookup used filesystem scan. Run /index for full AST-level search.\n"
+    } else {
+        ""
+    };
+    Ok(format!("{}{}", index_note, output.join("\n")))
 }
 
 fn walk_dir_for_map(
@@ -444,14 +463,20 @@ fn walk_dir_for_map(
                     _ => ext == ft,
                 };
                 if !ext_matches { continue; }
-            } else if !matches!(ext, "rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h" | "rb" | "swift") {
+            } else if !matches!(ext,
+                "rs" | "py" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h" | "rb" | "swift" |
+                "html" | "htm" | "css" | "scss" | "sass" | "md" | "mdx" | "jsx" | "tsx" |
+                "vue" | "svelte" | "php" | "kt" | "cs" | "toml" | "yaml" | "yml" | "json"
+            ) {
                 continue;
             }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let symbols = extract_symbols(&content, ext);
-                if !symbols.is_empty() {
-                    output.push(format!("\n{}:", path.display()));
+                output.push(format!("\n{}:", path.display()));
+                if symbols.is_empty() {
+                    output.push(format!("  ({})", ext_label(ext)));
+                } else {
                     output.extend(symbols);
                 }
             }
@@ -460,100 +485,4 @@ fn walk_dir_for_map(
     Ok(())
 }
 
-fn extract_symbols(content: &str, ext: &str) -> Vec<String> {
-    let mut symbols = Vec::new();
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        let line_no = i + 1;
-
-        let sym = match ext {
-            "rs" => extract_rust_symbol(trimmed),
-            "py" => extract_python_symbol(trimmed),
-            "ts" | "js" => extract_ts_symbol(trimmed),
-            "go" => extract_go_symbol(trimmed),
-            "java" => extract_java_symbol(trimmed),
-            _ => None,
-        };
-
-        if let Some(label) = sym {
-            symbols.push(format!("  {} (line {})", label, line_no));
-        }
-    }
-    symbols
-}
-
-fn extract_rust_symbol(line: &str) -> Option<String> {
-    for prefix in &["pub fn ", "fn ", "pub async fn ", "async fn ",
-                    "pub struct ", "struct ", "pub enum ", "enum ",
-                    "pub trait ", "trait ", "pub type ", "type ",
-                    "pub const ", "const ", "pub static ", "static ",
-                    "impl "] {
-        if let Some(after) = line.strip_prefix(prefix) {
-            let rest = after.split(|c: char| !c.is_alphanumeric() && c != '_').next()?;
-            if !rest.is_empty() {
-                return Some(format!("{} {}", prefix.trim(), rest));
-            }
-        }
-    }
-    None
-}
-
-fn extract_python_symbol(line: &str) -> Option<String> {
-    if let Some(rest) = line.strip_prefix("async def ").or_else(|| line.strip_prefix("def ")) {
-        let name = rest.split('(').next()?.trim();
-        return Some(format!("def {}", name));
-    }
-    if let Some(after) = line.strip_prefix("class ") {
-        let name = after.split(['(', ':']).next()?.trim();
-        return Some(format!("class {}", name));
-    }
-    None
-}
-
-fn extract_ts_symbol(line: &str) -> Option<String> {
-    for prefix in &["export function ", "function ", "export class ", "class ",
-                    "export interface ", "interface ", "export type ", "type ",
-                    "export const ", "const ", "export let ", "let ", "export enum ", "enum "] {
-        if let Some(after) = line.strip_prefix(prefix) {
-            let rest: &str = after.split(['(', '<', ' ', '=']).next()?;
-            if !rest.is_empty() {
-                return Some(format!("{}{}", prefix.trim_start_matches("export "), rest));
-            }
-        }
-    }
-    None
-}
-
-fn extract_go_symbol(line: &str) -> Option<String> {
-    if let Some(after) = line.strip_prefix("func ") {
-        let rest: &str = after.split(['(', ' ']).next()?;
-        return Some(format!("func {}", rest));
-    }
-    if let Some(after) = line.strip_prefix("type ") {
-        let name: &str = after.split_whitespace().next()?;
-        return Some(format!("type {}", name));
-    }
-    None
-}
-
-fn extract_java_symbol(line: &str) -> Option<String> {
-    for kw in &["class ", "interface ", "enum ", "record "] {
-        if line.contains(kw) {
-            let after = line.split(kw).nth(1)?;
-            let name: &str = after.split([' ', '{', '(', '<']).next()?;
-            if !name.is_empty() {
-                return Some(format!("{} {}", kw.trim(), name));
-            }
-        }
-    }
-    if (line.contains("public ") || line.contains("private ") || line.contains("protected "))
-        && line.contains('(')
-    {
-        let before_paren = line.split('(').next()?;
-        let name: &str = before_paren.split_whitespace().last()?;
-        if !name.is_empty() && name != "class" && name != "interface" {
-            return Some(format!("method {}", name));
-        }
-    }
-    None
-}
+use super::symbols::{ext_label, extract_symbols};
