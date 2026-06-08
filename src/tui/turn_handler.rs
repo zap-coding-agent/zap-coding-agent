@@ -444,9 +444,10 @@ pub(super) fn build_context_viewer(session: &Session) -> ContextViewerState {
         });
     }
 
+    let selected = turns.len().saturating_sub(1);
     ContextViewerState {
         turns,
-        selected: 0,
+        selected,
         total_tokens,
         limit_tokens: model_context_limit(&session.model),
         context_pct: session.context_fill_pct(),

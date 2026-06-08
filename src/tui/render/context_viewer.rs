@@ -110,7 +110,7 @@ pub(super) fn draw_context_viewer(frame: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         Span::styled(
-            "  ↑↓/jk navigate   → or Enter = detail   [d] drop   [c] compact   [x] clear   Esc close",
+            "  ↑↓/jk navigate turns   → or Enter = scroll detail panel   [d] drop   [c] compact   [x] clear   Esc close",
             dim,
         )
     };
@@ -296,12 +296,31 @@ fn draw_turn_detail(frame: &mut Frame, viewer: &ContextViewerState, area: Rect) 
         return;
     }
 
-    let max_scroll = all_lines.len().saturating_sub(area.height as usize);
+    let total_lines = all_lines.len();
+    let visible_h = area.height as usize;
+    let max_scroll = total_lines.saturating_sub(visible_h);
     let scroll = viewer.detail_scroll.min(max_scroll);
+
+    // Reserve the last row for a "more below" indicator when content overflows.
+    let has_more = scroll < max_scroll;
+    let render_h = if has_more && visible_h > 1 { visible_h - 1 } else { visible_h };
+    let render_area = Rect { height: render_h as u16, ..area };
+
     let para = Paragraph::new(all_lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
-    frame.render_widget(para, area);
+    frame.render_widget(para, render_area);
+
+    if has_more {
+        let more_row = Rect { y: area.y + render_h as u16, height: 1, ..area };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                " ↓ more (→/Enter to scroll) ",
+                Style::default().fg(Color::DarkGray),
+            )),
+            more_row,
+        );
+    }
 }
 
 fn truncate_str(s: &str, max_chars: usize) -> String {

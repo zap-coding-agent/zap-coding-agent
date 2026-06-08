@@ -830,6 +830,7 @@ fn handle_context_viewer_key(app: &mut App, key: KeyEvent) -> InputAction {
         match key.code {
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Tab => {
                 viewer.detail_focus = false;
+                viewer.detail_scroll = 0;
                 InputAction::None
             }
             KeyCode::Up | KeyCode::Char('k') => {
