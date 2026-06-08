@@ -352,6 +352,27 @@ pub(super) fn draw_input(frame: &mut Frame, app: &App, area: Rect) -> Option<(u1
     let prefix_chars = prefix.chars().count();
     let content_w = area.width.saturating_sub(2) as usize;
 
+    // While busy with a queued message, show the queued text instead of the draft.
+    if !matches!(app.state, AppState::Idle) {
+        if let Some(ref queued) = app.queued_input {
+            let spans: Vec<Span<'static>> = vec![
+                Span::styled("⏎ ".to_string(), Style::default().fg(Color::Rgb(255, 200, 50)).bold()),
+                Span::styled(queued.clone(), Style::default().fg(Color::Rgb(160, 160, 160))),
+            ];
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Rgb(80, 80, 80)))
+                .title(Span::styled(" queued — Esc to cancel ", Style::default().fg(Color::Rgb(255, 200, 50))));
+            frame.render_widget(
+                Paragraph::new(Line::from(spans))
+                    .block(block)
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                area,
+            );
+            return None;
+        }
+    }
+
     let total_lines = super::visual_line_count(&app.input, content_w.saturating_sub(prefix_chars));
 
     let (scroll, cursor_screen) = if content_w > 0 {

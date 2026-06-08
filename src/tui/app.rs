@@ -350,6 +350,10 @@ pub struct App {
     /// Pending message held for topic-shift confirmation.
     /// When Some, user must confirm before the message is sent.
     pub topic_shift_confirm: Option<String>,
+
+    /// Message queued while a turn is in progress.
+    /// Typed and submitted (Enter) during a busy turn; auto-fired when the turn ends.
+    pub queued_input: Option<String>,
 }
 
 /// Holds all state needed to complete a provider switch once the user types their API key.
@@ -431,6 +435,7 @@ impl App {
             prompt_history: Vec::new(),
             history_idx: None,
             topic_shift_confirm: None,
+            queued_input: None,
         }
     }
 

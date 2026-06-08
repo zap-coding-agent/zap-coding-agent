@@ -164,6 +164,13 @@ async fn tui_loop(
             if let Some(ref name) = one_shot_unpin {
                 session.pinned_skills.remove(name.as_str());
             }
+
+            // Auto-fire any prompt queued while the turn was in progress.
+            if app.pending_input.is_none() {
+                if let Some(queued) = app.queued_input.take() {
+                    app.pending_input = Some(queued);
+                }
+            }
             continue;
         }
 

@@ -372,10 +372,24 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
                 }
                 return InputAction::Submit(text);
             }
+            // Busy turn: queue the typed text to fire when the turn ends.
+            {
+                let text = app.input.trim().to_string();
+                if !text.is_empty() {
+                    app.queued_input = Some(text);
+                    app.input.clear();
+                    app.cursor = 0;
+                }
+            }
             InputAction::None
         }
 
         KeyCode::Esc => {
+            // Cancel any queued input first; second Esc clears the draft.
+            if app.queued_input.is_some() {
+                app.queued_input = None;
+                return InputAction::None;
+            }
             app.input.clear();
             app.cursor = 0;
             app.picker_sel = 0;
