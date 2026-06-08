@@ -441,7 +441,8 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Slash command picker | `src/ui.rs:show_command_picker` | `/` on empty line opens inquire picker |
 | Startup noise reduction | `src/tui/startup.rs:49` | Removed "Ready. X tools loaded" and skill count from TUI startup — reduces visual noise on every launch |
 | Image attach | `src/session.rs:cmd_attach` | staged until next message |
-| Clipboard paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
+| Clipboard image paste | `src/session/commands.rs:cmd_paste` | macOS: pngpaste/AppleScript · Windows: PowerShell Clipboard::GetImage · Linux: xclip/wl-paste |
+| Ctrl+V text paste (v0.13.87) | `src/tui/lifecycle.rs:handle_paste_image`, `src/session/commands/media.rs` | Ctrl+V now detects clipboard content: images → attaches (with 128-byte guard against corrupt tiny files); text → inserts into input at cursor. Added `paste_clipboard_text()` with pbpaste (macOS), Get-Clipboard -Raw with UTF-8 encoding (Windows), wl-paste/xclip (Linux). |
 | `/help` | `src/tui/commands.rs:help_text` | grouped command reference; includes goal, deploy, index quality, diff, attach, paste, skill log, remote |
 | `/config` | `src/session.rs:cmd_config` | provider, model, URL, mode |
 | `/cost` | `src/session.rs:cmd_cost` | session token totals + est. $ |

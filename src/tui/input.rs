@@ -464,7 +464,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
 }
 
 /// Convert a char-index into a byte index into `s`.
-fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
+pub(super) fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
         .map(|(b, _)| b)

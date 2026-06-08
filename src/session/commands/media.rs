@@ -146,3 +146,67 @@ $img.Save('{safe_dest}'); exit 0"#
             .unwrap_or(false)
     }
 }
+
+/// Try to get text from the system clipboard. Returns the text if successful, None otherwise.
+pub fn paste_clipboard_text() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("pbpaste")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    String::from_utf8(o.stdout).ok()
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile", "-NonInteractive", "-Command",
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw",
+            ])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    String::from_utf8(o.stdout).ok()
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Try wl-paste first (Wayland), then xclip (X11)
+        let wl = std::process::Command::new("wl-paste")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    String::from_utf8(o.stdout).ok()
+                } else {
+                    None
+                }
+            });
+        if wl.is_some() {
+            return wl;
+        }
+        std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-o"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() && !o.stdout.is_empty() {
+                    String::from_utf8(o.stdout).ok()
+                } else {
+                    None
+                }
+            })
+    }
+}

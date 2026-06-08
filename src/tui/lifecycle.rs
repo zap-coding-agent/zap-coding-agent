@@ -137,32 +137,70 @@ pub(super) fn handle_paste_image(
     if ok && std::path::Path::new(tmp).exists() {
         match std::fs::read(tmp) {
             Ok(bytes) => {
-                use base64::Engine;
-                let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                let kb = bytes.len() / 1024;
-                session.staged_images.push(("image/png".to_string(), data));
-                app.messages.push(UiMessage {
-                    role: MsgRole::Assistant,
-                    blocks: vec![UiBlock::Text(format!(
-                        "✓ Image attached ({} KB) — it will be sent with your next message.", kb
-                    ))],
-                });
+                // Guard: reject tiny/corrupt files (e.g. pngpaste writing text as a malformed PNG)
+                const MIN_IMAGE_BYTES: usize = 128;
+                if bytes.len() < MIN_IMAGE_BYTES {
+                    let _ = std::fs::remove_file(tmp);
+                } else {
+                    use base64::Engine;
+                    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let kb = bytes.len() / 1024;
+                    session.staged_images.push(("image/png".to_string(), data));
+                    app.messages.push(UiMessage {
+                        role: MsgRole::Assistant,
+                        blocks: vec![UiBlock::Text(format!(
+                            "✓ Image attached ({} KB) — it will be sent with your next message.", kb
+                        ))],
+                    });
+                    app.auto_scroll = true;
+                    return;
+                }
             }
             Err(e) => {
                 app.messages.push(UiMessage {
                     role: MsgRole::Assistant,
                     blocks: vec![UiBlock::Text(format!("✗ Failed to read clipboard image: {}", e))],
                 });
+                app.auto_scroll = true;
+                return;
             }
         }
-    } else {
-        app.messages.push(UiMessage {
-            role: MsgRole::Assistant,
-            blocks: vec![UiBlock::Text(
-                "✗ No image in clipboard. Copy a screenshot first, then press Ctrl+V again.".to_string(),
-            )],
-        });
     }
+
+    // Image paste failed (or produced a tiny corrupt file) — try text paste.
+    if let Some(text) = crate::session::commands::paste_clipboard_text() {
+        // Strip all trailing newlines/carriage-returns (clipboard tools often add one).
+        let mut trimmed = text.as_str();
+        while trimmed.ends_with('\n') || trimmed.ends_with('\r') {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+        if !trimmed.is_empty() {
+            let byte_idx = super::input::char_to_byte_idx(&app.input, app.cursor);
+            app.input.insert_str(byte_idx, trimmed);
+            app.cursor = app.input.chars().count();
+            app.picker_sel = 0;
+            return;
+        } else {
+            app.messages.push(UiMessage {
+                role: MsgRole::Assistant,
+                blocks: vec![UiBlock::Text(
+                    "✗ Clipboard is empty. Copy some text or a screenshot first, then press Ctrl+V again."
+                        .to_string(),
+                )],
+            });
+            app.auto_scroll = true;
+            return;
+        }
+    }
+
+    // Neither image nor text available.
+    app.messages.push(UiMessage {
+        role: MsgRole::Assistant,
+        blocks: vec![UiBlock::Text(
+            "✗ No image or text in clipboard. Copy something first, then press Ctrl+V again."
+                .to_string(),
+        )],
+    });
     app.auto_scroll = true;
 }
 

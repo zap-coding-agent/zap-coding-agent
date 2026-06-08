@@ -13,5 +13,6 @@ mod git;
 
 // Re-export public standalone functions so callers keep the same paths.
 pub use media::paste_clipboard_image;
+pub use media::paste_clipboard_text;
 pub use skills::{skill_list_text, skill_show_text};
 pub use code::detect_project_type;
