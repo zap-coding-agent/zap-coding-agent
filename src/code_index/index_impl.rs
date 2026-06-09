@@ -141,7 +141,7 @@ impl CodeIndex {
         let mut skipped = 0usize;
         let mut first_err: Option<String> = None;
 
-        let extensions = &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java"];
+        let extensions = &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "cs"];
         let entries = walkdir_filtered(dir, extensions);
 
         for path in entries {

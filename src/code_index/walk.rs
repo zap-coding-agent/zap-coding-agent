@@ -53,6 +53,7 @@ pub(super) fn detect_language(path: &Path) -> &'static str {
         Some("tsx")             => "tsx",
         Some("go")              => "go",
         Some("java")            => "java",
+        Some("cs")              => "csharp",
         _                       => "",
     }
 }

@@ -17,6 +17,7 @@ pub(super) fn extract_symbols(source: &str, lang: &str, path: &str) -> Vec<Symbo
         "tsx"        => extract_js(source, true, true),
         "go"         => extract_go(source),
         "java"       => extract_java(source),
+        "csharp"     => super::extract_csharp::extract_csharp(source),
         _            => vec![],
     };
 
@@ -31,13 +32,13 @@ pub(super) fn extract_symbols(source: &str, lang: &str, path: &str) -> Vec<Symbo
     }).collect()
 }
 
-fn make_parser(language: tree_sitter::Language) -> Option<tree_sitter::Parser> {
+pub(super) fn make_parser(language: tree_sitter::Language) -> Option<tree_sitter::Parser> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(language).ok()?;
     Some(parser)
 }
 
-fn signature(node: tree_sitter::Node, source: &[u8]) -> String {
+pub(super) fn signature(node: tree_sitter::Node, source: &[u8]) -> String {
     let body_start = body_start(node);
     let end = body_start.unwrap_or(node.end_byte());
     let text = &source[node.start_byte()..end.min(source.len())];
@@ -51,7 +52,7 @@ fn signature(node: tree_sitter::Node, source: &[u8]) -> String {
     }
 }
 
-fn body_start(node: tree_sitter::Node) -> Option<usize> {
+pub(super) fn body_start(node: tree_sitter::Node) -> Option<usize> {
     let body_kinds = &[
         "block", "statement_block", "suite", "declaration_list",
         "class_body", "enum_body", "field_declaration_list", "interface_body",
@@ -67,7 +68,7 @@ fn body_start(node: tree_sitter::Node) -> Option<usize> {
     None
 }
 
-fn node_text<'a>(node: tree_sitter::Node, source: &'a [u8]) -> &'a str {
+pub(super) fn node_text<'a>(node: tree_sitter::Node, source: &'a [u8]) -> &'a str {
     std::str::from_utf8(&source[node.start_byte()..node.end_byte()]).unwrap_or("")
 }
 

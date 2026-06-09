@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod extract;
+mod extract_csharp;
 mod index_impl;
 mod walk;
 
