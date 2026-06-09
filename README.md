@@ -19,6 +19,8 @@
   ╰──────────────────────────────────────┴─────────────────────────────╯
 ```
 
+[![Context Visibility in zap](https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg)](https://youtu.be/-wa1t2YiHDg?si=5XKkgaMx8H1LZtF4)
+
 ---
 
 ## The Problem Every AI Coding Agent Has
