@@ -30,6 +30,9 @@ agent_sessions.db
 # Article drafts — local only
 drafts/
 
+# Website — local only, not public yet
+website/
+
 # Development docs (tracked locally, not for distribution)
 tasks.md
 GAPS.md
