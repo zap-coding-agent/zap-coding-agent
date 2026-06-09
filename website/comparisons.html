@@ -427,8 +427,11 @@ The duplication one is the most meaningful miss. It's an architectural issue
 that affects the whole implementation plan, not just a detail."</div>
 
         <div class="subsection-title" style="margin-top:28px;">Screenshot: asking Claude Code if it missed anything</div>
-        <div id="screenshot-placeholder" style="margin-top:12px;padding:24px;background:var(--bg-code);border:1px solid var(--border-md);border-radius:6px;color:var(--text-2);font-size:0.9rem;">
-          <em>Screenshot will appear here once the image file is provided.</em>
+        <div style="margin-top:12px;">
+          <img src="assets/case-study-claude-code-missed.png"
+               alt="Claude Code's response when asked: 'zap picked because of good system prompt or code indexing approach or llm model capability?' — Claude Code explains that the provider list duplication was a code indexing catch, while Ollama URL and AuthSource enum were model capability, and notes the system prompt only set the framing."
+               style="width:100%;border-radius:6px;border:1px solid var(--border-md);display:block;" />
+          <p style="color:var(--text-2);font-size:0.8rem;margin-top:8px;line-height:1.5;">Claude Code's own analysis: the duplication catch came from code indexing (zap cited exact line numbers from <code>.zap/code.db</code>), not model capability or system prompt. Claude Code reviewed the doc in isolation with no access to the codebase.</p>
         </div>
       </section>
 
