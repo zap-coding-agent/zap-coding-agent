@@ -103,6 +103,79 @@ pub fn check_claude_code() -> Option<String> {
     if ok { Some("ready".into()) } else { None }
 }
 
+/// Returns `Some` if the `ollama` binary is installed on this machine.
+/// Checks common install paths and PATH; result is cached for 60 seconds.
+static OLLAMA_CACHE: Mutex<Option<(bool, Instant)>> = Mutex::new(None);
+
+pub fn check_ollama() -> Option<String> {
+    {
+        let lock = OLLAMA_CACHE.lock().ok()?;
+        if let Some((ok, ts)) = lock.as_ref() {
+            if ts.elapsed() < Duration::from_secs(60) {
+                return if *ok { Some("ready".into()) } else { None };
+            }
+        }
+    }
+
+    let fixed: &[&str] = &[
+        "/opt/homebrew/bin/ollama",
+        "/usr/local/bin/ollama",
+    ];
+    let on_path = fixed.iter().any(|p| std::path::Path::new(p).exists())
+        || std::env::var("PATH").ok()
+            .as_deref()
+            .unwrap_or("")
+            .split(':')
+            .any(|dir| std::path::Path::new(dir).join("ollama").exists());
+
+    if let Ok(mut lock) = OLLAMA_CACHE.lock() {
+        *lock = Some((on_path, Instant::now()));
+    }
+
+    if on_path { Some("ready".into()) } else { None }
+}
+
+/// Returns `Some` if LM Studio appears to be installed on this machine.
+/// Checks known app/config directories and the `lms` CLI binary.
+/// Result is cached for 60 seconds.
+static LM_STUDIO_CACHE: Mutex<Option<(bool, Instant)>> = Mutex::new(None);
+
+pub fn check_lm_studio() -> Option<String> {
+    {
+        let lock = LM_STUDIO_CACHE.lock().ok()?;
+        if let Some((ok, ts)) = lock.as_ref() {
+            if ts.elapsed() < Duration::from_secs(60) {
+                return if *ok { Some("ready".into()) } else { None };
+            }
+        }
+    }
+
+    let installed = dirs::home_dir()
+        .map(|h| {
+            // macOS: /Applications/LM Studio.app
+            std::path::Path::new("/Applications/LM Studio.app").exists()
+            // Linux snap / AppImage: ~/.local/share/LM Studio or ~/.config/LM Studio
+            || h.join(".local/share/LM Studio").is_dir()
+            || h.join(".config/LM Studio").is_dir()
+            // Windows: %APPDATA%/LM Studio or %LOCALAPPDATA%/LM Studio
+            || h.join("AppData/Roaming/LM Studio").is_dir()
+            || h.join("AppData/Local/LM Studio").is_dir()
+        })
+        .unwrap_or(false)
+        // lms CLI binary (bundled with LM Studio ≥0.3)
+        || std::env::var("PATH").ok()
+            .as_deref()
+            .unwrap_or("")
+            .split(':')
+            .any(|dir| std::path::Path::new(dir).join("lms").exists());
+
+    if let Ok(mut lock) = LM_STUDIO_CACHE.lock() {
+        *lock = Some((installed, Instant::now()));
+    }
+
+    if installed { Some("ready".into()) } else { None }
+}
+
 /// Invalidate the gcloud ADC cache so the next `check_gcloud_adc()` call
 /// re-probes the filesystem and subprocess (used after launching auth).
 pub fn invalidate_gcloud_cache() {
