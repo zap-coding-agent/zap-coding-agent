@@ -54,11 +54,13 @@
 
         <div class="sidebar-group">
           <span class="sidebar-heading">Core Features</span>
+          <a class="sidebar-link" href="#init"               data-section="init">Project Init (/init)</a>
           <a class="sidebar-link" href="#skills"             data-section="skills">Skill-First Context</a>
           <a class="sidebar-link" href="#code-index"         data-section="code-index">Code Indexing</a>
           <a class="sidebar-link" href="#context-visibility" data-section="context-visibility">Context Visibility</a>
           <a class="sidebar-link" href="#casual"             data-section="casual">Casual Messages</a>
           <a class="sidebar-link" href="#mcp"                data-section="mcp">Dynamic MCP Loading</a>
+          <a class="sidebar-link" href="#goal"               data-section="goal">Autonomous Mode</a>
         </div>
 
         <div class="sidebar-group">
@@ -251,6 +253,68 @@ api_key = <span class="c-str">"sk-..."</span></div>
 
         <div class="callout callout-tip">
           <strong>Tip:</strong> Set <code>mode = "auto"</code> to let zap run tools without asking for confirmation each time. Useful for trusted projects.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Project Init ─────────────────────────────────────────────── -->
+      <section class="doc-section" id="init">
+        <h2>Project Init</h2>
+        <p class="doc-lead">Run <code>/init</code> once in a new project and zap goes from blank-slate to fully context-aware in about 30 seconds. It builds the code index, reads your source files, and writes persistent knowledge files the agent loads on every future session.</p>
+
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-num">~30s</div><div class="stat-label">Time to full context</div></div>
+          <div class="stat-card"><div class="stat-num">4 files</div><div class="stat-label">Written automatically</div></div>
+          <div class="stat-card"><div class="stat-num">0</div><div class="stat-label">Manual steps after</div></div>
+        </div>
+
+        <div class="subsection-title">What /init does</div>
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>Detects your stack</h4>
+            <p>Identifies language and framework from manifests (<code>Cargo.toml</code>, <code>package.json</code>, <code>pom.xml</code>) and fires the right skill automatically.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Builds the code index</h4>
+            <p>Runs tree-sitter across your repo and writes the AST symbol index to <code>.zap/code.db</code>. The model queries what exists before writing anything new.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Writes project knowledge</h4>
+            <p>Asks the LLM to read your source and fill in <code>ZAP.md</code> — build commands, architecture, key files, do-not-touch list.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">Files created</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead><tr><th>File</th><th>What it contains</th><th>Loaded when</th></tr></thead>
+            <tbody>
+              <tr><td><code>ZAP.md</code></td><td>Project overview, build/test commands, architecture, do-not-touch list</td><td>Every session</td></tr>
+              <tr><td><code>.zap/understanding.md</code></td><td>Module map, data flows, non-obvious patterns, constraints</td><td>Every session</td></tr>
+              <tr><td><code>.zap/context.md</code></td><td>Last session: goal, files touched, what's next (auto-updated on exit)</td><td>Session start</td></tr>
+              <tr><td><code>.zap/session_log.md</code></td><td>History of all past sessions indexed by date</td><td>On request</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title">Example ZAP.md output</div>
+        <div class="code-block"><span class="c-dim">## Overview</span>
+Order service — handles order lifecycle (create, fulfil, cancel).
+
+<span class="c-dim">## Build &amp; Test</span>
+mvn clean install &amp;&amp; mvn test
+
+<span class="c-dim">## Architecture</span>
+- OrderController  → REST handlers
+- OrderService     → business logic, calls OrderRepository
+- OrderRepository  → JPA, Postgres via spring-data
+
+<span class="c-dim">## Do Not Touch</span>
+- LegacyOrderMapper.java — deprecated, backwards compat only</div>
+
+        <div class="callout callout-tip">
+          <strong>After /init:</strong> Every future session starts informed. The agent already knows your build commands, architecture, and what you worked on last time. You never re-explain the project.
         </div>
       </section>
 
@@ -639,6 +703,41 @@ Tests use testcontainers — don't mock the database.</div>
 
         <div class="callout callout-tip">
           <strong>Tip:</strong> Keep <code>CLAUDE.md</code> concise. It fires on every message — every token in it is spent whether the model needs it or not. Put language-specific context in trigger skills instead.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Autonomous Mode ──────────────────────────────────────────── -->
+      <section class="doc-section" id="goal">
+        <h2>Autonomous Mode</h2>
+        <p class="doc-lead"><code>/goal &lt;condition&gt;</code> runs turns automatically until the model signals it's done or a turn limit is reached. Use it for multi-step tasks you'd otherwise have to shepherd turn-by-turn.</p>
+
+        <div class="subsection-title">How it works</div>
+        <div class="code-block"><span class="c-dim"># Run until done, up to 20 turns (default)</span>
+/goal add pagination to the GET /orders endpoint and write tests
+
+<span class="c-dim"># Set a custom turn limit</span>
+/goal fix all clippy warnings --max 10
+
+<span class="c-dim"># Stop mid-flight</span>
+/goal stop</div>
+
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin: 16px 0;">The model runs tool calls autonomously each turn. When it's finished it ends its response with <code>✓ DONE</code> and the loop stops. The sidebar shows the goal condition, current turn, and elapsed time while it runs. Ctrl+C cancels at any point.</p>
+
+        <div class="two-col">
+          <div class="feature-row-item">
+            <h4>Good for</h4>
+            <p>Multi-file refactors, adding full feature layers (controller + service + tests), fixing all lints, running a test suite and fixing failures.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Permission mode</h4>
+            <p>Goal mode respects your current permission mode. Use <code>/mode auto</code> before <code>/goal</code> to let it run without confirmation prompts on every tool call.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-tip">
+          <strong>Tip:</strong> Be specific about the done condition. "Refactor auth module" is vague — "refactor auth module so all tests pass and cargo clippy has zero warnings" gives the model a clear signal to stop.
         </div>
       </section>
 
