@@ -403,9 +403,19 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
     let mut triggers    = Vec::new();
     let mut tokens      = 0usize;
     let mut category    = None;
+    let mut in_triggers = false; // collecting YAML list items under triggers:/trigger:
 
     for line in fm.lines() {
         let line = line.trim();
+
+        // YAML list item — only consumed when inside a triggers block
+        if in_triggers && line.starts_with("- ") {
+            let t = line[2..].trim().trim_matches('"').trim_matches('\'').to_string();
+            if !t.is_empty() { triggers.push(t); }
+            continue;
+        }
+        in_triggers = false;
+
         if line.starts_with("description:") {
             description = line.trim_start_matches("description:")
                 .trim().trim_matches('"').trim_matches('\'').to_string();
@@ -417,12 +427,20 @@ fn parse_frontmatter(fm: &str) -> ParsedFrontmatter {
             let val = line.trim_start_matches("priority:").trim();
             let clean: String = val.chars().filter(|c| c.is_ascii_digit()).collect();
             priority = clean.parse().unwrap_or(0).min(9);
-        } else if line.starts_with("trigger:") {
-            let val = line.trim_start_matches("trigger:").trim();
-            let inner = val.trim_matches(|c| c == '[' || c == ']');
-            for part in inner.split(',') {
-                let t = part.trim().trim_matches('"').trim_matches('\'').to_string();
-                if !t.is_empty() { triggers.push(t); }
+        } else if line.starts_with("triggers:") || line.starts_with("trigger:") {
+            // "triggers:" is used by Claude Code; "trigger:" is zap-native — both supported
+            let key_len = if line.starts_with("triggers:") { "triggers:".len() } else { "trigger:".len() };
+            let val = line[key_len..].trim();
+            if val.is_empty() {
+                // YAML block list — items follow on subsequent lines
+                in_triggers = true;
+            } else {
+                // Inline array: ["a", "b"]
+                let inner = val.trim_matches(|c| c == '[' || c == ']');
+                for part in inner.split(',') {
+                    let t = part.trim().trim_matches('"').trim_matches('\'').to_string();
+                    if !t.is_empty() { triggers.push(t); }
+                }
             }
         } else if line.starts_with("tokens:") {
             let val = line.trim_start_matches("tokens:").trim();

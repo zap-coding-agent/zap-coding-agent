@@ -27,6 +27,9 @@ agent_sessions.db
 # Claude Code session files
 .claude/
 
+# Article drafts — local only
+drafts/
+
 # Development docs (tracked locally, not for distribution)
 tasks.md
 GAPS.md

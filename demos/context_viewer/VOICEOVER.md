@@ -8,6 +8,23 @@
 
 [breathe, let the card land for 3 seconds before speaking]
 
+"Hey — welcome back.
+... Today I want to show you the most powerful feature I've built in zap —
+... something I haven't seen in any other coding agent."
+
+[pause 2s]
+
+"But first — if you're new here —
+... zap is a full terminal coding agent I built in Rust.
+... Fast, open-source, works with Anthropic, OpenAI, Gemini,
+... local models — basically anything.
+... A lot of features. Full TUI. Skills. Code indexing.
+... But today is about one thing —
+... context visibility and control. See exactly what's in your context window, and remove what you don't need.
+"
+
+[pause 2s]
+
 "Every AI coding tool shows you a number.
 ... Twenty-two percent.
 ... That's all you get."
@@ -237,6 +254,13 @@
 
 "Your context. Your control.
 ... This is /context in zap."
+
+[pause]
+
+"If you want to try it — zap is open-source,
+... link in the description.
+... Built in Rust. Fast. Free.
+... Give it a star if this was useful."
 
 [let summary card hold to end]
 

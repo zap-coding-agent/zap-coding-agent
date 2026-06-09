@@ -1,3 +1,99 @@
+## Session #282 — 2026-06-08
+Goal: i want to create you tube videos about zap , you creatd the one around context v
+Files: (no files modified)
+
+## Session #281 — 2026-06-08
+Goal: hi
+Files: (no files modified)
+
+## Session #279 — 2026-06-08
+Goal: possble to use kiro as an another llmprovide?
+Files: /Users/sanjeevgulati/personal-repos/ideas/src/session/commands/media.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/lifecycle.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/input.rs, /Users/sanjeevgulati/personal-repos/ideas/src/session/commands/mod.rs, /Users/sanjeevgulati/personal-repos/ideas/FEATURES.md, /Users/sanjeevgulati/personal-repos/ideas/Cargo.toml, /Users/sanjeevgulati/personal-repos/ideas/src/skill_manager.rs, /Users/sanjeevgulati/personal-repos/ideas/src/config.rs, /Users/sanjeevgulati/personal-repos/ideas/src/session/turn.rs, /Users/sanjeevgulati/personal-repos/ideas/src/session/mod.rs
+
+## Session #274 — 2026-06-05
+Goal: Give me a quick overview of this Flask project — what it does and how it's str
+Files: (no files modified)
+
+## Session #270 — 2026-06-04
+Goal: what was the commadn to view index and sql queries
+Files: (no files modified)
+
+## Session #254 — 2026-06-02
+Goal: hi
+Files: (no files modified)
+
+## Session #253 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #252 — 2026-06-01
+Goal: fsfsfs
+Files: (no files modified)
+
+## Session #250 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #248 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #246 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #245 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #243 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #242 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #241 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #240 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #239 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #237 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #232 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #231 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #228 — 2026-06-01
+Goal: hi
+Files: (no files modified)
+
+## Session #224 — 2026-06-01
+Goal: can you plan for implemetinng Gemini login , it hsould use proper gemini login t
+Files: (no files modified)
+
+## Session #226 — 2026-05-31
+Goal: hi
+Files: (no files modified)
+
+## Session #224 — 2026-05-31
+Goal: can you plan for implemetinng Gemini login , it hsould use proper gemini login t
+Files: /Users/sanjeevgulati/personal-repos/ideas/docs/roadmap/gemini-login.md, /Users/sanjeevgulati/personal-repos/ideas/src/llm_client/credentials.rs, /Users/sanjeevgulati/personal-repos/ideas/src/llm_client/mod.rs, /Users/sanjeevgulati/personal-repos/ideas/config.rs, /Users/sanjeevgulati/personal-repos/ideas/src/config.rs, /Users/sanjeevgulati/personal-repos/ideas/src/llm_client/openai.rs, /Users/sanjeevgulati/personal-repos/ideas/src/llm_client/anthropic.rs, /Users/sanjeevgulati/personal-repos/ideas/src/session/commands/provider.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/mod.rs, /Users/sanjeevgulati/personal-repos/ideas/src/llm_client/auth.rs, src/tui/app.rs, src/tui/turn_handler.rs, src/tui/render/overlays.rs, src/tui/mod.rs, src/session/commands/provider.rs, src/llm_client/mod.rs, src/llm_client/auth.rs, src/llm_client/credentials.rs, src/llm_client/openai.rs, /Users/sanjeevgulati/personal-repos/ideas/README.md, /Users/sanjeevgulati/personal-repos/ideas/FEATURES.md, /Users/sanjeevgulati/personal-repos/ideas/Cargo.toml, /Users/sanjeevgulati/personal-repos/ideas/src/tui/render/provider_picker.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/render/mod.rs, /Users/sanjeevgulati/personal-repos/ideas/src/tui/render/overlays.rs
+
 ## Session #220 — 2026-05-31
 Goal: hi
 Files: docs/roadmap/provider-auto-detection.md

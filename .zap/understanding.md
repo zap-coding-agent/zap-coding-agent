@@ -3,22 +3,65 @@
 
 <!-- zap:auto-stats:begin -->
 ## Project
-ideas v0.13.67 · 297 files · 4645 symbols
+ideas v0.13.99 · 321 files · 4847 symbols
 
 ### Languages
   - python: 3154 symbols
-  - rust: 1491 symbols
+  - rust: 1693 symbols
 
 ### Source modules
-  agent_core, audit, cli, config, context_manager, hooks, http, log, main, mcp, permission_manager, persistence, project, remote, remote_channel, secret_scanner, shell_runner, skill_manager, snapshot, stream_highlighter
+  agent_core, audit, cli, config, context_manager, context_utils, hooks, http, log, main, mcp, permission_manager, persistence, project, remote, remote_channel, secret_scanner, shell_runner, skill_manager, snapshot
 
 ### Built-in skills
-  25 skills in `src/default_skills/`
+  26 skills in `src/default_skills/`
 
 <!-- zap:auto-stats:end -->
 
 ## Analysis
 <!-- Run `/init` for a detailed LLM-powered analysis of architecture, patterns, and key modules. -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
