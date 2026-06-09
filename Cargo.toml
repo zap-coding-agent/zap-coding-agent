@@ -2,6 +2,14 @@
 name = "zap-coding-agent"
 version = "0.13.102"
 edition = "2021"
+description = "Skill-first AI coding agent in Rust. Injects only the context your task needs — no prompt bloat. Single binary, no runtime."
+homepage = "https://zap.justpush.cloud"
+repository = "https://github.com/zap-coding-agent/zap-coding-agent"
+documentation = "https://zap.justpush.cloud/docs.html"
+readme = "README.md"
+license = "MIT"
+keywords = ["ai", "coding-agent", "llm", "cli", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "zap"

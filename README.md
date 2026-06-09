@@ -1,5 +1,11 @@
 # ⚡ Zap Coding Agent
 
+**[Website](https://zap.justpush.cloud) · [Docs](https://zap.justpush.cloud/docs.html) · [Install](#install) · [Demo](https://youtu.be/-wa1t2YiHDg)**
+
+[![Crates.io](https://img.shields.io/crates/v/zap-coding-agent?color=5b3ff8)](https://crates.io/crates/zap-coding-agent)
+[![License: MIT](https://img.shields.io/badge/license-MIT-5b3ff8)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/zap-coding-agent/zap-coding-agent?color=5b3ff8)](https://github.com/zap-coding-agent/zap-coding-agent/releases/latest)
+
 > An AI coding agent built in Rust — skill-first context injection, a hard security boundary, and a single binary with no runtime.
 
 ```
