@@ -1,0 +1,42 @@
+# Zap — AI Coding Agent Built in Rust
+
+> Zap is a fast, open-source AI coding agent. It injects only the context your task needs — no prompt bloat. Single binary, no runtime dependencies. Works with Claude, Gemini, OpenAI, DeepSeek, and local models via LM Studio or Ollama.
+
+## What makes zap different
+
+- **Skill-first context**: Skills are markdown files injected only when your message triggers them. A Rust question gets the Rust skill. A greeting costs 31 tokens, not 2,000.
+- **AST code index**: Built with tree-sitter + SQLite. The model knows what already exists before deciding what to create — no duplicate files, no invented patterns.
+- **Context visibility**: See exactly what's in the context window. Remove stale messages with `/context drop` without starting a new session.
+- **Dynamic MCP loading**: MCP servers stay pending at startup. Tool schemas only enter context when explicitly needed.
+- **Multi-provider**: Claude, Gemini, OpenAI, DeepSeek, LM Studio, Ollama. Switch mid-session with `/model`.
+- **Single binary**: Written in Rust. Cold start in milliseconds. No Python venv, no Node.js, no Docker.
+- **Zero telemetry**: No usage data sent anywhere. MIT licensed.
+
+## Install
+
+```bash
+cargo install zap-coding-agent
+```
+
+Or download a pre-built binary from https://github.com/zap-coding-agent/zap-coding-agent/releases
+
+## Docs
+
+- [Getting Started](https://zap.justpush.cloud/docs.html#install)
+- [Configuration](https://zap.justpush.cloud/docs.html#config)
+- [Skill-First Context](https://zap.justpush.cloud/docs.html#skills)
+- [Code Indexing](https://zap.justpush.cloud/docs.html#code-index)
+- [Context Visibility](https://zap.justpush.cloud/docs.html#context-visibility)
+- [Dynamic MCP Loading](https://zap.justpush.cloud/docs.html#mcp)
+- [Multi-Provider](https://zap.justpush.cloud/docs.html#providers)
+- [Security Boundary](https://zap.justpush.cloud/docs.html#security)
+- [Session Memory](https://zap.justpush.cloud/docs.html#session-memory)
+- [Commands Reference](https://zap.justpush.cloud/docs.html#commands)
+
+## Links
+
+- Website: https://zap.justpush.cloud
+- GitHub: https://github.com/zap-coding-agent/zap-coding-agent
+- Crates.io: https://crates.io/crates/zap-coding-agent
+- Issues: https://github.com/zap-coding-agent/zap-coding-agent/issues
+- Demo video: https://youtu.be/-wa1t2YiHDg
