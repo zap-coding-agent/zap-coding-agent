@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zap vs Others — System Prompt, Memory &amp; Code Indexing</title>
+  <meta name="description" content="Technical comparison of Zap vs Claude Code, Gemini CLI, OpenCode and Cline: system prompt efficiency, memory &amp; session persistence, and a live code-review case study." />
+  <link rel="canonical" href="https://zap.justpush.cloud/comparisons.html" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:url"         content="https://zap.justpush.cloud/comparisons.html" />
+  <meta property="og:title"       content="Zap vs Claude Code, Gemini CLI &amp; Others" />
+  <meta property="og:description" content="System prompt token counts, memory/session feature tables, and a live code-review case study where code indexing made the difference." />
+  <meta property="og:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="Zap vs Claude Code, Gemini CLI &amp; Others" />
+  <meta name="twitter:description" content="System prompt sizes, memory features, and a live code-review case study." />
+  <meta name="twitter:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <div id="nav-placeholder"></div>
+
+  <!-- DOCS SHELL -->
+  <div class="docs-shell">
+
+    <!-- SIDEBAR -->
+    <aside class="docs-sidebar">
+      <nav class="sidebar-nav">
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">System Prompt</span>
+          <a class="sidebar-link" href="#system-prompt"  data-section="system-prompt">Efficiency Comparison</a>
+          <a class="sidebar-link" href="#token-table"    data-section="token-table">Token Counts</a>
+          <a class="sidebar-link" href="#skill-injection" data-section="skill-injection">Skill Injection</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Memory &amp; Sessions</span>
+          <a class="sidebar-link" href="#memory"         data-section="memory">Persistence Systems</a>
+          <a class="sidebar-link" href="#memory-table"   data-section="memory-table">Feature Table</a>
+          <a class="sidebar-link" href="#where-zap-leads" data-section="where-zap-leads">Where Zap Leads</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Live Case Study</span>
+          <a class="sidebar-link" href="#case-study"     data-section="case-study">Code Review Setup</a>
+          <a class="sidebar-link" href="#review-outputs" data-section="review-outputs">Side-by-Side Outputs</a>
+          <a class="sidebar-link" href="#what-explains"  data-section="what-explains">What Explains It</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Docs</span>
+          <a class="sidebar-link" href="docs.html">← Back to Docs</a>
+        </div>
+
+      </nav>
+    </aside>
+
+    <!-- CONTENT -->
+    <main class="docs-content">
+
+      <!-- ── System Prompt Efficiency ──────────────────────────────────── -->
+      <section class="doc-section" id="system-prompt">
+        <h2>System Prompt Efficiency</h2>
+        <p class="doc-lead">Most agents send the same monolithic system prompt on every turn regardless of what you typed. Zap sends a minimal base and injects domain content only when a relevant keyword triggers a skill.</p>
+
+        <div class="callout callout-tip">
+          <strong>Source:</strong> Zap source (<code>src/context_manager.rs</code>, <code>src/skill_manager.rs</code>). Claude Code: Piebald-AI/claude-code-system-prompts v2.1.162 (June 2026). Gemini CLI: open-source <code>gemini-cli</code> repo. OpenCode: bgauryy/open-docs. Cline: dontriskit/awesome-ai-system-prompts.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Token Counts ─────────────────────────────────────────────── -->
+      <section class="doc-section" id="token-table">
+        <h2>Token Counts per Turn</h2>
+        <p class="doc-lead">Tokens spent on the system prompt are paid on every turn — they never help the model write better code, they just define how it behaves. Leaner prompts leave more budget for real context.</p>
+
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Regular turn</th>
+                <th>Casual turn ("ok", "thanks")</th>
+                <th>How it varies</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Zap</strong></td>
+                <td>~1,750–8,000</td>
+                <td><strong>~15</strong></td>
+                <td>Skills injected only when keyword fires; casual turns skip everything</td>
+              </tr>
+              <tr>
+                <td>Claude Code</td>
+                <td>~8,000–20,000+</td>
+                <td>~8,000+</td>
+                <td>Full prompt every turn; git instructions always present even on non-git work</td>
+              </tr>
+              <tr>
+                <td>Gemini CLI</td>
+                <td>~3,000–6,000</td>
+                <td>~3,000</td>
+                <td>Always-on: date, git context, compression instructions, edit fixer</td>
+              </tr>
+              <tr>
+                <td>OpenCode</td>
+                <td>~2,000–5,000</td>
+                <td>~2,000</td>
+                <td>Provider-specific static file + env block always present</td>
+              </tr>
+              <tr>
+                <td>Cline</td>
+                <td>~8,000–15,000</td>
+                <td>~8,000</td>
+                <td>Complete tool descriptions inline; no conditional injection</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout" style="margin-top:20px;">
+          <strong>The casual turn gap is the most telling.</strong> When you type "ok" or "looks good", zap spends 15 tokens. Claude Code spends 8,000+. That's 500× more — for a turn where no code is being written and the instructions are wasted.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Skill Injection ──────────────────────────────────────────── -->
+      <section class="doc-section" id="skill-injection">
+        <h2>How Skill Injection Works</h2>
+        <p class="doc-lead">Instead of a 10,000-token monolith, zap assembles the system prompt dynamically. The base is ~1,750 tokens. Skills add context only when the message triggers them.</p>
+
+        <div class="subsection-title">Always-on base (~1,750 tokens)</div>
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>Identity + Environment</h4>
+            <p>Role, platform, shell, CWD. ~50 tokens.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Code Navigation Strategy</h4>
+            <p>Tool order: code_map → find_definition → search_code → read_file. ~300 tokens.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Security Rules</h4>
+            <p>6 non-negotiables: no force-push to main, no --no-verify, no secret files. ~100 tokens.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">Trigger-matched skills (injected only when relevant)</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th>Skill</th><th>Fires when message contains</th><th>Tokens added</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>git</code></td><td>commit, branch, merge, rebase, push, PR, conflict</td><td>~400</td></tr>
+              <tr><td><code>code-review</code></td><td>review, PR, pull request, diff, feedback</td><td>~300</td></tr>
+              <tr><td><code>debugging</code></td><td>bug, error, crash, exception, trace, debug, fail</td><td>~350</td></tr>
+              <tr><td><code>deploy</code></td><td>deploy, CI, CD, pipeline, release, docker</td><td>~300</td></tr>
+              <tr><td><code>security</code></td><td>vulnerability, injection, XSS, OWASP, CVE, auth</td><td>~400</td></tr>
+              <tr><td>Language skills</td><td>Detected from file extensions in CWD (Rust, TS, Go, Python…)</td><td>~200–600</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-top:16px;">Compare this to Claude Code, which always sends ~800 tokens of git workflow instructions — even when you're asking it to explain a CSS rule. The instructions are permanently embedded in the Bash tool description, not gated by keywords.</p>
+
+        <div class="callout callout-tip">
+          <strong>Skill files are plain markdown</strong> and fully customizable. Drop a <code>.md</code> file in <code>~/.zap/skills/</code> with a <code>trigger:</code> array and it fires when those keywords appear. See <a href="docs.html#skills">Skill-First Context ↗</a>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Memory & Session Persistence ────────────────────────────── -->
+      <section class="doc-section" id="memory">
+        <h2>Memory &amp; Session Persistence</h2>
+        <p class="doc-lead">How an agent remembers things across sessions defines how useful it is on long-running projects. Here's how zap and Claude Code store, inject, and expire memory.</p>
+
+        <div class="subsection-title">Zap's storage systems</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th>Store</th><th>Format</th><th>Scope</th><th>Injected when</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>~/.zap/agent.db</code> — memory table</td>
+                <td>SQLite key-value</td>
+                <td>Global (all projects)</td>
+                <td>Every non-casual turn</td>
+              </tr>
+              <tr>
+                <td><code>.zap/context.md</code></td>
+                <td>Markdown</td>
+                <td>Project-local</td>
+                <td>Session start (TUI always; CLI asks)</td>
+              </tr>
+              <tr>
+                <td><code>.zap/understanding.md</code></td>
+                <td>Markdown (LLM-generated by <code>/init</code>)</td>
+                <td>Project-local</td>
+                <td>Every session start, capped at 4,000 chars</td>
+              </tr>
+              <tr>
+                <td><code>.zap/session_log.md</code></td>
+                <td>Markdown, append-only</td>
+                <td>Project-local</td>
+                <td>Lazy hint only — LLM reads on demand</td>
+              </tr>
+              <tr>
+                <td><code>~/.zap/agent.db</code> — sessions table</td>
+                <td>SQLite</td>
+                <td>Global</td>
+                <td>On demand via <code>/sessions</code> picker</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title" style="margin-top:24px;">Accessing memory without zap</div>
+        <div class="code-block"><span class="c-dim"># Read all memory entries</span>
+sqlite3 ~/.zap/agent.db "SELECT key, value, updated_at FROM memory ORDER BY key;"
+
+<span class="c-dim"># See recent sessions</span>
+sqlite3 ~/.zap/agent.db "SELECT id, goal, model, created_at FROM sessions ORDER BY id DESC LIMIT 20;"</div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Feature Table ────────────────────────────────────────────── -->
+      <section class="doc-section" id="memory-table">
+        <h2>Memory Feature Table</h2>
+        <p class="doc-lead">Zap vs Claude Code, feature by feature.</p>
+
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th>Feature</th><th>Zap</th><th>Claude Code</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Session persistence</td><td>SQLite <code>sessions</code> + <code>session_messages</code></td><td><code>.jsonl</code> file per conversation</td></tr>
+              <tr><td>Session resume</td><td><code>/sessions</code> interactive picker</td><td>Conversation history in UI</td></tr>
+              <tr><td>Conversation branching</td><td>✅ Named forks via <code>branches</code> table</td><td>❌ Not available</td></tr>
+              <tr><td>Memory storage</td><td>SQLite key-value (<code>memory</code> table)</td><td>Typed <code>.md</code> files per project</td></tr>
+              <tr><td>Memory auto-save by LLM</td><td>✅ <code>memory_set</code> tool — proactive saving</td><td>✅ LLM saves proactively</td></tr>
+              <tr><td>Memory in system prompt</td><td>✅ All entries injected every non-casual turn</td><td>✅ MEMORY.md index always in context</td></tr>
+              <tr><td>Memory types</td><td>Flat key-value</td><td>✅ user / feedback / project / reference</td></tr>
+              <tr><td>New memory visible this session</td><td>✅ Patched into system prompt after tool round</td><td>✅ LLM knows what it wrote immediately</td></tr>
+              <tr><td>Session handoff file</td><td>✅ <code>.zap/context.md</code> (goal + files + next steps)</td><td>❌ None</td></tr>
+              <tr><td>Session log with file tracking</td><td>✅ <code>.zap/session_log.md</code></td><td>❌ None</td></tr>
+              <tr><td>LLM-generated project knowledge</td><td>✅ <code>.zap/understanding.md</code> (from <code>/init</code>)</td><td>❌ None</td></tr>
+              <tr><td>Code symbol index</td><td>✅ <code>.zap/code.db</code> (SQLite, instant lookup)</td><td>❌ Greps every query</td></tr>
+              <tr><td>File undo</td><td>✅ In-memory snapshot stack</td><td>❌ None</td></tr>
+              <tr><td>Sliding window summarization</td><td>✅ LLM summarizes dropped turns automatically</td><td>Manual <code>/compact</code> only</td></tr>
+              <tr><td>Context viewer</td><td>✅ TUI overlay with token usage per turn</td><td>❌ None</td></tr>
+              <tr><td>Audit log</td><td>✅ <code>~/.zap/audit.jsonl</code> (every tool call)</td><td>❌ No local audit</td></tr>
+              <tr><td>Casual turn optimization</td><td>✅ ~15 tokens for "ok"/"yes"/"thanks"</td><td>❌ Full prompt every turn</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Where Zap Leads ──────────────────────────────────────────── -->
+      <section class="doc-section" id="where-zap-leads">
+        <h2>Where Zap Leads</h2>
+        <p class="doc-lead">These aren't gaps to close — they're features Claude Code doesn't have at all.</p>
+
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>Conversation branching</h4>
+            <p>Try an alternative approach without losing current state. Named forks stored in <code>agent.db</code>.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Code symbol index</h4>
+            <p><code>find_definition</code> returns in milliseconds. Other agents grep every time. <a href="docs.html#code-index">See docs →</a></p>
+          </div>
+          <div class="feature-row-item">
+            <h4>understanding.md</h4>
+            <p>LLM-generated architectural reference, always in context from <code>/init</code>. No re-exploration every session.</p>
+          </div>
+        </div>
+        <div class="feature-row" style="margin-top:16px;">
+          <div class="feature-row-item">
+            <h4>Session log</h4>
+            <p>Which files were touched in which session. <code>.zap/session_log.md</code> — human-readable, append-only.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Context viewer</h4>
+            <p>See every message in context with its token count. Drop stale turns without restarting. <a href="docs.html#context-visibility">See docs →</a></p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Audit log</h4>
+            <p>Every tool call recorded to <code>~/.zap/audit.jsonl</code>. Useful for debugging unexpected changes and cost tracking.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Case Study Setup ─────────────────────────────────────────── -->
+      <section class="doc-section" id="case-study">
+        <h2>Live Case Study: Code Review</h2>
+        <p class="doc-lead">A requirements document proposing multi-phase credential auto-detection was reviewed by two agents in the same session — Claude Code (no index, file access via tools) and Zap (DeepSeek V4 Pro, code index active). Same document, same task, different results.</p>
+
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-num">4</div><div class="stat-label">issues Claude Code caught</div></div>
+          <div class="stat-card"><div class="stat-num">4</div><div class="stat-label">issues zap caught</div></div>
+          <div class="stat-card"><div class="stat-num">1</div><div class="stat-label">architectural miss (Claude Code only)</div></div>
+        </div>
+
+        <div class="subsection-title">Setup</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th></th><th>Claude Code</th><th>Zap (DeepSeek V4 Pro)</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Code index</td><td>❌ None — relies on grep/Read</td><td>✅ <code>.zap/code.db</code> built with <code>/init</code></td></tr>
+              <tr><td>File access during review</td><td>Yes (Read, Bash, grep)</td><td>Yes + SQL queries against index</td></tr>
+              <tr><td>Did it query source files?</td><td>No — reviewed doc in isolation</td><td>Yes — cross-referenced proposals against actual code</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Side-by-Side Outputs ─────────────────────────────────────── -->
+      <section class="doc-section" id="review-outputs">
+        <h2>Side-by-Side Outputs</h2>
+
+        <div class="subsection-title">What each agent caught</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th>Finding</th><th>Claude Code</th><th>Zap</th><th>How</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Provider list duplication</strong> — same 13-item list in two files</td>
+                <td>❌ Missed</td>
+                <td>✅ Exact file + line numbers</td>
+                <td>SQL query against <code>code.db</code> found both copies</td>
+              </tr>
+              <tr>
+                <td>Ollama probe URL wrong (<code>localhost:11434</code> → should be <code>/api/tags</code>)</td>
+                <td>Partially (flagged timeout, not URL)</td>
+                <td>✅ Specific fix</td>
+                <td>Model knowledge about Ollama API</td>
+              </tr>
+              <tr>
+                <td>AuthSource enum design (concrete <code>EnvVar / ShellCommand / HttpProbe</code> shape)</td>
+                <td>Vague — "needs richer return type"</td>
+                <td>✅ Actionable enum design</td>
+                <td>Model capability, more specific reasoning</td>
+              </tr>
+              <tr>
+                <td>Gemini auth wrong (gcloud ≠ AI Studio API key)</td>
+                <td>✅ Caught</td>
+                <td>❌ Missed</td>
+                <td>Model knowledge about Google's two API surfaces</td>
+              </tr>
+              <tr>
+                <td>Copilot needs extra HTTP header (<code>editor-version</code>)</td>
+                <td>✅ Caught</td>
+                <td>❌ Missed</td>
+                <td>Model knowledge about Copilot API</td>
+              </tr>
+              <tr>
+                <td>Key persistence unspecified (where does wizard save the key?)</td>
+                <td>✅ Caught</td>
+                <td>❌ Missed</td>
+                <td>Document analysis</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title" style="margin-top:28px;">Zap's key finding (verbatim)</div>
+        <div class="code-block"><span class="c-dim">-- Blocking Issue #1: Provider list duplication is not addressed</span>
+
+The same 13-provider list exists in two places:
+  src/session/commands/provider.rs:22-36   (CLI)
+  src/tui/turn_handler.rs:76-91            (TUI)
+
+Phase 1 should start by extracting a single PROVIDERS: &[ProviderDef] constant.
+Every phase modifies "both files" — that means duplicating every change
+(Copilot addition, Claude Code activation, env_key additions).
+This is the single biggest maintainability risk in the current code and the
+proposal adds more fields without fixing the root cause.
+→ blocking: Add a Phase 0: extract provider definitions to a shared constant.</div>
+
+        <div class="subsection-title" style="margin-top:28px;">When Claude Code was asked what it missed</div>
+        <div class="code-block"><span class="c-dim"># Claude Code's own assessment (verbatim)</span>
+
+"Yes — three things:
+
+1. Provider list duplication (Phase 0) — this was my cleanest miss.
+   I never flagged that the same 13-provider list lives in both provider.rs
+   and turn_handler.rs. Zap caught that every proposed change would need
+   to be made twice. I didn't mention this at all.
+
+2. Ollama probe URL — I flagged 'timeout is unspecified' but didn't catch
+   that localhost:11434 is the wrong target. Zap specifically identified
+   /api/tags as the correct lightweight endpoint. I was half-right.
+
+3. AuthSource enum specificity — I said Option&lt;String&gt; was wrong but was
+   vague about the shape. Zap proposed the concrete enum and drew the right
+   conclusion that this should move to Phase 2 before Copilot is added.
+
+The duplication one is the most meaningful miss. It's an architectural issue
+that affects the whole implementation plan, not just a detail."</div>
+
+        <div class="subsection-title" style="margin-top:28px;">Screenshot: asking Claude Code if it missed anything</div>
+        <div id="screenshot-placeholder" style="margin-top:12px;padding:24px;background:var(--bg-code);border:1px solid var(--border-md);border-radius:6px;color:var(--text-2);font-size:0.9rem;">
+          <em>Screenshot will appear here once the image file is provided.</em>
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── What Explains the Difference ─────────────────────────────── -->
+      <section class="doc-section" id="what-explains">
+        <h2>What Explains the Difference</h2>
+
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr><th>Finding</th><th>Who caught it</th><th>Why</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Provider list duplication</td>
+                <td><strong>Zap</strong></td>
+                <td>Queried code index — found exact file+line for both copies. Claude Code had file access but no pre-built index and didn't grep.</td>
+              </tr>
+              <tr>
+                <td>Ollama probe URL</td>
+                <td><strong>Zap</strong></td>
+                <td>Factual model knowledge about the Ollama API. Claude Code flagged timeout but not the wrong URL.</td>
+              </tr>
+              <tr>
+                <td>AuthSource enum (concrete shape)</td>
+                <td><strong>Zap</strong></td>
+                <td>More specific reasoning on the same concern Claude Code raised vaguely.</td>
+              </tr>
+              <tr>
+                <td>Gemini auth wrong</td>
+                <td><strong>Claude Code</strong></td>
+                <td>Factual model knowledge about Google's two API surfaces. Zap didn't catch this.</td>
+              </tr>
+              <tr>
+                <td>Copilot extra header</td>
+                <td><strong>Claude Code</strong></td>
+                <td>Factual model knowledge about the Copilot API.</td>
+              </tr>
+              <tr>
+                <td>Key persistence gap</td>
+                <td><strong>Claude Code</strong></td>
+                <td>Document analysis — both could have caught it; zap didn't.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout callout-tip" style="margin-top:24px;">
+          <strong>The provider list duplication</strong> — the most architecturally significant finding — required knowing the actual state of the code. Claude Code has file access but no pre-built index and didn't look. Zap had the index, was instructed to use it, and cited exact line numbers. That's what running <code>/init</code> buys.
+        </div>
+
+        <div class="callout" style="margin-top:16px;">
+          <strong>Note on model vs tooling.</strong> Zap in this test used DeepSeek V4 Pro, not Claude. The duplication catch came from the code index — a tool, not model capability. The model just had to read two SQL rows to see both file paths. The Gemini auth and Copilot header catches came from model knowledge — Claude Code's model (Claude Sonnet) happened to know those API details better.
+        </div>
+
+        <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border);">
+          <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;">
+            <strong>Date:</strong> 2026-05-31. Full raw outputs available in <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/live-zap-comparison/01-code-indexing-catches-duplication.md" target="_blank" rel="noopener" style="color:var(--purple);">docs/live-zap-comparison/ ↗</a>
+          </p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="footer-placeholder"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -28,16 +28,7 @@
 <body>
 
   <!-- NAV -->
-  <nav>
-    <div class="nav-inner">
-      <a href="index.html" class="logo">⚡ zap</a>
-      <div class="nav-links">
-        <a href="docs.html" style="color:var(--purple);font-weight:600;">Docs</a>
-        <a href="index.html#install">Install</a>
-        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
-      </div>
-    </div>
-  </nav>
+  <div id="nav-placeholder"></div>
 
   <!-- DOCS SHELL -->
   <div class="docs-shell">
@@ -73,6 +64,11 @@
         <div class="sidebar-group">
           <span class="sidebar-heading">Reference</span>
           <a class="sidebar-link" href="#commands"  data-section="commands">Commands</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Deep Dives</span>
+          <a class="sidebar-link" href="comparisons.html">Zap vs Others ↗</a>
         </div>
 
       </nav>
@@ -214,7 +210,9 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."</div>
         </div>
 
         <div class="callout callout-tip" style="margin-top:28px;">
-          <strong>First run tip:</strong> Type <code>/init</code> to build the code index and let zap read your project structure. It takes 10–30 seconds and runs once per project.
+          <strong>Recommended: run <code>/init</code> after installing.</strong>
+          <p style="margin:8px 0 0;">This builds the AST code index and generates a project summary. It takes 10–30 seconds and runs once per project. With the index active, zap resolves symbol locations from <code>.zap/code.db</code> instead of grepping — typically <strong>3–5 fewer tool calls per task</strong>, and no duplicate files or invented patterns.</p>
+          <p style="margin:8px 0 0;">After big refactors, run <code>/index</code> to rebuild. See <a href="#code-index">Code Indexing ↓</a> for how this works and a real-world example.</p>
         </div>
       </section>
 
@@ -448,8 +446,31 @@ FROM symbols
 WHERE path LIKE '%user_store%' AND kind = 'function'
 ORDER BY line;</div>
 
-        <div class="callout callout-tip">
-          <strong>Result:</strong> No duplicate files, no invented patterns. The model knows your codebase structure before it writes a single line.
+        <div class="subsection-title">Fewer tool calls per task</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:16px;">Without an index, an agent must grep through files to find where a symbol lives — that's multiple tool calls before it can even start. With the index built, zap resolves it in one SQL query.</p>
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without /init (no index)</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 3–5 tool calls to find one symbol</span>
+search_code("ProviderEntry")
+→ too many results, grep again
+search_code("ProviderEntry struct")
+→ found hint, read the file
+read_file("src/session/commands/provider.rs")
+→ got the definition</div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">With /init (index active)</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 1 SQL query, exact line number</span>
+find_definition("ProviderEntry")
+→ src/session/commands/provider.rs:31
+   src/tui/turn_handler.rs:82
+<span class="c-dim"># Two copies found — the duplication</span>
+<span class="c-dim"># is visible immediately</span></div>
+          </div>
+        </div>
+        <div class="callout" style="margin-top:16px;">
+          <strong>Real-world example:</strong> In a live code review, zap (with index) identified that the same 13-provider list was duplicated across two files — and flagged it as a Phase 0 refactor risk. Claude Code (without index, no grep) missed it entirely. <a href="comparisons.html#case-study" style="color:var(--purple);">See the full case study →</a>
         </div>
       </section>
 
@@ -778,18 +799,7 @@ Tests use testcontainers — don't mock the database.</div>
   </div>
 
   <!-- FOOTER -->
-  <footer>
-    <div class="container footer-inner">
-      <a href="index.html" class="logo">⚡ zap</a>
-      <div class="footer-links">
-        <a href="docs.html">Docs</a>
-        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Releases</a>
-        <a href="https://github.com/zap-coding-agent/zap-coding-agent/issues" target="_blank" rel="noopener">Issues</a>
-      </div>
-      <span class="footer-note">Built in Rust. MIT License.</span>
-    </div>
-  </footer>
+  <div id="footer-placeholder"></div>
 
   <script src="script.js"></script>
 </body>

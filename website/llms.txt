@@ -24,14 +24,23 @@ Or download a pre-built binary from https://github.com/zap-coding-agent/zap-codi
 
 - [Getting Started](https://zap.justpush.cloud/docs.html#install)
 - [Configuration](https://zap.justpush.cloud/docs.html#config)
+- [Project Init (/init)](https://zap.justpush.cloud/docs.html#init)
 - [Skill-First Context](https://zap.justpush.cloud/docs.html#skills)
 - [Code Indexing](https://zap.justpush.cloud/docs.html#code-index)
 - [Context Visibility](https://zap.justpush.cloud/docs.html#context-visibility)
 - [Dynamic MCP Loading](https://zap.justpush.cloud/docs.html#mcp)
+- [Autonomous Mode (/goal)](https://zap.justpush.cloud/docs.html#goal)
 - [Multi-Provider](https://zap.justpush.cloud/docs.html#providers)
 - [Security Boundary](https://zap.justpush.cloud/docs.html#security)
 - [Session Memory](https://zap.justpush.cloud/docs.html#session-memory)
 - [Commands Reference](https://zap.justpush.cloud/docs.html#commands)
+
+## Comparisons
+
+- [System Prompt Efficiency](https://zap.justpush.cloud/comparisons.html#system-prompt)
+- [Token Counts per Turn](https://zap.justpush.cloud/comparisons.html#token-table)
+- [Memory & Session Feature Table](https://zap.justpush.cloud/comparisons.html#memory-table)
+- [Live Code Review Case Study](https://zap.justpush.cloud/comparisons.html#case-study)
 
 ## Links
 

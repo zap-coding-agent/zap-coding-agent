@@ -1,3 +1,29 @@
+// ── Nav/footer partials ────────────────────────────────────────────
+async function loadPartials() {
+  const page = window.location.pathname.split('/').pop() || 'index.html';
+  for (const part of ['nav', 'footer']) {
+    const placeholder = document.getElementById(part + '-placeholder');
+    if (!placeholder) continue;
+    try {
+      const res = await fetch('partials/' + part + '.html');
+      const html = await res.text();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html.trim();
+      const el = tmp.firstElementChild;
+      placeholder.replaceWith(el);
+      if (part === 'nav') {
+        el.querySelectorAll('[data-nav]').forEach(a => {
+          if (a.getAttribute('data-nav') === page) {
+            a.style.color = 'var(--purple)';
+            a.style.fontWeight = '600';
+          }
+        });
+      }
+    } catch (e) { /* no-op: local file:// won't support fetch */ }
+  }
+}
+document.addEventListener('DOMContentLoaded', loadPartials);
+
 // ── Copy install command ───────────────────────────────────────────
 function copyInstall(btn) {
   const cmd = btn.closest('.install-box').querySelector('.install-cmd').textContent;
