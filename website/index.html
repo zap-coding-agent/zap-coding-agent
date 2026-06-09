@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zap — AI Coding Agent Built in Rust</title>
+  <meta name="description" content="A fast, open-source AI coding agent. Skill-first context injection, AST code index, single binary. Works with Claude, Gemini, OpenAI, and local models." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <span class="logo">⚡ zap</span>
+      <div class="nav-links">
+        <a href="docs.html">Docs</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">Open Source · Built in Rust</div>
+      <h1>The AI Coding Agent That<br><span class="accent">Earns Every Token</span></h1>
+      <p class="hero-sub">Other agents send the same 4,000-token prompt for Spring Boot and React alike. Zap injects only what's relevant — the right skill, for the right task, at the right moment.</p>
+
+      <div class="install-box">
+        <span class="install-label">Install</span>
+        <span class="install-cmd">cargo install zap-coding-agent</span>
+        <button class="copy-btn" onclick="copyInstall(this)" title="Copy">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+
+      <div class="hero-actions">
+        <a href="#install" class="btn-primary">Get Started</a>
+        <a href="docs.html" class="btn-secondary">Read the Docs</a>
+      </div>
+
+      <div class="terminal" aria-hidden="true">
+        <div class="terminal-bar">
+          <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+          <span class="terminal-title">zap — ~/my-project</span>
+        </div>
+        <pre class="terminal-body">  ╭────────────────────────────────────────────────────────╮
+  │   _____     _     ___                                  │
+  │    ___/    /_\   | _ \   fast AI coding agent          │
+  │   /       / _ \  |  _/                                 │
+  │  /_____  /_/ \_\ |_|                                   │
+  ├────────────────────────────┬───────────────────────────┤
+  │  model   claude-sonnet-4-6 │  Tab ↑↓  autocomplete     │
+  │  mode    ask               │  /        commands        │
+  │  ~/my-project              │  /help    all commands    │
+  ╰────────────────────────────┴───────────────────────────╯
+
+<span class="t-dim">You:</span> refactor the UserStore to use channels
+
+<span class="t-skill">▶ rust skill injected (~650t)</span>
+<span class="t-dim">zap:</span> <span class="t-cursor">█</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIDEO -->
+  <section class="video-section">
+    <div class="container container-sm">
+      <p class="section-label">See it in action</p>
+      <div class="video-wrapper">
+        <iframe
+          src="https://www.youtube.com/embed/-wa1t2YiHDg?si=5XKkgaMx8H1LZtF4"
+          title="YouTube video player" frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin" allowfullscreen>
+        </iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>The Problem Every AI Coding Agent Has</h2>
+        <p>Open any popular agent and inspect the raw request. You'll find the same wall of tokens sent on every turn — whether you're writing Java or React, fixing a typo or designing an architecture.</p>
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Gemini CLI</th>
+              <th>OpenCode</th>
+              <th class="col-zap">zap</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Spring Boot request</td>
+              <td class="bad"><strong>4,096 tokens</strong></td>
+              <td class="bad"><strong>2,003 tokens</strong></td>
+              <td class="good col-zap">1,889 tokens</td>
+            </tr>
+            <tr>
+              <td>React request</td>
+              <td class="bad"><strong>4,096 tokens</strong></td>
+              <td class="bad"><strong>2,003 tokens</strong></td>
+              <td class="good col-zap">1,661 tokens</td>
+            </tr>
+            <tr>
+              <td>Prompts identical?</td>
+              <td class="bad">✅ Yes — same bytes</td>
+              <td class="bad">✅ Yes — same bytes</td>
+              <td class="good col-zap">❌ No — different skill</td>
+            </tr>
+            <tr>
+              <td>Java conventions in prompt?</td>
+              <td class="bad">❌ None</td>
+              <td class="bad">❌ None</td>
+              <td class="good col-zap">✅ 650 tokens</td>
+            </tr>
+            <tr>
+              <td>React conventions in prompt?</td>
+              <td class="bad">❌ None</td>
+              <td class="bad">❌ None</td>
+              <td class="good col-zap">✅ 422 tokens</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">Gemini CLI sends the same 4,096-token prompt for both tasks. The word "java" does not appear anywhere in its 68,410-character prompt file.</p>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="section section-alt" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Everything you need. Nothing you don't.</h2>
+        <p>Six interlocking systems — each designed so every token in the context window earns its place.</p>
+      </div>
+
+      <div class="feature-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🎯</div>
+          <h3>Skill-First Context</h3>
+          <p>Skills are markdown files injected surgically only when your message triggers them. A Rust question gets the Rust skill. A greeting costs 31 tokens, not 2,000.</p>
+          <a href="docs.html#skills" class="feature-link">Learn more →</a>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🗂️</div>
+          <h3>AST Code Index</h3>
+          <p>Built with tree-sitter + SQLite. The model knows what already exists before deciding what to create — no duplicate files, no invented patterns.</p>
+          <a href="docs.html#code-index" class="feature-link">Learn more →</a>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔍</div>
+          <h3>Context Visibility</h3>
+          <p>See exactly what's in the context window. Remove stale messages with <code>/context drop</code> — without starting a new session.</p>
+          <a href="docs.html#context-visibility" class="feature-link">Learn more →</a>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">⚡</div>
+          <h3>Single Binary</h3>
+          <p>Written in Rust. No Python venv, no Node.js, no Docker. Cold start in milliseconds. Drop it on your PATH and it works.</p>
+          <a href="docs.html#install" class="feature-link">Learn more →</a>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔌</div>
+          <h3>Dynamic MCP Loading</h3>
+          <p>MCP servers stay pending at startup. Tool schemas only enter context when explicitly needed — not 10,000 tokens dumped on every turn.</p>
+          <a href="docs.html#mcp" class="feature-link">Learn more →</a>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🌐</div>
+          <h3>Multi-Provider</h3>
+          <p>Works with Claude, Gemini, OpenAI, DeepSeek, and local models via LM Studio or Ollama. Switch providers mid-session with <code>/provider</code>.</p>
+          <a href="docs.html#providers" class="feature-link">Learn more →</a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section class="section" id="install">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>Get Started in 60 Seconds</h2>
+        <p>Pick your platform. No runtime dependencies — just a single binary.</p>
+      </div>
+
+      <div class="os-tabs">
+        <button class="os-tab active" data-os="mac">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          macOS
+        </button>
+        <button class="os-tab" data-os="linux">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.472.021C7.994.28 4.99 2.7 3.82 5.9c-.38 1.01-.53 2.08-.44 3.14.21 2.37 1.69 4.42 3.28 5.93.49.46.96.9 1.35 1.36.55.63.94 1.33 1.1 2.07.07.35.1.7.1 1.06 0 1.33-.35 2.63-.95 3.76-.29.56-.65 1.08-1.07 1.55-.12.14-.24.27-.37.41-.97 1.06-1.72 2.2-1.72 3.56 0 .21.02.42.05.62.41 2.31 2.74 3.64 5.05 3.64 2.31 0 4.64-1.33 5.05-3.64.03-.2.05-.41.05-.62 0-1.36-.75-2.5-1.72-3.56-.13-.14-.25-.27-.37-.41-.42-.47-.78-.99-1.07-1.55-.6-1.13-.95-2.43-.95-3.76 0-.36.03-.71.1-1.06.16-.74.55-1.44 1.1-2.07.39-.46.86-.9 1.35-1.36 1.59-1.51 3.07-3.56 3.28-5.93.09-1.06-.06-2.13-.44-3.14C19.51 2.7 16.51.28 12.996.021 12.84.008 12.678 0 12.504 0z"/></svg>
+          Linux
+        </button>
+        <button class="os-tab" data-os="windows">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          Windows
+        </button>
+      </div>
+
+      <!-- macOS -->
+      <div class="os-content active" id="os-mac">
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <h4>Install Rust</h4>
+              <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</div>
+              <p>Restart your terminal, or run <code>source ~/.cargo/env</code>.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <h4>Install zap</h4>
+              <div class="code-block">cargo install zap-coding-agent</div>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <h4>Set your API key</h4>
+              <div class="code-block"><span class="c-dim"># Add to ~/.zshrc</span>
+export ANTHROPIC_API_KEY=sk-ant-...</div>
+              <p>Or configure Gemini, OpenAI, or a local model in <code>~/.agent.toml</code>.</p>
+            </div>
+          </div>
+          <div class="install-step last">
+            <div class="install-step-num">4</div>
+            <div class="install-step-body">
+              <h4>Run</h4>
+              <div class="code-block">cd your-project && zap</div>
+              <p>Type <code>/init</code> on first use to let zap learn your codebase.</p>
+            </div>
+          </div>
+        </div>
+        <p class="install-alt">Prefer a pre-built binary? <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Download from releases ↗</a></p>
+      </div>
+
+      <!-- Linux -->
+      <div class="os-content" id="os-linux">
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <h4>Install Rust</h4>
+              <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env</div>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <h4>Install zap</h4>
+              <div class="code-block">cargo install zap-coding-agent</div>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <h4>Set your API key</h4>
+              <div class="code-block"><span class="c-dim"># Add to ~/.bashrc or ~/.zshrc</span>
+export ANTHROPIC_API_KEY=sk-ant-...</div>
+            </div>
+          </div>
+          <div class="install-step last">
+            <div class="install-step-num">4</div>
+            <div class="install-step-body">
+              <h4>Run</h4>
+              <div class="code-block">cd your-project && zap</div>
+            </div>
+          </div>
+        </div>
+        <p class="install-alt">Pre-built binary available on the <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">releases page ↗</a></p>
+      </div>
+
+      <!-- Windows -->
+      <div class="os-content" id="os-windows">
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="install-step-num">1</div>
+            <div class="install-step-body">
+              <h4>One-line install (PowerShell)</h4>
+              <div class="code-block">irm https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.ps1 | iex</div>
+              <p>Downloads and installs the pre-built binary. No Rust required.</p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="install-step-num">2</div>
+            <div class="install-step-body">
+              <h4>Set your API key</h4>
+              <div class="code-block"><span class="c-dim"># PowerShell — add to $PROFILE for persistence</span>
+$env:ANTHROPIC_API_KEY = "sk-ant-..."</div>
+            </div>
+          </div>
+          <div class="install-step last">
+            <div class="install-step-num">3</div>
+            <div class="install-step-body">
+              <h4>Run</h4>
+              <div class="code-block">cd your-project; zap</div>
+            </div>
+          </div>
+        </div>
+        <p class="install-alt">Prefer Rust? <code>cargo install zap-coding-agent</code> works too — <a href="https://rustup.rs" target="_blank" rel="noopener">get Rust here ↗</a></p>
+      </div>
+
+      <div class="provider-chips">
+        <span class="chip-label">Works with</span>
+        <span class="chip">Claude</span>
+        <span class="chip">Gemini</span>
+        <span class="chip">OpenAI</span>
+        <span class="chip">DeepSeek</span>
+        <span class="chip">LM Studio</span>
+        <span class="chip">Ollama</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Ready to try it?</h2>
+      <p>Open source, MIT licensed. Zero telemetry.</p>
+      <div class="cta-actions">
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-primary">View on GitHub</a>
+        <a href="docs.html" class="btn-secondary">Read the Docs</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container footer-inner">
+      <span class="logo">⚡ zap</span>
+      <div class="footer-links">
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+      <span class="footer-note">Built in Rust. MIT License.</span>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docs — Zap AI Coding Agent</title>
+  <meta name="description" content="Full documentation for zap: installation, skills, code indexing, context visibility, MCP, multi-provider, and more." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="logo">⚡ zap</a>
+      <div class="nav-links">
+        <a href="docs.html" style="color:var(--purple);font-weight:600;">Docs</a>
+        <a href="index.html#install">Install</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- DOCS SHELL -->
+  <div class="docs-shell">
+
+    <!-- SIDEBAR -->
+    <aside class="docs-sidebar">
+      <nav class="sidebar-nav">
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Setup</span>
+          <a class="sidebar-link" href="#install"   data-section="install">Getting Started</a>
+          <a class="sidebar-link" href="#config"    data-section="config">Configuration</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Core Features</span>
+          <a class="sidebar-link" href="#skills"             data-section="skills">Skill-First Context</a>
+          <a class="sidebar-link" href="#code-index"         data-section="code-index">Code Indexing</a>
+          <a class="sidebar-link" href="#context-visibility" data-section="context-visibility">Context Visibility</a>
+          <a class="sidebar-link" href="#casual"             data-section="casual">Casual Messages</a>
+          <a class="sidebar-link" href="#mcp"                data-section="mcp">Dynamic MCP Loading</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Providers &amp; Security</span>
+          <a class="sidebar-link" href="#providers"     data-section="providers">Multi-Provider</a>
+          <a class="sidebar-link" href="#security"      data-section="security">Security Boundary</a>
+          <a class="sidebar-link" href="#session-memory" data-section="session-memory">Session Memory</a>
+        </div>
+
+        <div class="sidebar-group">
+          <span class="sidebar-heading">Reference</span>
+          <a class="sidebar-link" href="#commands"  data-section="commands">Commands</a>
+        </div>
+
+      </nav>
+    </aside>
+
+    <!-- CONTENT -->
+    <main class="docs-content">
+
+      <!-- ── Getting Started ──────────────────────────────────────────── -->
+      <section class="doc-section" id="install">
+        <h2>Getting Started</h2>
+        <p class="doc-lead">Zap is a single Rust binary — no Python venv, no Node, no Docker. Install it and run it from any directory.</p>
+
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-num">&lt; 10 ms</div><div class="stat-label">Cold start</div></div>
+          <div class="stat-card"><div class="stat-num">~9 MB</div><div class="stat-label">Binary size</div></div>
+          <div class="stat-card"><div class="stat-num">0</div><div class="stat-label">Runtime deps</div></div>
+        </div>
+
+        <div class="os-tabs">
+          <button class="os-tab active" data-os="mac">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            macOS
+          </button>
+          <button class="os-tab" data-os="linux">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12.504 0c-.155 0-.315.008-.472.021C7.994.28 4.99 2.7 3.82 5.9c-.38 1.01-.53 2.08-.44 3.14.21 2.37 1.69 4.42 3.28 5.93.49.46.96.9 1.35 1.36.55.63.94 1.33 1.1 2.07.07.35.1.7.1 1.06 0 1.33-.35 2.63-.95 3.76-.29.56-.65 1.08-1.07 1.55-.12.14-.24.27-.37.41-.97 1.06-1.72 2.2-1.72 3.56 0 .21.02.42.05.62.41 2.31 2.74 3.64 5.05 3.64 2.31 0 4.64-1.33 5.05-3.64.03-.2.05-.41.05-.62 0-1.36-.75-2.5-1.72-3.56-.13-.14-.25-.27-.37-.41-.42-.47-.78-.99-1.07-1.55-.6-1.13-.95-2.43-.95-3.76 0-.36.03-.71.1-1.06.16-.74.55-1.44 1.1-2.07.39-.46.86-.9 1.35-1.36 1.59-1.51 3.07-3.56 3.28-5.93.09-1.06-.06-2.13-.44-3.14C19.51 2.7 16.51.28 12.996.021 12.84.008 12.678 0 12.504 0z"/></svg>
+            Linux
+          </button>
+          <button class="os-tab" data-os="windows">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+            Windows
+          </button>
+        </div>
+
+        <!-- macOS -->
+        <div class="os-content active" id="os-mac">
+          <div class="install-steps">
+            <div class="install-step">
+              <div class="install-step-num">1</div>
+              <div class="install-step-body">
+                <h4>Install Rust</h4>
+                <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</div>
+                <p>Restart your terminal, or run <code>source ~/.cargo/env</code>.</p>
+              </div>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">2</div>
+              <div class="install-step-body">
+                <h4>Install zap</h4>
+                <div class="code-block">cargo install zap-coding-agent</div>
+              </div>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">3</div>
+              <div class="install-step-body">
+                <h4>Set your API key</h4>
+                <div class="code-block"><span class="c-dim"># Add to ~/.zshrc</span>
+export ANTHROPIC_API_KEY=sk-ant-...</div>
+                <p>Or configure Gemini, OpenAI, or a local model — see <a href="#config">Configuration</a>.</p>
+              </div>
+            </div>
+            <div class="install-step last">
+              <div class="install-step-num">4</div>
+              <div class="install-step-body">
+                <h4>Run</h4>
+                <div class="code-block">cd your-project &amp;&amp; zap</div>
+                <p>Type <code>/init</code> on first use to build the code index and generate a project summary.</p>
+              </div>
+            </div>
+          </div>
+          <p class="install-alt">Prefer a pre-built binary? <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Download from releases ↗</a></p>
+        </div>
+
+        <!-- Linux -->
+        <div class="os-content" id="os-linux">
+          <div class="install-steps">
+            <div class="install-step">
+              <div class="install-step-num">1</div>
+              <div class="install-step-body">
+                <h4>Install Rust</h4>
+                <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env</div>
+              </div>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">2</div>
+              <div class="install-step-body">
+                <h4>Install zap</h4>
+                <div class="code-block">cargo install zap-coding-agent</div>
+              </div>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">3</div>
+              <div class="install-step-body">
+                <h4>Set your API key</h4>
+                <div class="code-block"><span class="c-dim"># Add to ~/.bashrc or ~/.zshrc</span>
+export ANTHROPIC_API_KEY=sk-ant-...</div>
+              </div>
+            </div>
+            <div class="install-step last">
+              <div class="install-step-num">4</div>
+              <div class="install-step-body">
+                <h4>Run</h4>
+                <div class="code-block">cd your-project &amp;&amp; zap</div>
+              </div>
+            </div>
+          </div>
+          <p class="install-alt">Pre-built binary available on the <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">releases page ↗</a></p>
+        </div>
+
+        <!-- Windows -->
+        <div class="os-content" id="os-windows">
+          <div class="install-steps">
+            <div class="install-step">
+              <div class="install-step-num">1</div>
+              <div class="install-step-body">
+                <h4>One-line install (PowerShell)</h4>
+                <div class="code-block">irm https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.ps1 | iex</div>
+                <p>Downloads and installs the pre-built binary. No Rust required.</p>
+              </div>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">2</div>
+              <div class="install-step-body">
+                <h4>Set your API key</h4>
+                <div class="code-block"><span class="c-dim"># PowerShell — add to $PROFILE for persistence</span>
+$env:ANTHROPIC_API_KEY = "sk-ant-..."</div>
+              </div>
+            </div>
+            <div class="install-step last">
+              <div class="install-step-num">3</div>
+              <div class="install-step-body">
+                <h4>Run</h4>
+                <div class="code-block">cd your-project; zap</div>
+              </div>
+            </div>
+          </div>
+          <p class="install-alt">Prefer Rust? <code>cargo install zap-coding-agent</code> — <a href="https://rustup.rs" target="_blank" rel="noopener">get Rust here ↗</a></p>
+        </div>
+
+        <div class="callout callout-tip" style="margin-top:28px;">
+          <strong>First run tip:</strong> Type <code>/init</code> to build the code index and let zap read your project structure. It takes 10–30 seconds and runs once per project.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Configuration ────────────────────────────────────────────── -->
+      <section class="doc-section" id="config">
+        <h2>Configuration</h2>
+        <p class="doc-lead">All settings live in <code>~/.agent.toml</code>. Create the file if it doesn't exist — zap reads it on every startup.</p>
+
+        <div class="subsection-title">Minimal config</div>
+        <div class="code-block"><span class="c-dim"># ~/.agent.toml</span>
+model = <span class="c-str">"claude-sonnet-4-6"</span>
+
+[anthropic]
+api_key = <span class="c-str">"sk-ant-..."</span>  <span class="c-dim"># or use ANTHROPIC_API_KEY env var</span></div>
+
+        <div class="subsection-title">All options</div>
+        <div class="code-block"><span class="c-dim"># ~/.agent.toml</span>
+model      = <span class="c-str">"claude-sonnet-4-6"</span>
+mode       = <span class="c-str">"ask"</span>           <span class="c-dim"># ask | auto</span>
+skill_paths = [<span class="c-str">"~/.claude/skills"</span>, <span class="c-str">"~/.zap/skills"</span>]
+
+[anthropic]
+api_key = <span class="c-str">"sk-ant-..."</span>
+
+[gemini]
+api_key = <span class="c-str">"AIza..."</span>
+
+[openai]
+api_key  = <span class="c-str">"sk-..."</span>
+base_url = <span class="c-str">"https://api.openai.com/v1"</span>  <span class="c-dim"># override for local models</span>
+
+[deepseek]
+api_key = <span class="c-str">"sk-..."</span></div>
+
+        <div class="callout callout-tip">
+          <strong>Tip:</strong> Set <code>mode = "auto"</code> to let zap run tools without asking for confirmation each time. Useful for trusted projects.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Skills ────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="skills">
+        <h2>Skill-First Context</h2>
+        <p class="doc-lead">Skills are plain markdown files that zap injects into the context window before the model sees your message. The key insight: only relevant skills fire. A greeting costs 31 tokens. A Rust question gets the Rust skill injected automatically.</p>
+
+        <div class="subsection-title">How it works</div>
+        <div class="skill-demo">
+          <div class="skill-row">
+            <span class="msg">"hi, how are you?"</span>
+            <span class="skills">no skills<em>(31 tokens)</em></span>
+          </div>
+          <div class="skill-row">
+            <span class="msg">"refactor UserStore to use channels"</span>
+            <span class="skills">▶ rust<em>(+650 tokens)</em></span>
+          </div>
+          <div class="skill-row">
+            <span class="msg">"add a useEffect to fetch user data"</span>
+            <span class="skills">▶ react<em>(+422 tokens)</em></span>
+          </div>
+          <div class="skill-row">
+            <span class="msg">"write a test for the login handler"</span>
+            <span class="skills">▶ rust ▶ testing<em>(+890 tokens)</em></span>
+          </div>
+        </div>
+
+        <div class="subsection-title">Skill types</div>
+        <div class="skills-table-wrap">
+          <table class="skills-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>When it fires</th>
+                <th>Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="badge-always">Core</span></td>
+                <td>Every message, always injected</td>
+                <td><code>CLAUDE.md</code>, project context</td>
+              </tr>
+              <tr>
+                <td><span class="badge-trigger">Trigger</span></td>
+                <td>When your message matches a keyword trigger</td>
+                <td>Rust, React, Python, testing skills</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title">Skill file format</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">Skills are markdown files with an optional YAML frontmatter block. Files without frontmatter are always-on Core skills.</p>
+        <div class="code-block"><span class="c-dim">---
+name: rust
+description: Rust coding conventions and best practices
+trigger: ["rust", "cargo", "tokio", "async"]
+---</span>
+
+# Rust
+
+- Prefer `Result&lt;T, E&gt;` over panic for recoverable errors
+- Use `clippy` for lints — treat warnings as errors in CI
+- Async: use `tokio::spawn` for concurrent tasks...
+</div>
+
+        <div class="subsection-title">Where to put skills</div>
+        <div class="two-col">
+          <div class="feature-row-item">
+            <h4>Project skills</h4>
+            <p>Drop <code>.md</code> files in <code>.zap/skills/</code> inside your project. Checked in with your repo — shared with your team.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Global skills</h4>
+            <p>Put skills in <code>~/.zap/skills/</code> or configure <code>skill_paths</code> in <code>~/.agent.toml</code> to point at any directory.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">Cross-agent compatibility</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">Skills created for Claude Code or Gemini work in zap. Point <code>skill_paths</code> at <code>~/.claude/skills</code> to share them automatically.</p>
+        <div class="code-block"><span class="c-dim"># ~/.agent.toml</span>
+skill_paths = [<span class="c-str">"~/.claude/skills"</span>, <span class="c-str">"~/.zap/skills"</span>]</div>
+
+        <div class="callout callout-tip">
+          <strong>Pro tip:</strong> Use <code>/skills</code> in a session to see which skills are loaded and which triggered on the last message.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Code Indexing ─────────────────────────────────────────────── -->
+      <section class="doc-section" id="code-index">
+        <h2>Code Indexing</h2>
+        <p class="doc-lead">Zap builds an AST-level symbol index of your project using tree-sitter and stores it in a local SQLite database at <code>.zap/code.db</code>. The model can query it to find what already exists before deciding what to create.</p>
+
+        <div class="subsection-title">Building the index</div>
+        <div class="code-block"><span class="c-dim"># Run once per project, or after large refactors</span>
+/init</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-top:8px;margin-bottom:20px;">Takes 10–30 seconds for medium projects. The index is gitignored by default — it's a local cache, not a committed artifact.</p>
+
+        <div class="subsection-title">What's indexed</div>
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>Symbols</h4>
+            <p>Functions, structs, enums, traits, impls, classes, and methods — with their file path, line number, and signature.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Files</h4>
+            <p>Every source file with its symbol count and last-indexed timestamp.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Languages</h4>
+            <p>Rust, TypeScript, JavaScript, Python, Go, Java — and more via tree-sitter grammars.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">How the model uses it</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">The model queries the index directly with SQLite. No fuzzy search, no hallucination — it either finds the symbol or it doesn't.</p>
+        <div class="code-block"><span class="c-dim">-- Find a symbol by name</span>
+SELECT path, line, kind, signature
+FROM symbols
+WHERE name LIKE '%UserStore%' COLLATE NOCASE LIMIT 20;
+
+<span class="c-dim">-- List all functions in a file</span>
+SELECT name, line, signature
+FROM symbols
+WHERE path LIKE '%user_store%' AND kind = 'function'
+ORDER BY line;</div>
+
+        <div class="callout callout-tip">
+          <strong>Result:</strong> No duplicate files, no invented patterns. The model knows your codebase structure before it writes a single line.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Context Visibility ────────────────────────────────────────── -->
+      <section class="doc-section" id="context-visibility">
+        <h2>Context Visibility</h2>
+        <p class="doc-lead">Zap shows you exactly what's in the context window — token counts per message, which skills fired, and total usage. You can inspect, manage, and trim the context without starting a new session.</p>
+
+        <div class="subsection-title">Commands</div>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/context</code></td>
+                <td>List all messages with their index and token count</td>
+              </tr>
+              <tr>
+                <td><code>/context drop 3</code></td>
+                <td>Remove message at index 3 (keeps the rest)</td>
+              </tr>
+              <tr>
+                <td><code>/context drop 3-7</code></td>
+                <td>Remove messages 3 through 7</td>
+              </tr>
+              <tr>
+                <td><code>/context clear</code></td>
+                <td>Wipe the entire context — keeps skills and system prompt</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title">Example output</div>
+        <div class="code-block">[0]   system        1,889 tokens  (rust skill injected)
+[1]   user            42 tokens  "refactor UserStore to use channels"
+[2]   assistant      630 tokens
+[3]   user            28 tokens  "looks good — add tests"
+[4]   assistant      412 tokens
+──────────────────────────────────
+      total         3,001 tokens  of 200,000 available</div>
+
+        <div class="callout callout-tip">
+          <strong>Why this matters:</strong> Most agents let the context balloon silently. When you're 180,000 tokens in and the model starts confusing earlier code with newer changes, you now have a scalpel instead of a restart button.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Casual Messages ───────────────────────────────────────────── -->
+      <section class="doc-section" id="casual">
+        <h2>Casual Messages</h2>
+        <p class="doc-lead">Not every message is a coding task. When you greet zap or ask something unrelated to your project, it skips skill injection entirely — saving the tokens for when they count.</p>
+
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;">Casual message</div>
+            <div class="skill-demo">
+              <div class="skill-row">
+                <span class="msg">"hi there"</span>
+                <span class="skills">31 tokens</span>
+              </div>
+              <div class="skill-row">
+                <span class="msg">"what's the weather?"</span>
+                <span class="skills">36 tokens</span>
+              </div>
+              <div class="skill-row">
+                <span class="msg">"thanks!"</span>
+                <span class="skills">28 tokens</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;">Coding message</div>
+            <div class="skill-demo">
+              <div class="skill-row">
+                <span class="msg">"fix the async error"</span>
+                <span class="skills">▶ rust · 650 tokens</span>
+              </div>
+              <div class="skill-row">
+                <span class="msg">"add a loading state"</span>
+                <span class="skills">▶ react · 422 tokens</span>
+              </div>
+              <div class="skill-row">
+                <span class="msg">"write unit tests"</span>
+                <span class="skills">▶ rust ▶ test · 890t</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-top:4px;">The classifier runs locally and adds zero latency — it's a keyword heuristic, not a model call. It errs on the side of injecting skills when uncertain.</p>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Dynamic MCP Loading ───────────────────────────────────────── -->
+      <section class="doc-section" id="mcp">
+        <h2>Dynamic MCP Loading</h2>
+        <p class="doc-lead">Zap supports the <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="color:var(--purple);text-decoration:underline;">Model Context Protocol</a>. MCP servers start pending — their tool schemas don't enter the context until explicitly needed. No 10,000-token schema dump on every turn.</p>
+
+        <div class="subsection-title">Configuration</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">Zap reads MCP config from <code>~/.zap/mcp.json</code> (global) and <code>.mcp.json</code> (project-local). Both use the same Claude Code-compatible format.</p>
+        <div class="code-block"><span class="c-dim">// ~/.zap/mcp.json</span>
+{
+  <span class="c-str">"mcpServers"</span>: {
+    <span class="c-str">"filesystem"</span>: {
+      <span class="c-str">"command"</span>: <span class="c-str">"npx"</span>,
+      <span class="c-str">"args"</span>: [<span class="c-str">"-y"</span>, <span class="c-str">"@modelcontextprotocol/server-filesystem"</span>, <span class="c-str">"/Users/me/projects"</span>]
+    },
+    <span class="c-str">"postgres"</span>: {
+      <span class="c-str">"command"</span>: <span class="c-str">"npx"</span>,
+      <span class="c-str">"args"</span>: [<span class="c-str">"-y"</span>, <span class="c-str">"@modelcontextprotocol/server-postgres"</span>],
+      <span class="c-str">"env"</span>: { <span class="c-str">"DATABASE_URL"</span>: <span class="c-str">"postgresql://localhost/mydb"</span> }
+    }
+  }
+}</div>
+
+        <div class="subsection-title">How it differs from other agents</div>
+        <div class="two-col">
+          <div class="feature-row-item">
+            <h4>Other agents</h4>
+            <p>Dump all MCP tool schemas into every context window at startup — even tools you never call.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Zap</h4>
+            <p>Servers start idle. Schemas enter context only when the model decides to call that tool — keeping baseline cost near zero.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-tip">
+          <strong>Compatibility:</strong> If you already have <code>~/.claude/mcp.json</code> or a Claude Code MCP config, zap reads the same format. No migration needed.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Multi-Provider ────────────────────────────────────────────── -->
+      <section class="doc-section" id="providers">
+        <h2>Multi-Provider</h2>
+        <p class="doc-lead">Zap works with every major AI provider — and local models. Switch mid-session without restarting.</p>
+
+        <div class="provider-grid">
+          <div class="provider-card">
+            <strong>Claude</strong>
+            <span>Anthropic — claude-sonnet-4-6, claude-opus-4-7, haiku-4-5</span>
+          </div>
+          <div class="provider-card">
+            <strong>Gemini</strong>
+            <span>Google — gemini-2.5-pro, gemini-2.5-flash</span>
+          </div>
+          <div class="provider-card">
+            <strong>OpenAI</strong>
+            <span>GPT-4o, GPT-4o-mini, o3</span>
+          </div>
+          <div class="provider-card">
+            <strong>DeepSeek</strong>
+            <span>deepseek-chat, deepseek-reasoner</span>
+          </div>
+          <div class="provider-card">
+            <strong>LM Studio</strong>
+            <span>Any local model via OpenAI-compatible endpoint</span>
+          </div>
+          <div class="provider-card">
+            <strong>Ollama</strong>
+            <span>llama3, mistral, codestral, and more</span>
+          </div>
+        </div>
+
+        <div class="subsection-title">Switching providers</div>
+        <div class="code-block"><span class="c-dim"># Switch model mid-session</span>
+/model gemini-2.5-pro
+
+<span class="c-dim"># Or set a default in config</span>
+model = "gemini-2.5-flash"   <span class="c-dim"># ~/.agent.toml</span></div>
+
+        <div class="subsection-title">Local models (LM Studio / Ollama)</div>
+        <div class="code-block"><span class="c-dim"># ~/.agent.toml — point at any OpenAI-compatible server</span>
+[openai]
+api_key  = <span class="c-str">"lm-studio"</span>
+base_url = <span class="c-str">"http://localhost:1234/v1"</span>
+
+model = <span class="c-str">"lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF"</span></div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Security Boundary ─────────────────────────────────────────── -->
+      <section class="doc-section" id="security">
+        <h2>Security Boundary</h2>
+        <p class="doc-lead">Zap is explicit about what it touches. Every shell command and file write is shown before it runs. You confirm — or deny — each action.</p>
+
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>Zero telemetry</h4>
+            <p>No usage data, no crash reports, no analytics. Your code and queries stay between you and your chosen model provider.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Keys stay local</h4>
+            <p>API keys live in <code>~/.agent.toml</code> or environment variables. Never logged, never sent anywhere other than the provider API.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>Ask mode default</h4>
+            <p>Tool calls (file edits, shell commands) require confirmation by default. Switch to <code>auto</code> only for trusted projects.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">Modes</div>
+        <div class="code-block">mode = <span class="c-str">"ask"</span>   <span class="c-dim"># default: confirm every tool call</span>
+mode = <span class="c-str">"auto"</span>  <span class="c-dim"># run tools without prompting (trusted projects)</span></div>
+
+        <div class="subsection-title">MIT License</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;">Zap is open source under the MIT License. Read the code, fork it, audit it. The binary you run is built from the public source.</p>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Session Memory ────────────────────────────────────────────── -->
+      <section class="doc-section" id="session-memory">
+        <h2>Session Memory</h2>
+        <p class="doc-lead">Zap keeps a running log of what was worked on and which files were touched. When you start a new session, the model has context from previous ones — without bloating the live context window.</p>
+
+        <div class="subsection-title">How it works</div>
+        <div class="two-col">
+          <div class="feature-row-item">
+            <h4><code>.zap/context.md</code></h4>
+            <p>Last session's work, files touched, and what's next. Updated by zap at the end of each session.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4><code>.zap/session_log.md</code></h4>
+            <p>A brief history of past sessions — goal and files per session. Grows incrementally, never overwrites.</p>
+          </div>
+        </div>
+
+        <div class="subsection-title">Project memory file</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">You can also create a <code>CLAUDE.md</code> (or <code>.zap/PROJECT.md</code>) with permanent project-level context that fires on every message as a Core skill.</p>
+        <div class="code-block"><span class="c-dim"># CLAUDE.md — project context, always injected</span>
+
+# My Project
+
+This is a Rust web server using Axum and SQLx.
+Postgres 15 runs locally on port 5432.
+Tests use testcontainers — don't mock the database.</div>
+
+        <div class="callout callout-tip">
+          <strong>Tip:</strong> Keep <code>CLAUDE.md</code> concise. It fires on every message — every token in it is spent whether the model needs it or not. Put language-specific context in trigger skills instead.
+        </div>
+      </section>
+
+      <div class="section-divider"></div>
+
+      <!-- ── Commands Reference ────────────────────────────────────────── -->
+      <section class="doc-section" id="commands">
+        <h2>Commands Reference</h2>
+        <p class="doc-lead">Type any command at the zap prompt. Tab-completion is available for all slash commands.</p>
+
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>/init</code></td><td>Build (or rebuild) the code index for the current project</td></tr>
+              <tr><td><code>/skills</code></td><td>List loaded skills and which triggered last</td></tr>
+              <tr><td><code>/context</code></td><td>Show context window with token counts per message</td></tr>
+              <tr><td><code>/context drop N</code></td><td>Drop message at index N</td></tr>
+              <tr><td><code>/context drop N-M</code></td><td>Drop messages from index N through M</td></tr>
+              <tr><td><code>/context clear</code></td><td>Clear all messages (keeps skills and system prompt)</td></tr>
+              <tr><td><code>/model &lt;name&gt;</code></td><td>Switch model for the current session</td></tr>
+              <tr><td><code>/provider &lt;name&gt;</code></td><td>Switch AI provider mid-session</td></tr>
+              <tr><td><code>/mode ask</code></td><td>Require confirmation for every tool call</td></tr>
+              <tr><td><code>/mode auto</code></td><td>Run tools without confirmation prompts</td></tr>
+              <tr><td><code>/help</code></td><td>Show all available commands</td></tr>
+              <tr><td><code>/exit</code></td><td>End the session (Ctrl+C also works)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container footer-inner">
+      <a href="index.html" class="logo">⚡ zap</a>
+      <div class="footer-links">
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+      <span class="footer-note">Built in Rust. MIT License.</span>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
