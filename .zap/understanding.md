@@ -3,7 +3,7 @@
 
 <!-- zap:auto-stats:begin -->
 ## Project
-ideas v0.14.1 · 277 files · 4294 symbols
+ideas v0.14.1 · 278 files · 4294 symbols
 
 ### Languages
   - python: 3154 symbols
@@ -20,6 +20,8 @@ ideas v0.14.1 · 277 files · 4294 symbols
 
 ## Analysis
 <!-- Run `/init` for a detailed LLM-powered analysis of architecture, patterns, and key modules. -->
+
+
 
 
 

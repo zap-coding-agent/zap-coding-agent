@@ -58,7 +58,7 @@ impl Default for ToolRegistry {
 impl ToolRegistry {
     pub fn new() -> Self {
         use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, WriteFileTool};
-        use search::{CodeMapTool, FileImportsTool, FindDefinitionTool, FindReferencesTool, PackContextTool, SearchCodeTool, WhereImportedTool, WhoCallsTool};
+        use search::{CodeMapTool, FileImportsTool, FindByReturnTypeTool, FindDefinitionTool, FindReferencesTool, FindSubtypesTool, FindSupertypesTool, PackContextTool, SearchCodeTool, WhereImportedTool, WhoCallsTool};
         use shell::{ListDirectoryTool, ShellTool};
         use undo::UndoEditTool;
         use web::{WebFetchTool, WebSearchTool};
@@ -83,6 +83,9 @@ impl ToolRegistry {
         r.register(Arc::new(ListDirectoryTool));
         r.register(Arc::new(GlobReadTool));
         r.register(Arc::new(CodeMapTool));
+        r.register(Arc::new(FindSubtypesTool));
+        r.register(Arc::new(FindSupertypesTool));
+        r.register(Arc::new(FindByReturnTypeTool));
         r.register(Arc::new(WebFetchTool));
         r.register(Arc::new(WebSearchTool));
         r.register(Arc::new(TodoWriteTool));

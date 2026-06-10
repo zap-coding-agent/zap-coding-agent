@@ -48,9 +48,10 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Extract: Go | `src/code_index/extract_go.rs` | tree-sitter Go extraction — func, type, method, call, import flattening |
 | Extract: Java | `src/code_index/extract_java.rs` | tree-sitter Java extraction — class, method, invocation, object creation, import |
 | Extract: C# | `src/code_index/extract_csharp.rs` | tree-sitter C# extraction — class, method, property, invocation, using |
-| Index query | `src/code_index/index_query.rs` | `find_definition`, `symbols_in_path`, `search`, `find_references`, `callers_of`, `imports_for`, `importers_of`, `users_of_module` |
-| Index rank | `src/code_index/index_rank.rs` | `compute_file_ranks`, `rank_files(n)`, `file_rank(path)` — importance scoring |
-| Index pack | `src/code_index/index_pack.rs` | `pack_context(task, budget)` — keyword-driven relevance-ranked context bundle |
+| Index query | `src/code_index/index_query.rs` | `find_definition`, `symbols_in_path`, `search`, `find_references`, `callers_of`, `imports_for`, `importers_of`, `users_of_module`, `find_subtypes_of`, `find_supertypes_of`, `find_by_return_type`, `resolve_call` |
+| Index rank | `src/code_index/index_rank.rs` | `compute_file_ranks`, `rank_files(n)`, `file_rank(path)` — import-aware PageRank edge building |
+| Index pack | `src/code_index/index_pack.rs` | `pack_context(task, budget)` — budget-proportional one-hop expansion (budget/200, clamp 10–50 symbols) |
+| Type edges | `src/code_index/index_impl.rs` | `type_edges` table: extends/implements for Rust, Python, JS/TS, Java, C#; structured `return_type` + `params` columns on symbols |
 | Index quality | `src/code_index/index_quality.rs` | `quality_report()` — god objects, large files, high coupling, dead code candidates, health score |
 | TUI render | `src/tui/render/` | 7 focused submodules (messages, layout, header, overlays, diff, dialogs) |
 | TUI commands | `src/tui/commands/` | command picker, filter/resolve, handle_inline; text builders in text.rs |

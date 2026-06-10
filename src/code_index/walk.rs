@@ -55,13 +55,15 @@ pub(super) fn file_mtime(path: &Path) -> Option<u64> {
 
 pub(super) fn row_to_symbol(row: &rusqlite::Row) -> rusqlite::Result<Symbol> {
     Ok(Symbol {
-        path:      row.get(0)?,
-        name:      row.get(1)?,
-        kind:      row.get(2)?,
-        line:      row.get::<_, i64>(3)? as usize,
-        signature: row.get(4)?,
-        language:  row.get(5)?,
-        context:   row.get(6)?,
+        path:        row.get(0)?,
+        name:        row.get(1)?,
+        kind:        row.get(2)?,
+        line:        row.get::<_, i64>(3)? as usize,
+        signature:   row.get(4)?,
+        language:    row.get(5)?,
+        context:     row.get(6)?,
+        return_type: row.get(7).unwrap_or_default(),
+        params:      row.get(8).unwrap_or_default(),
     })
 }
 

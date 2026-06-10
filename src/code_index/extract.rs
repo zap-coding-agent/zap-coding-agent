@@ -1,11 +1,20 @@
-use super::{CallSite, Import, Symbol};
+use super::{CallSite, Import, Symbol, TypeEdge};
 
 pub(super) struct RawSymbol {
-    pub name:      String,
-    pub kind:      String,
-    pub line:      usize,
-    pub signature: String,
-    pub context:   String,
+    pub name:        String,
+    pub kind:        String,
+    pub line:        usize,
+    pub signature:   String,
+    pub context:     String,
+    pub return_type: String,
+    pub params:      String,  // JSON array of strings
+}
+
+pub(super) struct RawTypeEdge {
+    pub child_name:  String,
+    pub parent_name: String,
+    pub edge_kind:   String,
+    pub line:        usize,
 }
 
 pub(super) struct RawCallSite {
@@ -28,10 +37,11 @@ pub(super) struct ExtractResult {
     pub symbols:    Vec<Symbol>,
     pub call_sites: Vec<CallSite>,
     pub imports:    Vec<Import>,
+    pub type_edges: Vec<TypeEdge>,
 }
 
 pub(super) fn extract_all(source: &str, lang: &str, path: &str) -> ExtractResult {
-    let (raw_syms, raw_calls, raw_imports) = match lang {
+    let (raw_syms, raw_calls, raw_imports, raw_type_edges) = match lang {
         "rust"       => super::extract_rust::extract_rust(source),
         "python"     => super::extract_python::extract_python(source),
         "javascript" => super::extract_js::extract_js(source, false, false),
@@ -40,17 +50,19 @@ pub(super) fn extract_all(source: &str, lang: &str, path: &str) -> ExtractResult
         "go"         => super::extract_go::extract_go(source),
         "java"       => super::extract_java::extract_java(source),
         "csharp"     => super::extract_csharp::extract_csharp(source),
-        _            => (vec![], vec![], vec![]),
+        _            => (vec![], vec![], vec![], vec![]),
     };
 
     let symbols = raw_syms.into_iter().map(|r| Symbol {
-        path:      path.to_string(),
-        name:      r.name,
-        kind:      r.kind,
-        line:      r.line,
-        signature: r.signature,
-        language:  lang.to_string(),
-        context:   r.context,
+        path:        path.to_string(),
+        name:        r.name,
+        kind:        r.kind,
+        line:        r.line,
+        signature:   r.signature,
+        language:    lang.to_string(),
+        context:     r.context,
+        return_type: r.return_type,
+        params:      r.params,
     }).collect();
 
     let call_sites = raw_calls.into_iter().filter(|r| keep_call(&r.name)).map(|r| CallSite {
@@ -73,7 +85,26 @@ pub(super) fn extract_all(source: &str, lang: &str, path: &str) -> ExtractResult
         language:      lang.to_string(),
     }).collect();
 
-    ExtractResult { symbols, call_sites, imports }
+    let type_edges = raw_type_edges.into_iter().map(|r| TypeEdge {
+        id:          0,
+        child_path:  path.to_string(),
+        child_name:  r.child_name,
+        parent_name: r.parent_name,
+        edge_kind:   r.edge_kind,
+        line:        r.line,
+        language:    lang.to_string(),
+    }).collect();
+
+    ExtractResult { symbols, call_sites, imports, type_edges }
+}
+
+/// Serialize a list of parameter strings as a compact JSON array.
+pub(super) fn params_to_json(params: &[&str]) -> String {
+    if params.is_empty() { return "[]".into(); }
+    let inner: Vec<String> = params.iter()
+        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect();
+    format!("[{}]", inner.join(","))
 }
 
 /// v1 noise filter: drop single-char identifiers. Per-language stdlib noise

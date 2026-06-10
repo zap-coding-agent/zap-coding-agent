@@ -61,7 +61,7 @@ impl CodeIndex {
         for kw in &keywords {
             let pattern = format!("%{}%", kw);
             let rows: Vec<Symbol> = self.conn
-                .prepare("SELECT path, name, kind, line, signature, language, context
+                .prepare("SELECT path, name, kind, line, signature, language, context, return_type, params
                            FROM symbols
                           WHERE name LIKE ?1
                           ORDER BY CASE WHEN name = ?2 COLLATE NOCASE THEN 0 ELSE 1 END
@@ -99,7 +99,8 @@ impl CodeIndex {
                 .partial_cmp(&file_score.get(&a.path).cloned().unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        top_symbols_for_expand.truncate(10);
+        let expansion_limit = (budget_chars / 200).clamp(10, 50);
+        top_symbols_for_expand.truncate(expansion_limit);
 
         let mut callers_by_target: std::collections::HashMap<String, Vec<CallSite>> = std::collections::HashMap::new();
         let mut importers_by_target: std::collections::HashMap<String, Vec<Import>> = std::collections::HashMap::new();

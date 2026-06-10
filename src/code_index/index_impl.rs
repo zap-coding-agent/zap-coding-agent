@@ -74,9 +74,23 @@ impl CodeIndex {
                 path TEXT PRIMARY KEY,
                 rank REAL NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS type_edges (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                child_path  TEXT NOT NULL,
+                child_name  TEXT NOT NULL,
+                parent_name TEXT NOT NULL,
+                edge_kind   TEXT NOT NULL,
+                line        INTEGER NOT NULL,
+                language    TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_te_child  ON type_edges(child_path, child_name);
+            CREATE INDEX IF NOT EXISTS idx_te_parent ON type_edges(parent_name COLLATE NOCASE);
         ")?;
 
         let _ = conn.execute("ALTER TABLE symbols ADD COLUMN ref_count INTEGER DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE symbols ADD COLUMN return_type TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE symbols ADD COLUMN params TEXT NOT NULL DEFAULT ''", []);
 
         Ok(Self { conn, db_path })
     }
@@ -85,15 +99,17 @@ impl CodeIndex {
         let conn = rusqlite::Connection::open_in_memory().context("open in-memory code index")?;
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS symbols (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                path      TEXT NOT NULL,
-                name      TEXT NOT NULL,
-                kind      TEXT NOT NULL,
-                line      INTEGER NOT NULL,
-                signature TEXT NOT NULL DEFAULT '',
-                language  TEXT NOT NULL DEFAULT '',
-                context   TEXT NOT NULL DEFAULT '',
-                ref_count INTEGER DEFAULT 0
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                path        TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                kind        TEXT NOT NULL,
+                line        INTEGER NOT NULL,
+                signature   TEXT NOT NULL DEFAULT '',
+                language    TEXT NOT NULL DEFAULT '',
+                context     TEXT NOT NULL DEFAULT '',
+                ref_count   INTEGER DEFAULT 0,
+                return_type TEXT NOT NULL DEFAULT '',
+                params      TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_sym_path ON symbols(path);
@@ -132,6 +148,17 @@ impl CodeIndex {
                 path TEXT PRIMARY KEY,
                 rank REAL NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS type_edges (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                child_path  TEXT NOT NULL,
+                child_name  TEXT NOT NULL,
+                parent_name TEXT NOT NULL,
+                edge_kind   TEXT NOT NULL,
+                line        INTEGER NOT NULL,
+                language    TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_te_child  ON type_edges(child_path, child_name);
+            CREATE INDEX IF NOT EXISTS idx_te_parent ON type_edges(parent_name COLLATE NOCASE);
         ")?;
         Ok(Self { conn, db_path: std::path::PathBuf::from(":memory:") })
     }
@@ -164,7 +191,7 @@ impl CodeIndex {
         let graph = graph_enabled();
 
         let extracted = if lang.is_empty() {
-            super::extract::ExtractResult { symbols: vec![], call_sites: vec![], imports: vec![] }
+            super::extract::ExtractResult { symbols: vec![], call_sites: vec![], imports: vec![], type_edges: vec![] }
         } else {
             extract_all(&source, lang, &path_str)
         };
@@ -173,14 +200,16 @@ impl CodeIndex {
         tx.execute("DELETE FROM symbols    WHERE path = ?1", params![path_str])?;
         tx.execute("DELETE FROM call_sites WHERE path = ?1", params![path_str])?;
         tx.execute("DELETE FROM imports    WHERE path = ?1", params![path_str])?;
+        tx.execute("DELETE FROM type_edges WHERE child_path = ?1", params![path_str])?;
 
         for sym in &extracted.symbols {
             tx.execute(
-                "INSERT INTO symbols (path, name, kind, line, signature, language, context)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO symbols (path, name, kind, line, signature, language, context, return_type, params)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     sym.path, sym.name, sym.kind, sym.line as i64,
-                    sym.signature, sym.language, sym.context
+                    sym.signature, sym.language, sym.context,
+                    sym.return_type, sym.params
                 ],
             )?;
         }
@@ -206,6 +235,16 @@ impl CodeIndex {
                     ],
                 )?;
             }
+            for te in &extracted.type_edges {
+                tx.execute(
+                    "INSERT INTO type_edges (child_path, child_name, parent_name, edge_kind, line, language)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        te.child_path, te.child_name, te.parent_name,
+                        te.edge_kind, te.line as i64, te.language
+                    ],
+                )?;
+            }
         }
 
         let count = extracted.symbols.len() as i64;
@@ -221,11 +260,12 @@ impl CodeIndex {
                 crate::log::write(
                     "INDEX",
                     &format!(
-                        "tree-sitter · {} · {} · {} symbols · {} calls · {} imports",
+                        "tree-sitter · {} · {} · {} symbols · {} calls · {} imports · {} type edges",
                         lang, path_str,
                         extracted.symbols.len(),
                         extracted.call_sites.len(),
                         extracted.imports.len(),
+                        extracted.type_edges.len(),
                     ),
                 );
             } else {
@@ -354,11 +394,24 @@ impl CodeIndex {
     /// the old text-scan behavior should set `ZAP_INDEX_MODE=graph` (default).
     pub fn compute_reference_counts(&mut self) -> Result<usize> {
         let tx = self.conn.unchecked_transaction()?;
+        // Import-aware: for qualified calls, only count a call against a definition when the
+        // caller's file imports the callee's name from a module that contains the qualifier.
+        // Unqualified calls fall back to the original name-only match.
         let updated = tx.execute(
             "UPDATE symbols
                 SET ref_count = (
                     SELECT COUNT(*) FROM call_sites cs
                      WHERE cs.name = symbols.name COLLATE NOCASE
+                       AND (
+                         cs.qualifier = ''
+                         OR EXISTS (
+                           SELECT 1 FROM imports im
+                            WHERE im.path = cs.path
+                              AND im.imported_name = symbols.name COLLATE NOCASE
+                              AND (instr(im.module, cs.qualifier) > 0
+                                   OR instr(cs.qualifier, im.module) > 0)
+                         )
+                       )
                 )",
             [],
         )?;

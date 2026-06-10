@@ -1,17 +1,18 @@
-use super::extract::{make_parser, node_text, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol};
+use super::extract::{make_parser, node_text, params_to_json, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RawTypeEdge};
 
-pub(super) fn extract_python(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>) {
+pub(super) fn extract_python(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>, Vec<RawTypeEdge>) {
     let mut parser = match make_parser(tree_sitter_python::language()) {
-        Some(p) => p, None => return (vec![], vec![], vec![]),
+        Some(p) => p, None => return (vec![], vec![], vec![], vec![]),
     };
     let tree = match parser.parse(source.as_bytes(), None) {
-        Some(t) => t, None => return (vec![], vec![], vec![]),
+        Some(t) => t, None => return (vec![], vec![], vec![], vec![]),
     };
     let mut syms = Vec::new();
     let mut calls = Vec::new();
     let mut imports = Vec::new();
-    extract_python_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, "");
-    (syms, calls, imports)
+    let mut type_edges = Vec::new();
+    extract_python_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, &mut type_edges, "");
+    (syms, calls, imports, type_edges)
 }
 
 fn extract_python_node(
@@ -19,6 +20,7 @@ fn extract_python_node(
     out: &mut Vec<RawSymbol>,
     calls: &mut Vec<RawCallSite>,
     imports: &mut Vec<RawImport>,
+    type_edges: &mut Vec<RawTypeEdge>,
     context: &str,
 ) {
     let kind = node.kind();
@@ -27,11 +29,12 @@ fn extract_python_node(
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
                 let k = if kind == "async_function_definition" { "async fn" } else { "def" };
-                out.push(RawSymbol { name: name.clone(), kind: k.into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                let (return_type, params) = python_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: k.into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type, params });
                 let new_ctx = if context.is_empty() { name.clone() } else { format!("{}.{}", context, name) };
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
-                        if c.kind() == "block" { extract_python_node(c, src, out, calls, imports, &new_ctx); }
+                        if c.kind() == "block" { extract_python_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                     }
                 }
                 return;
@@ -40,10 +43,11 @@ fn extract_python_node(
         "class_definition" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "class".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name: name.clone(), kind: "class".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
+                extract_python_class_type_edges(node, src, &name, type_edges);
                 let new_ctx = if context.is_empty() { name.clone() } else { format!("{}.{}", context, name) };
                 for i in 0..node.child_count() {
-                    if let Some(c) = node.child(i) { extract_python_node(c, src, out, calls, imports, &new_ctx); }
+                    if let Some(c) = node.child(i) { extract_python_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                 }
                 return;
             }
@@ -54,7 +58,7 @@ fn extract_python_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_python_node(c, src, out, calls, imports, context);
+                    extract_python_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -70,7 +74,56 @@ fn extract_python_node(
         _ => {}
     }
     for i in 0..node.child_count() {
-        if let Some(c) = node.child(i) { extract_python_node(c, src, out, calls, imports, context); }
+        if let Some(c) = node.child(i) { extract_python_node(c, src, out, calls, imports, type_edges, context); }
+    }
+}
+
+fn python_fn_sig_parts(node: tree_sitter::Node, src: &[u8]) -> (String, String) {
+    let return_type = node.child_by_field_name("return_type")
+        .map(|n| node_text(n, src).trim_start_matches("->").trim().to_string())
+        .unwrap_or_default();
+
+    let params_json = node.child_by_field_name("parameters")
+        .map(|params_node| {
+            let mut parts: Vec<&str> = Vec::new();
+            for i in 0..params_node.child_count() {
+                if let Some(c) = params_node.child(i) {
+                    if c.is_named() && !matches!(c.kind(), "(" | ")") {
+                        let text = std::str::from_utf8(&src[c.start_byte()..c.end_byte()]).unwrap_or("").trim();
+                        if !text.is_empty() && text != "self" && text != "cls" { parts.push(text); }
+                    }
+                }
+            }
+            params_to_json(&parts)
+        })
+        .unwrap_or_else(|| "[]".into());
+
+    (return_type, params_json)
+}
+
+fn extract_python_class_type_edges(node: tree_sitter::Node, src: &[u8], class_name: &str, type_edges: &mut Vec<RawTypeEdge>) {
+    // `class_definition` has an `superclasses` field (argument_list node)
+    let line = node.start_position().row + 1;
+    if let Some(supers) = node.child_by_field_name("superclasses") {
+        for i in 0..supers.child_count() {
+            if let Some(c) = supers.child(i) {
+                if c.is_named() {
+                    let parent = node_text(c, src).trim().to_string();
+                    // Skip keyword-only nodes or empty
+                    if parent.is_empty() || parent == "," { continue; }
+                    // Strip generic params: `Generic[T]` → `Generic`
+                    let base = parent.split('[').next().unwrap_or(&parent).trim().to_string();
+                    if !base.is_empty() {
+                        type_edges.push(RawTypeEdge {
+                            child_name:  class_name.to_string(),
+                            parent_name: base,
+                            edge_kind:   "extends".into(),
+                            line,
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 

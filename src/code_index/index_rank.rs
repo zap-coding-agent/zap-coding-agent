@@ -43,18 +43,50 @@ impl CodeIndex {
         let mut edges: std::collections::HashMap<(usize, usize), f32> =
             std::collections::HashMap::new();
 
-        // 3a. Call edges.
+        // 3a. Call edges — import-aware: qualified calls are narrowed via the imports table.
         {
-            let mut stmt = self.conn.prepare("SELECT path, name FROM call_sites")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut stmt = self.conn.prepare("SELECT path, name, qualifier FROM call_sites")?;
+            let rows = stmt.query_map([], |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            )))?;
             for row in rows.flatten() {
-                let Some(&caller_idx) = file_index.get(&row.0) else { continue };
-                let key = row.1.to_lowercase();
+                let (caller_path, name, qualifier) = row;
+                let Some(&caller_idx) = file_index.get(&caller_path) else { continue };
+                let key = name.to_lowercase();
                 let Some(targets) = defs_by_name.get(&key) else { continue };
                 if targets.is_empty() { continue }
-                let share = 1.0_f32 / targets.len() as f32;
-                for &t in targets {
-                    if t == caller_idx { continue }  // skip self-loops
+
+                let narrowed: Vec<usize> = if qualifier.is_empty() {
+                    targets.clone()
+                } else {
+                    // Keep only targets whose defining file has the callee imported with
+                    // a module path that overlaps the qualifier.
+                    let qual_lower = qualifier.to_lowercase();
+                    targets.iter().copied().filter(|&t| {
+                        let target_path = &files[t];
+                        // check if caller_path imports name from a module matching qualifier
+                        self.conn.query_row(
+                            "SELECT 1 FROM imports im
+                              WHERE im.path = ?1
+                                AND im.imported_name = ?2 COLLATE NOCASE
+                                AND (instr(lower(im.module), ?3) > 0
+                                     OR instr(?3, lower(im.module)) > 0)
+                              LIMIT 1",
+                            rusqlite::params![caller_path, name, qual_lower],
+                            |_| Ok(()),
+                        ).is_ok()
+                        // also accept if the target file's path itself contains the qualifier
+                        || target_path.to_lowercase().contains(&qual_lower)
+                    }).collect()
+                };
+
+                let effective = if narrowed.is_empty() { targets } else { &narrowed };
+                if effective.is_empty() { continue }
+                let share = 1.0_f32 / effective.len() as f32;
+                for &t in effective {
+                    if t == caller_idx { continue }
                     *edges.entry((caller_idx, t)).or_insert(0.0) += share;
                 }
             }

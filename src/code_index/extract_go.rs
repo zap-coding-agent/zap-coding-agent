@@ -1,17 +1,17 @@
-use super::extract::{make_parser, node_text, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol};
+use super::extract::{make_parser, node_text, params_to_json, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RawTypeEdge};
 
-pub(super) fn extract_go(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>) {
+pub(super) fn extract_go(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>, Vec<RawTypeEdge>) {
     let mut parser = match make_parser(tree_sitter_go::language()) {
-        Some(p) => p, None => return (vec![], vec![], vec![]),
+        Some(p) => p, None => return (vec![], vec![], vec![], vec![]),
     };
     let tree = match parser.parse(source.as_bytes(), None) {
-        Some(t) => t, None => return (vec![], vec![], vec![]),
+        Some(t) => t, None => return (vec![], vec![], vec![], vec![]),
     };
     let mut syms = Vec::new();
     let mut calls = Vec::new();
     let mut imports = Vec::new();
     extract_go_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, "");
-    (syms, calls, imports)
+    (syms, calls, imports, vec![])
 }
 
 fn extract_go_node(
@@ -26,7 +26,8 @@ fn extract_go_node(
         "function_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "func".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                let (return_type, params) = go_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: "func".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type, params });
                 let new_ctx = format!("func {}", name);
                 if let Some(body) = node.child_by_field_name("body") {
                     extract_go_node(body, src, out, calls, imports, &new_ctx);
@@ -40,7 +41,8 @@ fn extract_go_node(
                     .map(|r| node_text(r, src).trim_matches(|c| c == '(' || c == ')').trim().to_string())
                     .unwrap_or_default();
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "method".into(), line: node.start_position().row + 1, signature: signature(node, src), context: recv.clone() });
+                let (return_type, params) = go_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: "method".into(), line: node.start_position().row + 1, signature: signature(node, src), context: recv.clone(), return_type, params });
                 let new_ctx = if recv.is_empty() { format!("method {}", name) } else { format!("{} · {}", recv, name) };
                 if let Some(body) = node.child_by_field_name("body") {
                     extract_go_node(body, src, out, calls, imports, &new_ctx);
@@ -60,7 +62,7 @@ fn extract_go_node(
                                 "interface_type" => "interface",
                                 _                => "type",
                             };
-                            out.push(RawSymbol { name, kind: k.into(), line: spec.start_position().row + 1, signature: signature(spec, src), context: context.to_string() });
+                            out.push(RawSymbol { name, kind: k.into(), line: spec.start_position().row + 1, signature: signature(spec, src), context: context.to_string(), return_type: "".into(), params: "".into() });
                         }
                     }
                 }
@@ -74,7 +76,7 @@ fn extract_go_node(
                     if matches!(spec.kind(), "const_spec" | "var_spec") {
                         if let Some(n) = spec.child_by_field_name("name") {
                             let name = node_text(n, src).to_string();
-                            out.push(RawSymbol { name, kind: k.into(), line: spec.start_position().row + 1, signature: signature(spec, src), context: context.to_string() });
+                            out.push(RawSymbol { name, kind: k.into(), line: spec.start_position().row + 1, signature: signature(spec, src), context: context.to_string(), return_type: "".into(), params: "".into() });
                         }
                     }
                 }
@@ -135,6 +137,29 @@ fn unwrap_go_callable(node: tree_sitter::Node, src: &[u8]) -> (String, String, S
         }
         _ => ("".into(), "".into(), "".into()),
     }
+}
+
+fn go_fn_sig_parts(node: tree_sitter::Node, src: &[u8]) -> (String, String) {
+    let return_type = node.child_by_field_name("result")
+        .map(|n| node_text(n, src).to_string())
+        .unwrap_or_default();
+
+    let params_json = node.child_by_field_name("parameters")
+        .map(|params_node| {
+            let mut parts: Vec<&str> = Vec::new();
+            for i in 0..params_node.child_count() {
+                if let Some(c) = params_node.child(i) {
+                    if matches!(c.kind(), "parameter_declaration" | "variadic_parameter_declaration") {
+                        let text = std::str::from_utf8(&src[c.start_byte()..c.end_byte()]).unwrap_or("").trim();
+                        if !text.is_empty() { parts.push(text); }
+                    }
+                }
+            }
+            params_to_json(&parts)
+        })
+        .unwrap_or_else(|| "[]".into());
+
+    (return_type, params_json)
 }
 
 fn flatten_go_imports(node: tree_sitter::Node, src: &[u8], imports: &mut Vec<RawImport>) {

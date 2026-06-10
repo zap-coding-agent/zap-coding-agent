@@ -52,13 +52,15 @@ impl QualityReport {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    pub path: String,
-    pub name: String,
-    pub kind: String,
-    pub line: usize,
-    pub signature: String,
-    pub language: String,
-    pub context: String,
+    pub path:        String,
+    pub name:        String,
+    pub kind:        String,
+    pub line:        usize,
+    pub signature:   String,
+    pub language:    String,
+    pub context:     String,
+    pub return_type: String,
+    pub params:      String,  // JSON array of strings
 }
 
 impl Symbol {
@@ -68,6 +70,25 @@ impl Symbol {
         } else {
             format!("{}:{} {} {} [{}] — {}", self.path, self.line, self.kind, self.name, self.context, self.signature)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeEdge {
+    pub id:          i64,
+    pub child_path:  String,
+    pub child_name:  String,
+    pub parent_name: String,
+    pub edge_kind:   String,
+    pub line:        usize,
+    pub language:    String,
+}
+
+impl TypeEdge {
+    pub fn display(&self) -> String {
+        format!("{}:{} {} {} → {} [{}]",
+            self.child_path, self.line, self.edge_kind,
+            self.child_name, self.parent_name, self.language)
     }
 }
 
@@ -321,6 +342,30 @@ pub fn global_quality_report() -> Option<QualityReport> {
         .get()
         .and_then(|g| g.lock().ok())
         .and_then(|g| g.quality_report().ok())
+}
+
+pub fn global_find_subtypes_of(parent_name: &str) -> Vec<TypeEdge> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.find_subtypes_of(parent_name).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_find_supertypes_of(child_name: &str) -> Vec<TypeEdge> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.find_supertypes_of(child_name).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_find_by_return_type(type_name: &str) -> Vec<Symbol> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.find_by_return_type(type_name).ok())
+        .unwrap_or_default()
 }
 
 /// Returns (short_path, symbol_count, line_count) for all indexed files, sorted by line_count desc.

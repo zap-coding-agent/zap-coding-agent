@@ -1,6 +1,6 @@
-use super::extract::{make_parser, node_text, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol};
+use super::extract::{make_parser, node_text, params_to_json, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RawTypeEdge};
 
-pub(super) fn extract_js(source: &str, typescript: bool, tsx: bool) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>) {
+pub(super) fn extract_js(source: &str, typescript: bool, tsx: bool) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>, Vec<RawTypeEdge>) {
     let lang = if tsx {
         tree_sitter_typescript::language_tsx()
     } else if typescript {
@@ -8,13 +8,14 @@ pub(super) fn extract_js(source: &str, typescript: bool, tsx: bool) -> (Vec<RawS
     } else {
         tree_sitter_javascript::language()
     };
-    let mut parser = match make_parser(lang) { Some(p) => p, None => return (vec![], vec![], vec![]) };
-    let tree = match parser.parse(source.as_bytes(), None) { Some(t) => t, None => return (vec![], vec![], vec![]) };
+    let mut parser = match make_parser(lang) { Some(p) => p, None => return (vec![], vec![], vec![], vec![]) };
+    let tree = match parser.parse(source.as_bytes(), None) { Some(t) => t, None => return (vec![], vec![], vec![], vec![]) };
     let mut syms = Vec::new();
     let mut calls = Vec::new();
     let mut imports = Vec::new();
-    extract_js_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, "");
-    (syms, calls, imports)
+    let mut type_edges = Vec::new();
+    extract_js_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, &mut type_edges, "");
+    (syms, calls, imports, type_edges)
 }
 
 fn extract_js_node(
@@ -22,6 +23,7 @@ fn extract_js_node(
     out: &mut Vec<RawSymbol>,
     calls: &mut Vec<RawCallSite>,
     imports: &mut Vec<RawImport>,
+    type_edges: &mut Vec<RawTypeEdge>,
     context: &str,
 ) {
     let kind = node.kind();
@@ -30,11 +32,12 @@ fn extract_js_node(
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
                 let k = if kind == "generator_function_declaration" { "function*" } else { "function" };
-                out.push(RawSymbol { name: name.clone(), kind: k.into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                let (return_type, params) = js_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: k.into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type, params });
                 let new_ctx = name.clone();
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
-                        if c.kind() == "statement_block" { extract_js_node(c, src, out, calls, imports, &new_ctx); }
+                        if c.kind() == "statement_block" { extract_js_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                     }
                 }
                 return;
@@ -43,10 +46,11 @@ fn extract_js_node(
         "class_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "class".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name: name.clone(), kind: "class".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
+                extract_js_class_type_edges(node, src, &name, type_edges);
                 let new_ctx = name.clone();
                 for i in 0..node.child_count() {
-                    if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, &new_ctx); }
+                    if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                 }
                 return;
             }
@@ -54,11 +58,12 @@ fn extract_js_node(
         "method_definition" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "method".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                let (return_type, params) = js_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: "method".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type, params });
                 let new_ctx = if context.is_empty() { name } else { format!("{}.{}", context, name) };
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
-                        if c.kind() == "statement_block" { extract_js_node(c, src, out, calls, imports, &new_ctx); }
+                        if c.kind() == "statement_block" { extract_js_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                     }
                 }
                 return;
@@ -67,10 +72,10 @@ fn extract_js_node(
         "interface_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name: name.clone(), kind: "interface".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name: name.clone(), kind: "interface".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
                 let new_ctx = name.clone();
                 for i in 0..node.child_count() {
-                    if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, &new_ctx); }
+                    if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, type_edges, &new_ctx); }
                 }
                 return;
             }
@@ -78,20 +83,20 @@ fn extract_js_node(
         "type_alias_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "type".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "type".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "enum_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "enum".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "enum".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "lexical_declaration" | "variable_declaration" => {
             extract_js_var_decls(node, src, out, context);
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_js_node(c, src, out, calls, imports, context);
+                    extract_js_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -102,7 +107,7 @@ fn extract_js_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_js_node(c, src, out, calls, imports, context);
+                    extract_js_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -114,7 +119,7 @@ fn extract_js_node(
         _ => {}
     }
     for i in 0..node.child_count() {
-        if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, context); }
+        if let Some(c) = node.child(i) { extract_js_node(c, src, out, calls, imports, type_edges, context); }
     }
 }
 
@@ -130,12 +135,68 @@ fn extract_js_var_decls(node: tree_sitter::Node, src: &[u8], out: &mut Vec<RawSy
                     if matches!(val_kind, "arrow_function" | "function" | "generator_function") {
                         let name = node_text(name_node, src).to_string();
                         let k = if val_kind == "arrow_function" { "arrow fn" } else { "function" };
+                        let (return_type, params) = js_fn_sig_parts(val_node, src);
                         out.push(RawSymbol {
                             name, kind: k.into(),
                             line: decl.start_position().row + 1,
                             signature: signature(decl, src),
                             context: context.to_string(),
+                            return_type, params,
                         });
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn js_fn_sig_parts(node: tree_sitter::Node, src: &[u8]) -> (String, String) {
+    let return_type = node.child_by_field_name("return_type")
+        .map(|n| node_text(n, src).trim_start_matches(':').trim().to_string())
+        .unwrap_or_default();
+
+    let params_json = node.child_by_field_name("parameters")
+        .map(|params_node| {
+            let mut parts: Vec<&str> = Vec::new();
+            for i in 0..params_node.child_count() {
+                if let Some(c) = params_node.child(i) {
+                    if c.is_named() && !matches!(c.kind(), "(" | ")") {
+                        let text = std::str::from_utf8(&src[c.start_byte()..c.end_byte()]).unwrap_or("").trim();
+                        if !text.is_empty() { parts.push(text); }
+                    }
+                }
+            }
+            params_to_json(&parts)
+        })
+        .unwrap_or_else(|| "[]".into());
+
+    (return_type, params_json)
+}
+
+fn extract_js_class_type_edges(node: tree_sitter::Node, src: &[u8], class_name: &str, type_edges: &mut Vec<RawTypeEdge>) {
+    // `class_declaration` has `class_heritage` child which has `extends_clause` / `implements_clause`
+    let line = node.start_position().row + 1;
+    for i in 0..node.child_count() {
+        let Some(c) = node.child(i) else { continue };
+        if c.kind() == "class_heritage" {
+            for j in 0..c.child_count() {
+                let Some(clause) = c.child(j) else { continue };
+                if clause.kind() == "extends_clause" {
+                    if let Some(t) = clause.child_by_field_name("value") {
+                        let parent = node_text(t, src).split('<').next().unwrap_or("").trim().to_string();
+                        if !parent.is_empty() {
+                            type_edges.push(RawTypeEdge { child_name: class_name.to_string(), parent_name: parent, edge_kind: "extends".into(), line });
+                        }
+                    }
+                } else if clause.kind() == "implements_clause" {
+                    for k in 0..clause.child_count() {
+                        let Some(t) = clause.child(k) else { continue };
+                        if t.kind() == "type_identifier" || t.kind() == "generic_type" {
+                            let parent = node_text(t, src).split('<').next().unwrap_or("").trim().to_string();
+                            if !parent.is_empty() {
+                                type_edges.push(RawTypeEdge { child_name: class_name.to_string(), parent_name: parent, edge_kind: "implements".into(), line });
+                            }
+                        }
                     }
                 }
             }

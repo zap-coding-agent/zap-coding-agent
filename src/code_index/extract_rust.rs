@@ -1,17 +1,18 @@
-use super::extract::{make_parser, node_text, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RUST_MACRO_NOISE};
+use super::extract::{make_parser, node_text, params_to_json, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RawTypeEdge, RUST_MACRO_NOISE};
 
-pub(super) fn extract_rust(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>) {
+pub(super) fn extract_rust(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>, Vec<RawTypeEdge>) {
     let mut parser = match make_parser(tree_sitter_rust::language()) {
-        Some(p) => p, None => return (vec![], vec![], vec![]),
+        Some(p) => p, None => return (vec![], vec![], vec![], vec![]),
     };
     let tree = match parser.parse(source.as_bytes(), None) {
-        Some(t) => t, None => return (vec![], vec![], vec![]),
+        Some(t) => t, None => return (vec![], vec![], vec![], vec![]),
     };
     let mut syms = Vec::new();
     let mut calls = Vec::new();
     let mut imports = Vec::new();
-    extract_rust_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, "");
-    (syms, calls, imports)
+    let mut type_edges = Vec::new();
+    extract_rust_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, &mut type_edges, "");
+    (syms, calls, imports, type_edges)
 }
 
 fn extract_rust_node(
@@ -19,6 +20,7 @@ fn extract_rust_node(
     out: &mut Vec<RawSymbol>,
     calls: &mut Vec<RawCallSite>,
     imports: &mut Vec<RawImport>,
+    type_edges: &mut Vec<RawTypeEdge>,
     context: &str,
 ) {
     let kind = node.kind();
@@ -27,7 +29,8 @@ fn extract_rust_node(
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
                 let sig  = signature(node, src);
-                out.push(RawSymbol { name: name.clone(), kind: "fn".into(), line: node.start_position().row + 1, signature: sig, context: context.to_string() });
+                let (return_type, params) = rust_fn_sig_parts(node, src);
+                out.push(RawSymbol { name: name.clone(), kind: "fn".into(), line: node.start_position().row + 1, signature: sig, context: context.to_string(), return_type, params });
                 let new_ctx = if context.is_empty() {
                     format!("fn {}", name)
                 } else {
@@ -36,7 +39,7 @@ fn extract_rust_node(
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
                         if c.kind() == "block" {
-                            extract_rust_node(c, src, out, calls, imports, &new_ctx);
+                            extract_rust_node(c, src, out, calls, imports, type_edges, &new_ctx);
                         }
                     }
                 }
@@ -46,49 +49,51 @@ fn extract_rust_node(
         "struct_item" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "struct".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "struct".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "enum_item" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "enum".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "enum".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "trait_item" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
                 let ctx = format!("trait {}", name);
-                out.push(RawSymbol { name: node_text(n, src).to_string(), kind: "trait".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name: node_text(n, src).to_string(), kind: "trait".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
                 for i in 0..node.child_count() {
-                    if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, &ctx); }
+                    if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, type_edges, &ctx); }
                 }
                 return;
             }
         }
         "impl_item" => {
             let impl_label = build_impl_label(node, src);
+            // Extract type edge: `impl Trait for Type` → TypeEdge(Type → Trait, "implements")
+            extract_rust_impl_type_edge(node, src, type_edges);
             for i in 0..node.child_count() {
-                if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, &impl_label); }
+                if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, type_edges, &impl_label); }
             }
             return;
         }
         "const_item" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "const".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "const".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "type_item" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "type".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "type".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "macro_definition" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
-                out.push(RawSymbol { name, kind: "macro".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string() });
+                out.push(RawSymbol { name, kind: "macro".into(), line: node.start_position().row + 1, signature: signature(node, src), context: context.to_string(), return_type: "".into(), params: "".into() });
             }
         }
         "call_expression" => {
@@ -97,7 +102,7 @@ fn extract_rust_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_rust_node(c, src, out, calls, imports, context);
+                    extract_rust_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -108,7 +113,7 @@ fn extract_rust_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_rust_node(c, src, out, calls, imports, context);
+                    extract_rust_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -120,7 +125,7 @@ fn extract_rust_node(
         _ => {}
     }
     for i in 0..node.child_count() {
-        if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, context); }
+        if let Some(c) = node.child(i) { extract_rust_node(c, src, out, calls, imports, type_edges, context); }
     }
 }
 
@@ -264,6 +269,68 @@ fn join_path(prefix: &str, segment: &str) -> String {
     if prefix.is_empty()      { segment.to_string() }
     else if segment.is_empty() { prefix.to_string() }
     else                       { format!("{}::{}", prefix, segment) }
+}
+
+/// Extract `(return_type, params_json)` from a `function_item` node.
+fn rust_fn_sig_parts(node: tree_sitter::Node, src: &[u8]) -> (String, String) {
+    let return_type = node.child_by_field_name("return_type")
+        .map(|n| node_text(n, src).trim_start_matches("->").trim().to_string())
+        .unwrap_or_default();
+
+    let params_json = node.child_by_field_name("parameters")
+        .map(|params_node| {
+            let mut parts: Vec<&str> = Vec::new();
+            for i in 0..params_node.child_count() {
+                if let Some(c) = params_node.child(i) {
+                    if matches!(c.kind(), "parameter" | "self_parameter") {
+                        let text = std::str::from_utf8(&src[c.start_byte()..c.end_byte()]).unwrap_or("").trim();
+                        if !text.is_empty() { parts.push(text); }
+                    }
+                }
+            }
+            params_to_json(&parts)
+        })
+        .unwrap_or_else(|| "[]".into());
+
+    (return_type, params_json)
+}
+
+/// Emit a type edge for `impl Trait for Type` forms.
+fn extract_rust_impl_type_edge(node: tree_sitter::Node, src: &[u8], type_edges: &mut Vec<RawTypeEdge>) {
+    // `impl_item` structure: `impl` [trait_type `for`] type_name body
+    // We want: impl Trait for Type  →  edge Type "implements" Trait
+    let mut trait_name: Option<String> = None;
+    let mut type_name: Option<String> = None;
+    let mut saw_for = false;
+
+    for i in 0..node.child_count() {
+        let Some(c) = node.child(i) else { continue };
+        match c.kind() {
+            "for" => { saw_for = true; }
+            "type_identifier" | "generic_type" | "scoped_type_identifier" => {
+                let txt = node_text(c, src).to_string();
+                if !saw_for {
+                    trait_name = Some(txt);
+                } else {
+                    type_name = Some(txt);
+                }
+            }
+            "declaration_list" => break,
+            _ => {}
+        }
+    }
+
+    if let (Some(trait_n), Some(type_n)) = (trait_name, type_name) {
+        let base_trait = trait_n.split('<').next().unwrap_or(&trait_n).trim().to_string();
+        if !base_trait.is_empty() && !type_n.is_empty() {
+            type_edges.push(RawTypeEdge {
+                child_name:  type_n,
+                parent_name: base_trait,
+                edge_kind:   "implements".into(),
+                line:        node.start_position().row + 1,
+            });
+        }
+    }
 }
 
 fn build_impl_label(node: tree_sitter::Node, src: &[u8]) -> String {

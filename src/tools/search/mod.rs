@@ -325,6 +325,122 @@ impl Tool for PackContextTool {
     }
 }
 
+// ── find_subtypes ─────────────────────────────────────────────────────────────
+
+pub(super) struct FindSubtypesTool;
+
+#[async_trait]
+impl Tool for FindSubtypesTool {
+    fn name(&self) -> &str { "find_subtypes" }
+    fn description(&self) -> &str {
+        "Find all types (classes, structs) that extend or implement a given type. \
+         Uses the indexed type hierarchy (Rust/Python/JS/TS/Java/C#). \
+         Example: find_subtypes('BaseHandler') returns every class extending it."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "parent": { "type": "string", "description": "Base class, trait, or interface name." }
+            },
+            "required": ["parent"]
+        })
+    }
+    fn permission_context(&self, input: &serde_json::Value) -> String {
+        format!("find subtypes of '{}'", input["parent"].as_str().unwrap_or("?"))
+    }
+    async fn execute(&self, input: serde_json::Value) -> Result<String> {
+        let parent = input["parent"].as_str().context("find_subtypes: 'parent' required")?;
+        let hits = crate::code_index::global_find_subtypes_of(parent);
+        if hits.is_empty() {
+            return Ok(format!("No subtypes of `{}` found in the index.", parent));
+        }
+        let mut out = format!("{} subtype(s) of `{}`:\n\n", hits.len(), parent);
+        for te in &hits {
+            out.push_str(&te.display());
+            out.push('\n');
+        }
+        Ok(out)
+    }
+}
+
+// ── find_supertypes ───────────────────────────────────────────────────────────
+
+pub(super) struct FindSupertypesTool;
+
+#[async_trait]
+impl Tool for FindSupertypesTool {
+    fn name(&self) -> &str { "find_supertypes" }
+    fn description(&self) -> &str {
+        "Find all types (base classes, traits, interfaces) that a given type extends or implements. \
+         Uses the indexed type hierarchy (Rust/Python/JS/TS/Java/C#)."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "child": { "type": "string", "description": "Class or struct name to look up." }
+            },
+            "required": ["child"]
+        })
+    }
+    fn permission_context(&self, input: &serde_json::Value) -> String {
+        format!("find supertypes of '{}'", input["child"].as_str().unwrap_or("?"))
+    }
+    async fn execute(&self, input: serde_json::Value) -> Result<String> {
+        let child = input["child"].as_str().context("find_supertypes: 'child' required")?;
+        let hits = crate::code_index::global_find_supertypes_of(child);
+        if hits.is_empty() {
+            return Ok(format!("No supertypes of `{}` found in the index.", child));
+        }
+        let mut out = format!("{} supertype(s) of `{}`:\n\n", hits.len(), child);
+        for te in &hits {
+            out.push_str(&te.display());
+            out.push('\n');
+        }
+        Ok(out)
+    }
+}
+
+// ── find_by_return_type ───────────────────────────────────────────────────────
+
+pub(super) struct FindByReturnTypeTool;
+
+#[async_trait]
+impl Tool for FindByReturnTypeTool {
+    fn name(&self) -> &str { "find_by_return_type" }
+    fn description(&self) -> &str {
+        "Find all functions and methods that return a given type. \
+         Example: find_by_return_type('Result') returns all Rust functions returning Result<…>. \
+         Uses structured signature data extracted at index time."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "type_name": { "type": "string", "description": "Return type name to search for (partial match, case-insensitive)." }
+            },
+            "required": ["type_name"]
+        })
+    }
+    fn permission_context(&self, input: &serde_json::Value) -> String {
+        format!("find functions returning '{}'", input["type_name"].as_str().unwrap_or("?"))
+    }
+    async fn execute(&self, input: serde_json::Value) -> Result<String> {
+        let type_name = input["type_name"].as_str().context("find_by_return_type: 'type_name' required")?;
+        let hits = crate::code_index::global_find_by_return_type(type_name);
+        if hits.is_empty() {
+            return Ok(format!("No functions returning `{}` found in the index.", type_name));
+        }
+        let mut out = format!("{} function(s) returning `{}`:\n\n", hits.len(), type_name);
+        for s in &hits {
+            out.push_str(&s.display());
+            out.push('\n');
+        }
+        Ok(out)
+    }
+}
+
 // ── code_map ──────────────────────────────────────────────────────────────────
 
 pub(super) struct CodeMapTool;

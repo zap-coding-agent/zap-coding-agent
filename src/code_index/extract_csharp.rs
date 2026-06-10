@@ -1,17 +1,18 @@
-use super::extract::{make_parser, node_text, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol};
+use super::extract::{make_parser, node_text, params_to_json, signature, truncate_receiver, RawCallSite, RawImport, RawSymbol, RawTypeEdge};
 
-pub(crate) fn extract_csharp(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>) {
+pub(crate) fn extract_csharp(source: &str) -> (Vec<RawSymbol>, Vec<RawCallSite>, Vec<RawImport>, Vec<RawTypeEdge>) {
     let mut parser = match make_parser(tree_sitter_c_sharp::language()) {
-        Some(p) => p, None => return (vec![], vec![], vec![]),
+        Some(p) => p, None => return (vec![], vec![], vec![], vec![]),
     };
     let tree = match parser.parse(source.as_bytes(), None) {
-        Some(t) => t, None => return (vec![], vec![], vec![]),
+        Some(t) => t, None => return (vec![], vec![], vec![], vec![]),
     };
     let mut syms = Vec::new();
     let mut calls = Vec::new();
     let mut imports = Vec::new();
-    extract_csharp_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, "");
-    (syms, calls, imports)
+    let mut type_edges = Vec::new();
+    extract_csharp_node(tree.root_node(), source.as_bytes(), &mut syms, &mut calls, &mut imports, &mut type_edges, "");
+    (syms, calls, imports, type_edges)
 }
 
 fn extract_csharp_node(
@@ -19,6 +20,7 @@ fn extract_csharp_node(
     out: &mut Vec<RawSymbol>,
     calls: &mut Vec<RawCallSite>,
     imports: &mut Vec<RawImport>,
+    type_edges: &mut Vec<RawTypeEdge>,
     context: &str,
 ) {
     let kind = node.kind();
@@ -40,11 +42,13 @@ fn extract_csharp_node(
                     line: node.start_position().row + 1,
                     signature: signature(node, src),
                     context: context.to_string(),
+                    return_type: "".into(), params: "".into(),
                 });
+                extract_csharp_type_edges(node, src, &name, type_edges);
                 let new_ctx = name.clone();
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
-                        extract_csharp_node(c, src, out, calls, imports, &new_ctx);
+                        extract_csharp_node(c, src, out, calls, imports, type_edges, &new_ctx);
                     }
                 }
                 return;
@@ -56,7 +60,7 @@ fn extract_csharp_node(
                 let new_ctx = if context.is_empty() { name } else { format!("{}.{}", context, name) };
                 for i in 0..node.child_count() {
                     if let Some(c) = node.child(i) {
-                        extract_csharp_node(c, src, out, calls, imports, &new_ctx);
+                        extract_csharp_node(c, src, out, calls, imports, type_edges, &new_ctx);
                     }
                 }
                 return;
@@ -65,15 +69,17 @@ fn extract_csharp_node(
         "method_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
+                let (return_type, params) = csharp_method_sig_parts(node, src);
                 out.push(RawSymbol {
                     name: name.clone(), kind: "method".into(),
                     line: node.start_position().row + 1,
                     signature: signature(node, src),
                     context: context.to_string(),
+                    return_type, params,
                 });
                 let new_ctx = if context.is_empty() { name } else { format!("{} · {}", context, name) };
                 if let Some(body) = node.child_by_field_name("body") {
-                    extract_csharp_node(body, src, out, calls, imports, &new_ctx);
+                    extract_csharp_node(body, src, out, calls, imports, type_edges, &new_ctx);
                 }
                 return;
             }
@@ -81,15 +87,17 @@ fn extract_csharp_node(
         "constructor_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
+                let (_, params) = csharp_method_sig_parts(node, src);
                 out.push(RawSymbol {
                     name: name.clone(), kind: "constructor".into(),
                     line: node.start_position().row + 1,
                     signature: signature(node, src),
                     context: context.to_string(),
+                    return_type: "".into(), params,
                 });
                 let new_ctx = if context.is_empty() { name } else { format!("{} · ctor", context) };
                 if let Some(body) = node.child_by_field_name("body") {
-                    extract_csharp_node(body, src, out, calls, imports, &new_ctx);
+                    extract_csharp_node(body, src, out, calls, imports, type_edges, &new_ctx);
                 }
                 return;
             }
@@ -97,11 +105,14 @@ fn extract_csharp_node(
         "property_declaration" => {
             if let Some(n) = node.child_by_field_name("name") {
                 let name = node_text(n, src).to_string();
+                let return_type = node.child_by_field_name("type")
+                    .map(|t| node_text(t, src).to_string()).unwrap_or_default();
                 out.push(RawSymbol {
                     name, kind: "property".into(),
                     line: node.start_position().row + 1,
                     signature: signature(node, src),
                     context: context.to_string(),
+                    return_type, params: "".into(),
                 });
             }
         }
@@ -118,6 +129,7 @@ fn extract_csharp_node(
                                     line: node.start_position().row + 1,
                                     signature: signature(node, src),
                                     context: context.to_string(),
+                                    return_type: "".into(), params: "".into(),
                                 });
                             }
                         }
@@ -133,6 +145,7 @@ fn extract_csharp_node(
                     line: node.start_position().row + 1,
                     signature: signature(node, src),
                     context: context.to_string(),
+                    return_type: "".into(), params: "".into(),
                 });
             }
         }
@@ -142,7 +155,7 @@ fn extract_csharp_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_csharp_node(c, src, out, calls, imports, context);
+                    extract_csharp_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -153,7 +166,7 @@ fn extract_csharp_node(
             }
             for i in 0..node.child_count() {
                 if let Some(c) = node.child(i) {
-                    extract_csharp_node(c, src, out, calls, imports, context);
+                    extract_csharp_node(c, src, out, calls, imports, type_edges, context);
                 }
             }
             return;
@@ -165,7 +178,7 @@ fn extract_csharp_node(
         _ => {}
     }
     for i in 0..node.child_count() {
-        if let Some(c) = node.child(i) { extract_csharp_node(c, src, out, calls, imports, context); }
+        if let Some(c) = node.child(i) { extract_csharp_node(c, src, out, calls, imports, type_edges, context); }
     }
 }
 
@@ -216,6 +229,50 @@ fn parse_csharp_object_creation(node: tree_sitter::Node, src: &[u8], context: &s
         receiver_expr: "".into(),
         caller_scope:  context.to_string(),
     })
+}
+
+fn csharp_method_sig_parts(node: tree_sitter::Node, src: &[u8]) -> (String, String) {
+    let return_type = node.child_by_field_name("type")
+        .map(|n| node_text(n, src).to_string())
+        .unwrap_or_default();
+
+    let params_json = node.child_by_field_name("parameters")
+        .map(|params_node| {
+            let mut parts: Vec<&str> = Vec::new();
+            for i in 0..params_node.child_count() {
+                if let Some(c) = params_node.child(i) {
+                    if matches!(c.kind(), "parameter") {
+                        let text = std::str::from_utf8(&src[c.start_byte()..c.end_byte()]).unwrap_or("").trim();
+                        if !text.is_empty() { parts.push(text); }
+                    }
+                }
+            }
+            params_to_json(&parts)
+        })
+        .unwrap_or_else(|| "[]".into());
+
+    (return_type, params_json)
+}
+
+fn extract_csharp_type_edges(node: tree_sitter::Node, src: &[u8], class_name: &str, type_edges: &mut Vec<RawTypeEdge>) {
+    // `base_list` child: contains base type + interfaces separated by commas
+    let line = node.start_position().row + 1;
+    if let Some(base_list) = (0..node.child_count())
+        .filter_map(|i| node.child(i))
+        .find(|c| c.kind() == "base_list")
+    {
+        let mut first = true;
+        for i in 0..base_list.child_count() {
+            let Some(c) = base_list.child(i) else { continue };
+            if matches!(c.kind(), "identifier" | "qualified_name" | "generic_name") {
+                let parent = node_text(c, src).split('<').next().unwrap_or("").trim().to_string();
+                if parent.is_empty() { first = false; continue; }
+                let edge_kind = if first { "extends" } else { "implements" };
+                type_edges.push(RawTypeEdge { child_name: class_name.to_string(), parent_name: parent, edge_kind: edge_kind.into(), line });
+                first = false;
+            }
+        }
+    }
 }
 
 fn flatten_csharp_using(node: tree_sitter::Node, src: &[u8], imports: &mut Vec<RawImport>) {

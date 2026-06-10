@@ -1,3 +1,11 @@
+## Session #295 — 2026-06-10
+Goal: how is code graph implemented
+Files: docs/specs/2026-06-25-code-graph-v2-design.md
+
+## Session #294 — 2026-06-10
+Goal: deploy
+Files: (no files modified)
+
 ## Session #293 — 2026-06-10
 Goal: claude code was doing a commit and push , can you resume that
 Files: /Users/sanjeevgulati/personal-repos/ideas/FEATURES.md, /Users/sanjeevgulati/personal-repos/ideas/.gitignore, /Users/sanjeevgulati/personal-repos/ideas/Cargo.toml, /Users/sanjeevgulati/personal-repos/ideas/.github/workflows/deploy-website.yml
