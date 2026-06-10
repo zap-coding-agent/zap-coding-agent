@@ -134,10 +134,10 @@ impl Session {
 
                     let mut stmt = conn.prepare(
                         "SELECT id, goal, model, created_at FROM sessions ORDER BY id DESC LIMIT 10"
-                    ).unwrap();
+                    ).expect("prepare sessions query");
                     let rows: Vec<(i64, String, String, String)> = stmt.query_map([], |r| {
                         Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                    }).unwrap().flatten().collect();
+                    }).expect("query sessions").flatten().collect();
                     if !rows.is_empty() {
                         println!("  {} Recent sessions:", "·".dimmed());
                         for (id, goal, model, created) in &rows {
@@ -150,8 +150,8 @@ impl Session {
                         }
                     }
 
-                    let mut mstmt = conn.prepare("SELECT key, value FROM memory ORDER BY key LIMIT 20").unwrap();
-                    let mrows: Vec<(String, String)> = mstmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect();
+                    let mut mstmt = conn.prepare("SELECT key, value FROM memory ORDER BY key LIMIT 20").expect("prepare memory query");
+                    let mrows: Vec<(String, String)> = mstmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).expect("query memory").flatten().collect();
                     if !mrows.is_empty() {
                         println!("  {} Memory ({} entries):", "·".dimmed(), mrows.len());
                         for (key, val) in &mrows {

@@ -390,7 +390,7 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             the codebase. Do NOT recite it verbatim for user-facing questions — for general \
             queries (\"what is this?\", \"summarize\", \"overview\") answer in plain, \
             end-user-friendly language: what the product does and who it's for.**";
-        sections.push(format!("## Project Reference\n{}\n{}", understanding.unwrap(), note));
+        sections.push(format!("## Project Reference\n{}\n{}", understanding.expect("analysis present"), note));
     } else {
         // No /init analysis yet — give the LLM an active self-orientation routine
         // so it can produce high-quality answers through its own exploration.

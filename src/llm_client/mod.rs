@@ -251,7 +251,7 @@ pub(super) async fn send_with_retry(
             last_resp = Some(resp);
         }
     }
-    Ok(last_resp.unwrap())
+    Ok(last_resp.expect("retry exhausted with no response"))
 }
 
 // ── URL normalisation helpers ─────────────────────────────────────────────────

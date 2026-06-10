@@ -300,8 +300,8 @@ async fn localhost_run_tunnel(port: u16) -> Result<String> {
         .context("failed to spawn ssh for localhost.run tunnel")?;
 
     // Read lines from stderr (localhost.run prints the URL there) and stdout.
-    let stderr = child.stderr.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().expect("child.stderr");
+    let stdout = child.stdout.take().expect("child.stdout");
 
     // Track PID for clean shutdown, then keep child alive.
     if let Some(pid) = child.id() { crate::remote_channel::set_tunnel_pid(pid); }

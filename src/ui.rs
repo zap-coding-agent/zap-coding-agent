@@ -118,7 +118,7 @@ impl ThinkingSpinner {
         let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::with_template("  {spinner:.yellow} {msg}")
-                .unwrap()
+                .expect("valid progress template")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
         // Do NOT call enable_steady_tick — its internal thread can fire after

@@ -124,7 +124,9 @@ impl Session {
                     None => { println!("  {} could not determine home dir", "✗".red()); return; }
                 };
                 if !path.exists() {
-                    std::fs::create_dir_all(path.parent().unwrap()).ok();
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent).ok();
+                    }
                     std::fs::write(&path,
                         "{\n  \"mcpServers\": {\n  }\n}\n"
                     ).ok();
