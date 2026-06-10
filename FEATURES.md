@@ -14,7 +14,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | /init command section | `README.md` | New "6. /init" section in "What makes zap different" — step-by-step flow, example ZAP.md output, update timing table |
 | Features table /init row | `README.md` | New "Project init" row in Features at a Glance table |
 
-### Task planner (src/task_planner.rs)
+### Code graph v2 (v0.15.0)
+| Feature | File | Notes |
+|---|---|---|
+| Type edges | `src/code_index/index_impl.rs`, `src/code_index/extract_rust.rs`, `src/code_index/extract_python.rs`, `src/code_index/extract_js.rs`, `src/code_index/extract_java.rs`, `src/code_index/extract_csharp.rs` | `type_edges` table: extends/implements for Rust, Python, JS/TS, Java, C#; structured `return_type` + `params` columns on symbols |
+| Import-aware resolution | `src/code_index/index_query.rs` | `resolve_call` — jump from call site to definition via import graph; `find_subtypes_of` / `find_supertypes_of` / `find_by_return_type` queries |
+| Context packer | `src/code_index/index_pack.rs` | `pack_context(task, budget)` — budget-proportional one-hop expansion (budget/200, clamp 10–50 symbols) for targeted context injection |
+| Quality report | `src/code_index/index_quality.rs` | `quality_report()` — god objects, large files, high coupling, dead code candidates, health score |
+
+
 | Feature | File | Notes |
 |---|---|---|
 | Mode picker | `src/task_planner.rs:pick_session_mode` | inquire Select at REPL startup: Vibe / Task |
