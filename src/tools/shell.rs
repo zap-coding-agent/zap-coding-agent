@@ -1,13 +1,16 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use std::borrow::Cow;
 
 use super::Tool;
 
-// ── Hard-blocked patterns (rejected unconditionally, even with explicit approval) ─
-
-/// Commands matching any of these substrings are refused outright — no prompt,
-/// no override. They cover filesystem nukes, pipe-to-shell code-injection,
-/// reverse shells, and disk-level destruction.
+// ── Confused-model guardrail (NOT a security sandbox) ──────────────────────────
+//
+// These patterns are a best-effort footgun prevention for LLMs that may generate
+// destructive commands when confused. They are a substring denylist — trivially
+// bypassable with encoding, variable indirection, or path tricks. For real
+// isolation, enable sandbox mode in ~/.agent.toml: sandbox = "workdir"
+// or sandbox = "container". See docs/SECURITY.md for the threat model.
 const BLOCKED_PATTERNS: &[&str] = &[
     // Filesystem nukes
     "rm -rf /",
@@ -137,9 +140,54 @@ fn guard_shell(command: &str) -> Result<()> {
     Ok(())
 }
 
+// ── Container detection ────────────────────────────────────────────────────────
+
+/// Check whether Docker or Podman is available for container-based sandboxing.
+fn container_runtime() -> Option<&'static str> {
+    ["docker", "podman"].iter().find(|prog| {
+        std::process::Command::new(prog)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }).copied()
+}
+
+/// Wrap a command in `docker run --rm` to execute inside a disposable container.
+/// Only the project directory is mounted (read-only) plus a writable temp.
+fn wrap_in_container(command: &str, cwd: &std::path::Path) -> Result<String> {
+    let runtime = container_runtime()
+        .ok_or_else(|| anyhow::anyhow!(
+            "container sandbox: neither docker nor podman found on PATH"
+        ))?;
+    let cwd_str = cwd.to_string_lossy();
+
+    // Escape single quotes in the command for safe sh -c embedding
+    let escaped = command.replace('\'', "'\\''");
+
+    Ok(format!(
+        "{} run --rm --network none \
+         -v '{}':'{}':ro \
+         --tmpfs /tmp:exec \
+         -w '{}' \
+         alpine:latest sh -c '{}'",
+        runtime, cwd_str, cwd_str, cwd_str, escaped
+    ))
+}
+
 // ── shell ─────────────────────────────────────────────────────────────────────
 
-pub(super) struct ShellTool;
+pub(super) struct ShellTool {
+    sandbox: crate::config::SandboxMode,
+}
+
+impl ShellTool {
+    pub fn new(sandbox: crate::config::SandboxMode) -> Self {
+        Self { sandbox }
+    }
+}
 
 #[async_trait]
 impl Tool for ShellTool {
@@ -179,7 +227,22 @@ impl Tool for ShellTool {
             .map(|t| t.min(300))
             .unwrap_or(crate::shell_runner::COMMAND_TIMEOUT_SECS);
 
-        let out = crate::shell_runner::run_command_timeout(command, timeout_secs).await?;
+        let (command_str, work_dir): (Cow<'_, str>, Option<std::path::PathBuf>) = match self.sandbox {
+            crate::config::SandboxMode::Container => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let wrapped = wrap_in_container(command, &cwd)?;
+                (std::borrow::Cow::Owned(wrapped), None)
+            }
+            crate::config::SandboxMode::Workdir => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                (std::borrow::Cow::Borrowed(command), Some(cwd))
+            }
+            crate::config::SandboxMode::Off => {
+                (std::borrow::Cow::Borrowed(command), None)
+            }
+        };
+
+        let out = crate::shell_runner::run_command_timeout(&command_str, timeout_secs, work_dir.as_deref()).await?;
         let mut result = String::new();
         if !out.stdout.is_empty() {
             result.push_str(&out.stdout);
@@ -397,7 +460,7 @@ mod tests {
 
     #[test]
     fn permission_context_with_description_contains_newline() {
-        let tool = ShellTool;
+        let tool = ShellTool::new(crate::config::SandboxMode::Off);
         let input = serde_json::json!({
             "command": "npm install",
             "description": "install dependencies"
@@ -408,7 +471,7 @@ mod tests {
 
     #[test]
     fn permission_context_without_description_has_no_newline() {
-        let tool = ShellTool;
+        let tool = ShellTool::new(crate::config::SandboxMode::Off);
         let input = serde_json::json!({ "command": "npm install" });
         let ctx = tool.permission_context(&input);
         assert!(!ctx.contains('\n'));

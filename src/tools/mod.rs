@@ -52,11 +52,11 @@ pub struct ToolRegistry {
 }
 
 impl Default for ToolRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self { Self::new(crate::config::SandboxMode::Off) }
 }
 
 impl ToolRegistry {
-    pub fn new() -> Self {
+    pub fn new(sandbox: crate::config::SandboxMode) -> Self {
         use file::{BatchEditTool, EditFileTool, GlobReadTool, ReadFileTool, WriteFileTool};
         use search::{CodeMapTool, FileImportsTool, FindByReturnTypeTool, FindDefinitionTool, FindReferencesTool, FindSubtypesTool, FindSupertypesTool, PackContextTool, SearchCodeTool, WhereImportedTool, WhoCallsTool};
         use shell::{ListDirectoryTool, ShellTool};
@@ -72,7 +72,7 @@ impl ToolRegistry {
         r.register(Arc::new(WriteFileTool));
         r.register(Arc::new(BatchEditTool));
         r.register(Arc::new(UndoEditTool));
-        r.register(Arc::new(ShellTool));
+        r.register(Arc::new(ShellTool::new(sandbox)));
         r.register(Arc::new(SearchCodeTool));
         r.register(Arc::new(FindDefinitionTool));
         r.register(Arc::new(FindReferencesTool));
@@ -263,14 +263,14 @@ mod mcp_lazy_tests {
         for (name, server_cfg) in servers {
             cfg.servers.insert(name.to_string(), server_cfg);
         }
-        let mut r = ToolRegistry::new();
+        let mut r = ToolRegistry::new(crate::config::SandboxMode::Off);
         r.load_mcp_lazy(cfg);
         r
     }
 
     #[test]
     fn no_mcp_connect_when_no_pending_servers() {
-        let r = ToolRegistry::new();
+        let r = ToolRegistry::new(crate::config::SandboxMode::Off);
         let defs = r.tool_definitions();
         assert!(!defs.iter().any(|d| d["name"] == "mcp_connect"),
             "mcp_connect should not appear when there are no pending servers");

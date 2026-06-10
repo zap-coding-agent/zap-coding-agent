@@ -48,7 +48,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | batch_edit count fix | `src/tools/file/edit.rs` | Replacement counts now tracked during validation pass (original content) instead of apply pass (mutated content), preventing drift when later edits introduce text matching earlier edits' old_strings |
-| Panic audit — bare `unwrap()` → `expect()` | `src/llm_client/mod.rs`, `src/remote.rs`, `src/context_manager.rs`, `src/ui.rs`, `src/session/commands/index.rs`, `src/session/commands/memory.rs` | 9 risky bare `unwrap()` calls replaced with `expect()` across 6 files. All remaining unwraps confined to `#[cfg(test)]` blocks only |
+| Panic audit — bare `unwrap()` → `expect()` | `src/llm_client/mod.rs`, `src/remote.rs`, `src/context_manager.rs`, `src/ui.rs`, `src/session/commands/index.rs`, `src/session/commands/memory.rs` | 9 risky bare `unwrap()` calls replaced with `expect()` across 6 files. All remaining unwraps confined to `#[cfg(test)]` blocks only || | Shell isolation — sandbox modes | `src/config.rs`, `src/tools/shell.rs`, `src/shell_runner.rs`, `docs/SECURITY.md` | Added `sandbox` config (off/workdir/container). `workdir` jails `current_dir` to project root. `container` wraps commands in disposable Docker/Podman container (`--network none`, read-only mount). Wrote full threat model doc |
 
 ### Code graph v2 (v0.15.0)
 | Feature | File | Notes |

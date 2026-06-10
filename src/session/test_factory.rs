@@ -39,7 +39,7 @@ impl Session {
         let store = persistence::Store::open_in_memory()?;
         let session_id = store.save_session("(test)", &cfg.model)?;
 
-        let tools = ToolRegistry::new();
+        let tools = ToolRegistry::new(crate::config::SandboxMode::Off);
         let tool_defs = tools.tool_definitions();
         let tool_count = tool_defs.len();
 

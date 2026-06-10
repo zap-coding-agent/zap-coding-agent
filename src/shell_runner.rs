@@ -14,8 +14,8 @@ pub struct ShellOutput {
     pub exit_code: i32,
 }
 
-/// Run an arbitrary shell string with a custom timeout.
-pub async fn run_command_timeout(command: &str, timeout_secs: u64) -> Result<ShellOutput> {
+/// Run an arbitrary shell string with a custom timeout and optional working directory.
+pub async fn run_command_timeout(command: &str, timeout_secs: u64, cwd: Option<&std::path::Path>) -> Result<ShellOutput> {
     tracing::info!(command = %command, timeout_secs, "executing shell command");
     #[cfg(windows)]
     let mut cmd = {
@@ -29,6 +29,9 @@ pub async fn run_command_timeout(command: &str, timeout_secs: u64) -> Result<She
         c.arg("-c").arg(command);
         c
     };
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
     run_with_timeout_secs(&mut cmd, timeout_secs).await
 }
 
@@ -116,7 +119,7 @@ mod tests {
     #[tokio::test]
     async fn timeout_is_respected() {
         let start = std::time::Instant::now();
-        let result = run_command_timeout("sleep 5", 1).await;
+        let result = run_command_timeout("sleep 5", 1, None).await;
         let elapsed = start.elapsed().as_secs();
         assert!(result.is_err(), "should have timed out");
         assert!(elapsed < 3, "should complete in ~1s, took {elapsed}s");
@@ -124,14 +127,14 @@ mod tests {
 
     #[tokio::test]
     async fn short_command_completes_within_timeout() {
-        let out = run_command_timeout("echo hello", 30).await.unwrap();
+        let out = run_command_timeout("echo hello", 30, None).await.unwrap();
         assert_eq!(out.stdout.trim(), "hello");
         assert_eq!(out.exit_code, 0);
     }
 
     #[tokio::test]
     async fn timeout_error_message_includes_duration() {
-        let err = run_command_timeout("sleep 5", 1).await.unwrap_err();
+        let err = run_command_timeout("sleep 5", 1, None).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("timed out"), "error must say timed out");
         assert!(msg.contains('1'), "error must mention the timeout value");

@@ -17,6 +17,13 @@ pub enum PermissionMode {
     Deny,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum SandboxMode {
+    Off,
+    Workdir,
+    Container,
+}
+
 /// Which LLM API backend to use.
 #[derive(Debug, Clone)]
 pub enum Provider {
@@ -45,6 +52,7 @@ pub struct ProviderEntry {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub permission_mode: PermissionMode,
+    pub sandbox: SandboxMode,
     pub api_key: String,
     pub model: String,
     pub provider: Provider,
@@ -114,6 +122,7 @@ struct FileConfig {
     api_key:         Option<String>,
     base_url:        Option<String>,
     permission_mode: Option<String>,
+    sandbox:         Option<String>,
     /// Per-provider settings; key is slug (e.g. "anthropic", "lm_studio").
     providers:       Option<HashMap<String, ProviderEntry>>,
     // network
@@ -220,6 +229,18 @@ impl Config {
             other  => anyhow::bail!("invalid permission_mode '{}' — use ask / auto / deny", other),
         };
 
+        // ── sandbox ────────────────────────────────────────────────────────────
+        let sb_str = env::var("AGENT_SANDBOX").ok()
+            .or(file.sandbox)
+            .unwrap_or_else(|| "off".to_string());
+
+        let sandbox = match sb_str.to_lowercase().as_str() {
+            "off"       => SandboxMode::Off,
+            "workdir"   => SandboxMode::Workdir,
+            "container" => SandboxMode::Container,
+            other       => anyhow::bail!("invalid sandbox '{}' — use off / workdir / container", other),
+        };
+
         // ── proxy ─────────────────────────────────────────────────────────────
         let proxy = env::var("AGENT_PROXY").ok().or(file.proxy);
 
@@ -253,7 +274,7 @@ impl Config {
             .unwrap_or(file.disable_stream.unwrap_or(false));
 
         Ok(Self {
-            permission_mode, api_key, model, provider, base_url,
+            permission_mode, sandbox, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
             budget: None, skill_paths, skill_token_budget, context_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
@@ -277,6 +298,14 @@ impl Config {
         writeln!(f, "# ~/.agent.toml — managed by zap /provider")?;
         writeln!(f, "provider        = {:?}", self.provider_slug)?;
         writeln!(f, "permission_mode = {:?}", pm_str)?;
+        let sb_str = match self.sandbox {
+            SandboxMode::Off       => "off",
+            SandboxMode::Workdir   => "workdir",
+            SandboxMode::Container => "container",
+        };
+        if sb_str != "off" {
+            writeln!(f, "sandbox         = {:?}", sb_str)?;
+        }
         writeln!(f)?;
         writeln!(f, "# Network / corporate proxy settings")?;
         if let Some(ref p) = self.proxy {
@@ -345,6 +374,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             permission_mode: PermissionMode::Auto,
+            sandbox: SandboxMode::Off,
             api_key: String::new(),
             model: "test-model".to_string(),
             provider: Provider::OpenAi,

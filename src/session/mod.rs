@@ -137,7 +137,7 @@ impl Session {
         let session_id = store.save_session("(repl)", &config.model)?;
 
         let mut system = context_manager::build_system_prompt(config)?;
-        let mut tools = ToolRegistry::new();
+        let mut tools = ToolRegistry::new(config.sandbox.clone());
 
         // MCP: load config into pending_mcp — servers connect on first use via mcp_connect tool.
         let mcp_cfg = crate::mcp::load_config();
