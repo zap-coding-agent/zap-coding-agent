@@ -1,0 +1,10 @@
+{
+  "id": "09_shell_command",
+  "category": "shell",
+  "description": "Use the shell tool to produce a build artifact.",
+  "prompt": "Create a file named names_sorted.txt that contains every line from names.txt sorted alphabetically. Preserve the file (don't delete the input).",
+  "setup": "printf 'charlie\\nalpha\\nbravo\\n' > names.txt",
+  "check": "test -f names.txt && test -f names_sorted.txt && [ \"$(cat names_sorted.txt)\" = \"$(printf 'alpha\\nbravo\\ncharlie')\" ]",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

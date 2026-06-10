@@ -1,0 +1,11 @@
+{
+  "id": "05_rename_variable",
+  "category": "refactor",
+  "description": "Rename a variable across a small file consistently.",
+  "prompt": "In app.py, rename the variable `usr` to `user` everywhere it appears. Don't change any other code.",
+  "setup": "cat > app.py <<'PY'\ndef greet(usr):\n    print('hi', usr)\n    return usr.upper()\nif __name__ == '__main__':\n    greet('alice')\nPY",
+  "check": "! grep -nw 'usr' app.py && grep -qw 'user' app.py && python3 -c \"import app; assert app.greet('bob')=='BOB'\"",
+  "timeout_secs": 180,
+  "max_turns": 10,
+  "requires": ["python3"]
+}

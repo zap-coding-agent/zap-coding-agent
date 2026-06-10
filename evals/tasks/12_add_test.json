@@ -1,0 +1,11 @@
+{
+  "id": "12_add_test",
+  "category": "edit",
+  "description": "Write a passing test for an existing function.",
+  "prompt": "There's a function `is_even(n)` in numbers.py. Write a unittest test file `test_numbers.py` with at least 2 test methods that cover True and False cases. Running `python3 -m unittest test_numbers` must report OK.",
+  "setup": "cat > numbers.py <<'PY'\ndef is_even(n):\n    return n % 2 == 0\nPY",
+  "check": "test -f test_numbers.py && grep -q 'is_even' test_numbers.py && python3 -m unittest test_numbers 2>&1 | tail -3 | grep -q OK",
+  "timeout_secs": 180,
+  "max_turns": 10,
+  "requires": ["python3"]
+}

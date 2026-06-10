@@ -9,8 +9,15 @@ use super::{
     send_with_retry, LlmProvider,
 };
 
-const MAX_TOKENS: u32 = 16_000;
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+
+/// Documented output token caps for known Anthropic model families.
+/// Uses a conservative default for unrecognized models.
+fn max_output_tokens(model: &str) -> u32 {
+    let m = model.to_lowercase();
+    if m.contains("claude-opus") || m.contains("claude-sonnet") { 32_000 }
+    else                                                          { 16_000 }
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct AnthropicRequest<'a> {
@@ -65,6 +72,35 @@ fn encode_messages_anthropic(messages: &[Message]) -> Vec<serde_json::Value> {
 
         serde_json::json!({ "role": msg.role, "content": content })
     }).collect()
+}
+
+/// Mark the last content block of the last message with `cache_control: ephemeral`
+/// so Anthropic can serve the conversation prefix from cache across turns.
+/// Prefers the last text block; falls back to the last block of any type.
+fn mark_last_message_cacheable(messages: &mut [serde_json::Value]) {
+    let Some(last_msg) = messages.last_mut() else { return };
+    let content = match last_msg["content"].as_array_mut() {
+        Some(c) if !c.is_empty() => c,
+        _ => return,
+    };
+
+    // Prefer the last text block, otherwise the last block of any type.
+    let target_idx = content
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, b)| b["type"].as_str() == Some("text"))
+        .map(|(i, _)| i)
+        .or_else(|| if content.is_empty() { None } else { Some(content.len() - 1) });
+
+    if let Some(idx) = target_idx {
+        if let Some(obj) = content[idx].as_object_mut() {
+            obj.insert(
+                "cache_control".to_string(),
+                serde_json::json!({ "type": "ephemeral" }),
+            );
+        }
+    }
 }
 
 /// Per-content-block accumulator while parsing the SSE stream.
@@ -222,17 +258,20 @@ impl LlmProvider for AnthropicClient {
             }
         }
 
-        let effective_budget = thinking_budget.min(MAX_TOKENS.saturating_sub(1));
+        let effective_budget = thinking_budget
+            .min(max_output_tokens(&self.model).saturating_sub(1));
         let thinking = if effective_budget > 0 {
             Some(serde_json::json!({"type": "enabled", "budget_tokens": effective_budget}))
         } else {
             None
         };
+        let mut encoded = encode_messages_anthropic(messages);
+        mark_last_message_cacheable(&mut encoded);
         let body = AnthropicRequest {
             model: &self.model,
-            max_tokens: MAX_TOKENS,
+            max_tokens: max_output_tokens(&self.model),
             system: system_blocks,
-            messages: encode_messages_anthropic(messages),
+            messages: encoded,
             tools: cached_tools,
             stream: !self.disable_stream,
             thinking,
@@ -469,5 +508,47 @@ impl LlmProvider for AnthropicClient {
         }
 
         Ok(ApiResponse { content, stop_reason, usage: Some(usage_acc) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mark_last_message_adds_cache_control() {
+        let messages = vec![
+            Message {
+                role: "user".into(),
+                content: vec![ContentBlock::Text { text: "hello".into() }],
+            },
+            Message {
+                role: "assistant".into(),
+                content: vec![ContentBlock::Text { text: "hi there".into() }],
+            },
+        ];
+        let mut encoded = encode_messages_anthropic(&messages);
+        mark_last_message_cacheable(&mut encoded);
+
+        // First message should NOT have cache_control
+        let first_blocks = encoded[0]["content"].as_array().unwrap();
+        for block in first_blocks {
+            assert!(block.get("cache_control").is_none(),
+                "first message should not have cache_control");
+        }
+
+        // Last message's last block SHOULD have cache_control
+        let last_blocks = encoded[1]["content"].as_array().unwrap();
+        let last_block = last_blocks.last().unwrap();
+        let cc = last_block["cache_control"].as_object().unwrap();
+        assert_eq!(cc["type"].as_str().unwrap(), "ephemeral");
+    }
+
+    #[test]
+    fn mark_last_message_skips_if_empty() {
+        let mut encoded: Vec<serde_json::Value> = vec![];
+        mark_last_message_cacheable(&mut encoded);
+        // Should not panic
+        assert!(encoded.is_empty());
     }
 }

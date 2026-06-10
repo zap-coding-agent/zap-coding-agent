@@ -33,6 +33,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | | Restore conversation history on resume | `src/persistence.rs`, `src/session/mod.rs` | `load_previous_messages()` finds the prior session and deserializes its saved `session_messages` JSON back into `Vec<Message>` — on resume, the LLM now sees the full previous conversation, not just the `context.md` handoff summary |
+
+### Anthropic efficiency (v0.15.4)
+| Feature | File | Notes |
+|---|---|---|
+| | Full prompt caching (history breakpoint) | `src/llm_client/anthropic.rs` | Adds `cache_control: ephemeral` on the last conversation message so Anthropic reuses the conversation prefix across turns instead of re-billing it |
+| | Model-aware output token cap | `src/llm_client/anthropic.rs` | Replaces hardcoded 16k max_tokens with `max_output_tokens()` — Opus/Sonnet → 32k, others → 16k |
+| | Default model bumped | `src/config.rs` | Anthropic default from `claude-opus-4-7` → `claude-opus-4-8` |
 | Resume history token-budget guard | `src/session/mod.rs` | `load_and_guard_previous_messages` — apply `windowed_history` (last 8 user turns, tool results outside last 2 turns pruned) plus a token cap at 30% of the model's context window, dropping oldest user+assistant pairs until under budget |
 
 ### Code graph v2 (v0.15.0)

@@ -1,0 +1,10 @@
+{
+  "id": "01_create_file",
+  "category": "edit",
+  "description": "Create a new file with specified contents.",
+  "prompt": "Create a file called hello.txt with the single line 'hello world' (no trailing whitespace).",
+  "setup": "",
+  "check": "test -f hello.txt && grep -qx 'hello world' hello.txt",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

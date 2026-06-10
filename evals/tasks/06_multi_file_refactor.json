@@ -1,0 +1,11 @@
+{
+  "id": "06_multi_file_refactor",
+  "category": "refactor",
+  "description": "Touch two files in one task: extract a helper.",
+  "prompt": "In helpers.py, add a function `square(n)` that returns n*n. Then change main.py to import and use square(5) instead of writing 5*5 inline. Don't change the printed output.",
+  "setup": "cat > helpers.py <<'PY'\ndef double(n):\n    return n + n\nPY\ncat > main.py <<'PY'\nprint(5 * 5)\nPY",
+  "check": "grep -q 'def square' helpers.py && grep -q 'square(5)' main.py && [ \"$(python3 main.py)\" = '25' ]",
+  "timeout_secs": 180,
+  "max_turns": 12,
+  "requires": ["python3"]
+}

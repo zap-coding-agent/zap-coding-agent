@@ -1,0 +1,11 @@
+{
+  "id": "03_add_function_python",
+  "category": "edit",
+  "description": "Add a function to an existing module and confirm a small assertion runs.",
+  "prompt": "There is a file math_utils.py. Add a function `add(a, b)` that returns a + b. Don't touch any existing code.",
+  "setup": "cat > math_utils.py <<'PY'\n# math_utils — helpers\n\ndef double(x):\n    return x * 2\nPY",
+  "check": "python3 -c \"import math_utils; assert math_utils.add(2,3)==5 and math_utils.double(4)==8\"",
+  "timeout_secs": 180,
+  "max_turns": 10,
+  "requires": ["python3"]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "14_count_lines",
+  "category": "search",
+  "description": "Read-only: answer a question about file contents.",
+  "prompt": "How many non-empty lines does data.txt have? Just answer with the number — don't modify anything.",
+  "setup": "printf 'one\\ntwo\\n\\nthree\\n\\nfour\\n' > data.txt\necho 'baseline' > MARKER.txt",
+  "check": "[ \"$(cat data.txt | wc -l | tr -d ' ')\" = '6' ] && [ -z \"$(find . -newer MARKER.txt -type f -not -path './.zap/*' -not -path './.agent_tmp/*' -not -name MARKER.txt 2>/dev/null)\" ]",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

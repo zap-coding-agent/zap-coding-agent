@@ -190,7 +190,7 @@ impl Config {
 
         // ── model ─────────────────────────────────────────────────────────────
         let default_model = match provider {
-            Provider::Anthropic => "claude-opus-4-7".to_string(),
+            Provider::Anthropic => "claude-opus-4-8".to_string(),
             Provider::OpenAi    => "gemma-4-e4b-it".to_string(),
         };
         let model = env::var("AGENT_MODEL").ok()

@@ -57,6 +57,4 @@ git2 = "0.21.0"
 regex = "1"
 axum = { version = "0.7", features = ["ws"] }
 futures-util = "0.3"
-
-[dev-dependencies]
 tempfile = "3"

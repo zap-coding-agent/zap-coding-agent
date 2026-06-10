@@ -1,0 +1,10 @@
+{
+  "id": "07_where_defined",
+  "category": "search",
+  "description": "Read-only: locate where a symbol is defined.",
+  "prompt": "Tell me what file the function `compute_score` is defined in. Just answer with the file name. Don't edit anything.",
+  "setup": "mkdir -p pkg && cat > pkg/scoring.py <<'PY'\ndef compute_score(x):\n    return x * 10\nPY\ncat > pkg/util.py <<'PY'\ndef helper():\n    return 42\nPY\necho 'NOTE: do not edit files for this task' > NOTES.txt",
+  "check": "! git -C . diff --quiet 2>/dev/null || true; for f in pkg/scoring.py pkg/util.py NOTES.txt; do test -e \"$f\" || exit 1; done; [ -z \"$(find . -newer NOTES.txt -type f -not -path './.zap/*' -not -path './.agent_tmp/*' -not -name NOTES.txt 2>/dev/null)\" ]",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

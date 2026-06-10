@@ -1,0 +1,11 @@
+{
+  "id": "04_fix_failing_test",
+  "category": "bugfix",
+  "description": "Diagnose a failing test and fix the implementation.",
+  "prompt": "Run `python3 -m unittest -v` here. The test in test_calc.py is failing because calc.add returns a - b instead of a + b. Fix calc.py so the test passes. Don't change the test.",
+  "setup": "cat > calc.py <<'PY'\ndef add(a, b):\n    return a - b\nPY\ncat > test_calc.py <<'PY'\nimport unittest\nfrom calc import add\nclass TestAdd(unittest.TestCase):\n    def test_simple(self):\n        self.assertEqual(add(2, 3), 5)\nif __name__ == '__main__':\n    unittest.main()\nPY",
+  "check": "python3 -m unittest test_calc.py -v 2>&1 | tail -3 | grep -q OK",
+  "timeout_secs": 180,
+  "max_turns": 10,
+  "requires": ["python3"]
+}

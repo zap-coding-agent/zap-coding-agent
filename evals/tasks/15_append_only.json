@@ -1,0 +1,10 @@
+{
+  "id": "15_append_only",
+  "category": "edit",
+  "description": "Append a line without touching the existing contents.",
+  "prompt": "Append a new line 'second' to the end of file notes.txt. The existing line 'first' must remain unchanged on line 1.",
+  "setup": "printf 'first\\n' > notes.txt",
+  "check": "[ \"$(sed -n '1p' notes.txt)\" = 'first' ] && [ \"$(sed -n '2p' notes.txt)\" = 'second' ]",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

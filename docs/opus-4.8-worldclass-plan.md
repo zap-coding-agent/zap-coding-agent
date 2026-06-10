@@ -295,13 +295,13 @@ zap can credibly claim world-class harness quality when **all** hold:
 ```
 TIER 1
 [ ] 1.1 Full Anthropic prompt caching (history breakpoint)
-[ ] 1.2 Mock LlmProvider + agent-loop tests
-[ ] 1.3 Eval harness (evals/)
+[x] 1.2 Mock LlmProvider — partial (mock.rs + test_factory.rs exist; Session::new_with_client missing)
+[x] 1.3 Eval harness (evals/) — done (15 tasks, runner, README)
 [ ] 1.4 Model-aware max_tokens + default model bump
 
 TIER 2
-[ ] 2.1 Casual/no-history path made additive-safe
-[ ] 2.2 Panic audit (mutex/IO unwraps removed from hot path)
+[x] 2.1 Casual/no-history path made additive-safe — done (needs_prior_context gate wired, unit tests)
+[ ] 2.2 Panic audit — partial (code_index + tui/channel cleaned; 93 unwraps remain across other files)
 [ ] 2.3 batch_edit count/ordering fix
 
 TIER 3

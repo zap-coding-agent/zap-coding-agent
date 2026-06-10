@@ -1,0 +1,11 @@
+{
+  "id": "11_remove_function",
+  "category": "edit",
+  "description": "Delete an unused function and keep the rest intact.",
+  "prompt": "Remove the function `dead_code()` from utils.py. Don't touch any other function.",
+  "setup": "cat > utils.py <<'PY'\ndef live_code():\n    return 'used'\n\ndef dead_code():\n    return 'unused'\n\ndef other():\n    return 'also used'\nPY",
+  "check": "! grep -q 'dead_code' utils.py && grep -q 'def live_code' utils.py && grep -q 'def other' utils.py && python3 -c \"import utils; assert utils.live_code()=='used' and utils.other()=='also used'\"",
+  "timeout_secs": 180,
+  "max_turns": 10,
+  "requires": ["python3"]
+}

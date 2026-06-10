@@ -1,0 +1,10 @@
+{
+  "id": "02_edit_file",
+  "category": "edit",
+  "description": "Modify an existing file's contents.",
+  "prompt": "The file greeting.txt currently says 'Hi'. Change it so it says 'Hello' instead. Keep the file a single line.",
+  "setup": "printf 'Hi\\n' > greeting.txt",
+  "check": "grep -qx 'Hello' greeting.txt && [ \"$(wc -l < greeting.txt)\" -le 1 ]",
+  "timeout_secs": 120,
+  "max_turns": 6
+}

@@ -1,0 +1,11 @@
+{
+  "id": "10_json_modification",
+  "category": "edit",
+  "description": "Modify a structured config file without breaking JSON.",
+  "prompt": "config.json has a `version` field. Bump it from 1 to 2. Keep the rest of the file unchanged. The result must still be valid JSON.",
+  "setup": "cat > config.json <<'JSON'\n{\n  \"name\": \"demo\",\n  \"version\": 1,\n  \"features\": [\"a\", \"b\"]\n}\nJSON",
+  "check": "python3 -c \"import json; c=json.load(open('config.json')); assert c['version']==2 and c['name']=='demo' and c['features']==['a','b']\"",
+  "timeout_secs": 120,
+  "max_turns": 6,
+  "requires": ["python3"]
+}
