@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zap — Independent Engineering Review (Claude Opus 4.8)</title>
+  <meta name="description" content="Independent engineering review of zap by Claude Opus 4.8 — scored 8.5/10. Verified by a clean build and 168 passing tests. See the capabilities zap has that Claude Code, Gemini CLI, and OpenCode do not." />
+  <link rel="canonical" href="https://zap.justpush.cloud/review.html" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="article" />
+  <meta property="og:url"         content="https://zap.justpush.cloud/review.html" />
+  <meta property="og:title"       content="Zap — Independent Engineering Review (8.5/10)" />
+  <meta property="og:description" content="Reviewed by Claude Opus 4.8. Verified by a clean build and 168 passing tests. The capabilities no other coding agent ships." />
+  <meta property="og:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="Zap — Independent Engineering Review (8.5/10)" />
+  <meta name="twitter:description" content="Reviewed by Claude Opus 4.8. Verified by a clean build and 168 passing tests." />
+  <meta name="twitter:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="logo">⚡ zap</a>
+      <div class="nav-links">
+        <a href="docs.html">Docs</a>
+        <a href="comparisons.html">Comparisons</a>
+        <a href="review.html" style="color:var(--purple);font-weight:600;">Review</a>
+        <a href="index.html#install">Install</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">Independent Engineering Review</div>
+      <h1>Independently reviewed.<br><span class="accent">8.5 / 10.</span></h1>
+      <p class="hero-sub">A full source-code review of zap by <strong>Claude Opus 4.8</strong> — not a marketing claim. Every score is backed by code that was read and a build + test suite that was run.</p>
+
+      <div class="stat-row" style="max-width:760px;margin:32px auto 0;">
+        <div class="stat-card"><div class="stat-num">8.5<span style="font-size:.5em;color:var(--text);opacity:.6">/10</span></div><div class="stat-label">overall engineering score</div></div>
+        <div class="stat-card"><div class="stat-num">168</div><div class="stat-label">tests passing · 0 failing</div></div>
+        <div class="stat-card"><div class="stat-num">0</div><div class="stat-label">compiler warnings</div></div>
+      </div>
+
+      <p class="hero-sub" style="font-size:.85rem;opacity:.7;margin-top:20px;">Reviewer: Claude Opus 4.8 · Method: read of <code>src/**</code> (~29k LOC) + live <code>cargo build --release</code> and <code>cargo test</code> · June 2026</p>
+
+      <div class="hero-actions">
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/opus-4.8-review-v2.md" target="_blank" rel="noopener" class="btn-primary">Read the full report ↗</a>
+        <a href="#unique" class="btn-secondary">What only zap does</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- VERDICT -->
+  <section class="section">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>The verdict</h2>
+        <p>zap is a genuinely well-engineered coding agent — clean architecture, the right abstractions, a green build, and real test discipline. It is now in the same conversation as the major agents on harness quality, and it ships three capabilities the majors do not.</p>
+      </div>
+      <div class="callout callout-tip">
+        <strong>Why this matters for adoption:</strong> the review was deliberately barred from trusting any of the project's own marketing documents — it scored the source code only. The two structural gaps from the first review (no automated tests on the agent loop; no way to measure quality) were closed and re-verified. This is an evidence-based assessment, suitable for technical due diligence.
+      </div>
+    </div>
+  </section>
+
+  <!-- UNIQUE TO ZAP -->
+  <section class="section section-alt" id="unique">
+    <div class="container">
+      <div class="section-header">
+        <h2>Capabilities unique to zap</h2>
+        <p>These are the things the review found in zap's source that <strong>Claude Code, Gemini CLI, and OpenCode do not provide</strong>. This is where zap is ahead — not on a feature checklist, but on architecture.</p>
+      </div>
+
+      <div class="feature-grid">
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🕸️</div>
+          <h3>Persistent code graph</h3>
+          <p>A tree-sitter + SQLite index of the whole repo — <strong>symbols, function call-sites, imports, and a type hierarchy</strong>, with PageRank-ranked files. The model answers "who calls X" or "what breaks if I rename Y" in <strong>one query</strong>, not ten greps.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">No other major agent maintains a queryable code graph. Claude Code and Gemini CLI re-grep every time.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🎯</div>
+          <h3>Skill-first context injection</h3>
+          <p>Per-turn, zap injects <strong>only the skills your message triggers</strong>, ranked and capped to a token budget. A Rust task gets Rust conventions; a greeting costs ~31 tokens instead of a 2,000-token wall sent on every turn.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">Others send the same static system prompt regardless of task. This is zap's signature design.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔌</div>
+          <h3>Token-smart MCP loading</h3>
+          <p>MCP servers stay <strong>pending</strong> at startup. Instead of dumping every server's tool schemas into every request, zap injects one lightweight connector and loads a server's tools only when the model decides it needs them.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">A genuinely different, more economical MCP integration than the eager-load model others use.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔒</div>
+          <h3>Secret pre-flight + sandbox</h3>
+          <p>Content is scanned for ~25 credential patterns <strong>before it ever leaves for a cloud LLM</strong>, and shell execution has real isolation modes (<code>off / workdir / container</code>) with a documented threat model.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">An enterprise-grade data-egress + execution posture built into the agent, not bolted on.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🏢</div>
+          <h3>Any provider · local · air-gapped</h3>
+          <p>Anthropic, any OpenAI-compatible endpoint, Gemini, DeepSeek, <strong>local models (LM Studio / Ollama)</strong>, corporate gateways, and gcloud ADC — switchable mid-session. Runs fully offline against a local model.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">Unlike Claude Code (Anthropic-centric) or Gemini CLI (Gemini-only) — zap fits a regulated, gateway-bound enterprise.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">⚡</div>
+          <h3>Single Rust binary</h3>
+          <p>One 26 MB static binary. <strong>No Node.js, no Python venv, no Docker</strong> to install or audit. Cold-starts in milliseconds and dramatically shrinks the supply-chain surface compared to npm-based agents.</p>
+          <p style="color:var(--purple);font-weight:600;font-size:.86rem;margin-top:10px;">Smaller attack surface and zero runtime dependencies — a real security and IT-approval advantage.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- CAPABILITY MATRIX -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>How zap compares</h2>
+        <p>Harness capabilities side by side. zap's edge is concentrated in code understanding, context efficiency, and enterprise/security fit.</p>
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Claude Code</th>
+              <th>Gemini CLI</th>
+              <th>OpenCode</th>
+              <th class="col-zap">zap</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Persistent queryable code graph</td>
+              <td class="bad">❌</td>
+              <td class="bad">❌</td>
+              <td class="bad">❌</td>
+              <td class="good col-zap">✅ tree-sitter + SQLite</td>
+            </tr>
+            <tr>
+              <td>Per-task skill injection</td>
+              <td class="bad">❌ static prompt</td>
+              <td class="bad">❌ static prompt</td>
+              <td class="bad">❌ static prompt</td>
+              <td class="good col-zap">✅ token-budgeted</td>
+            </tr>
+            <tr>
+              <td>Token-smart / lazy MCP loading</td>
+              <td class="bad">eager</td>
+              <td class="bad">eager</td>
+              <td class="bad">eager</td>
+              <td class="good col-zap">✅ on-demand</td>
+            </tr>
+            <tr>
+              <td>Any provider (incl. local / air-gapped)</td>
+              <td class="bad">Anthropic-centric</td>
+              <td class="bad">Gemini only</td>
+              <td class="good">✅</td>
+              <td class="good col-zap">✅</td>
+            </tr>
+            <tr>
+              <td>Secret pre-flight scan before cloud send</td>
+              <td class="bad">❌</td>
+              <td class="bad">❌</td>
+              <td class="bad">❌</td>
+              <td class="good col-zap">✅</td>
+            </tr>
+            <tr>
+              <td>Shell sandbox modes</td>
+              <td class="bad">permission-based</td>
+              <td class="bad">partial</td>
+              <td class="bad">partial</td>
+              <td class="good col-zap">✅ off/workdir/container</td>
+            </tr>
+            <tr>
+              <td>Single binary, no runtime</td>
+              <td class="bad">needs Node</td>
+              <td class="bad">needs Node</td>
+              <td class="good">✅ (Go)</td>
+              <td class="good col-zap">✅ (Rust)</td>
+            </tr>
+            <tr>
+              <td>Full prompt caching</td>
+              <td class="good">✅</td>
+              <td class="bad">N/A</td>
+              <td class="bad">provider-dependent</td>
+              <td class="good col-zap">✅</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">Comparison reflects the review's findings as of June 2026. Claude Code remains the most battle-tested harness overall; zap's advantage is architectural — capabilities the others do not implement.</p>
+    </div>
+  </section>
+
+  <!-- SCORECARD -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2>Scorecard</h2>
+        <p>How the review rated each dimension — and how it improved after the gap-closing work was completed and re-verified.</p>
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr><th>Dimension</th><th>First pass</th><th class="col-zap">Current</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Architecture &amp; abstractions</td><td>9</td><td class="good col-zap">9</td></tr>
+            <tr><td>Code understanding (graph)</td><td>9</td><td class="good col-zap">9</td></tr>
+            <tr><td>Context efficiency / caching</td><td>6</td><td class="good col-zap">9</td></tr>
+            <tr><td>Testing &amp; verifiability</td><td>4</td><td class="good col-zap">8</td></tr>
+            <tr><td>Reliability (crash-safety)</td><td>5</td><td class="good col-zap">7</td></tr>
+            <tr><td>Safety / sandboxing</td><td>5</td><td class="good col-zap">8</td></tr>
+            <tr><td>Correctness (edit tools)</td><td>7</td><td class="good col-zap">8</td></tr>
+            <tr><td><strong>Overall</strong></td><td><strong>7.0</strong></td><td class="good col-zap"><strong>8.5</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout" style="margin-top:20px;">
+        <strong>Verified, not claimed.</strong> At review time: <code>cargo build --release</code> completed clean with <strong>zero warnings</strong>, and <code>cargo test</code> reported <strong>168 passed, 0 failed</strong> — including new deterministic tests on the core agent loop that did not exist in the first pass.
+      </div>
+    </div>
+  </section>
+
+  <!-- SECURITY REVIEW -->
+  <section class="section" id="security">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>Security review</h2>
+        <p>Beyond the engineering review, zap is undergoing an independent security assessment.</p>
+      </div>
+      <div class="feature-grid" style="grid-template-columns:1fr;">
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🛡️</div>
+          <h3>Independent security review — by Mythos <span class="chip" style="margin-left:8px;vertical-align:middle;">In progress</span></h3>
+          <p>A dedicated security assessment of zap's data-egress controls, shell sandboxing, supply-chain surface, and credential handling is being conducted by Mythos. The report will be linked here when complete.</p>
+          <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/SECURITY.md" target="_blank" rel="noopener" class="feature-link">Read zap's security model &amp; threat model →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REPORTS -->
+  <section class="section section-alt">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>The full reports</h2>
+        <p>Everything above is drawn from these source-verified documents.</p>
+      </div>
+      <div class="provider-chips" style="justify-content:center;">
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/opus-4.8-review-v2.md" target="_blank" rel="noopener">Engineering Review (v2) ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/opus-4.8-review.md" target="_blank" rel="noopener">Engineering Review (v1) ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security Model ↗</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Try the agent that earned the marks</h2>
+      <p>Open source, MIT licensed. Zero telemetry. Single binary.</p>
+      <div class="cta-actions">
+        <a href="index.html#install" class="btn-primary">Install zap</a>
+        <a href="docs.html" class="btn-secondary">Read the Docs</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <div id="footer-placeholder"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
