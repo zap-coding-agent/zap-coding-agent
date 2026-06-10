@@ -83,6 +83,29 @@ fn load_and_guard_previous_messages(
     windowed
 }
 
+// ── Edit ledger ────────────────────────────────────────────────────────────────
+
+/// Per-file edit ledger entry, surviving sliding-window context eviction.
+#[derive(Debug, Clone)]
+pub struct EditedFile {
+    pub first_turn: usize,
+    pub last_turn:  usize,
+    pub ops_count:  usize,
+}
+
+impl EditedFile {
+    /// Summary line: "src/foo.rs (turns 3–7, 5 ops)" — typically ~30–40 chars.
+    fn summary(&self, path: &str) -> String {
+        if self.first_turn == self.last_turn {
+            format!("{} (turn {}, {} op{})", path, self.first_turn, self.ops_count,
+                if self.ops_count == 1 { "" } else { "s" })
+        } else {
+            format!("{} (turns {}–{}, {} op{})", path, self.first_turn, self.last_turn, self.ops_count,
+                if self.ops_count == 1 { "" } else { "s" })
+        }
+    }
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 pub struct Session {
@@ -114,7 +137,9 @@ pub struct Session {
     pub thinking_budget: u32,
     /// Number of consecutive compact failures; gates auto-compact circuit breaker.
     pub compact_failures: u8,
-    /// Paths written/edited this session — used to populate context.md at exit.
+    /// Files modified this session — survives sliding-window context eviction.
+    pub edited_files:  std::collections::HashMap<String, EditedFile>,
+    /// Legacy alias: deduplicated, sorted list derived from edited_files keys.
     pub files_changed: Vec<String>,
     /// Info lines shown at TUI startup (context banner, init nudge). Drained by run_tui().
     pub startup_notices: Vec<String>,
@@ -398,6 +423,7 @@ impl Session {
             thinking_budget: 0,
             compact_failures: 0,
             files_changed: Vec::new(),
+            edited_files: std::collections::HashMap::new(),
             startup_notices,
             skill_trace: Vec::new(),
             dropped_summary: String::new(),

@@ -86,6 +86,7 @@ impl Session {
             skill_trace: Vec::new(),
             dropped_summary: String::new(),
             last_window_start: 0,
+            edited_files: std::collections::HashMap::new(),
         })
     }
 }

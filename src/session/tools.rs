@@ -344,6 +344,17 @@ impl Session {
                 if let Some(path_str) = tool.affected_path(input) {
                     crate::code_index::global_reindex_file(std::path::Path::new(path_str));
                     self.files_changed.push(path_str.to_string());
+                    let entry = self.edited_files.entry(path_str.to_string());
+                    let cur = self.turn_count;
+                    match entry {
+                        std::collections::hash_map::Entry::Occupied(mut o) => {
+                            o.get_mut().last_turn = cur;
+                            o.get_mut().ops_count += 1;
+                        }
+                        std::collections::hash_map::Entry::Vacant(v) => {
+                            v.insert(crate::session::EditedFile { first_turn: cur, last_turn: cur, ops_count: 1 });
+                        }
+                    }
                 }
             }
         }

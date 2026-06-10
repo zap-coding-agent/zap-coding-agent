@@ -568,6 +568,18 @@ Black-box tests that run the installed `zap` binary and assert on observable out
 | T06 TUI | `test_tui.sh` | TUI starts with PTY, renders banner, exits cleanly — uses `script(1)` |
 | T07 Regression | `test_regression.sh` | R01: UTF-8 char-boundary panic on large grep output with em-dashes; R02: `/sessions` no crash |
 
+
+### Opus 4.8 worldclass improvements (v0.15.5–0.15.8)
+| Feature | File | Notes |
+|---|---|---|
+| `batch_edit` count validation fix (v0.15.5) | `src/tools/file/edit.rs` | `batch_edit` count test now uses `replace_all: true` for multi-occurrence old_strings — validates against mutations |
+| Panic audit — 0 bare `.unwrap()` calls (v0.15.6) | `src/llm_client/mod.rs`, `src/remote.rs`, `src/context_manager.rs`, `src/ui.rs`, `src/session/commands/` | 9 risky `.unwrap()` calls replaced with `.expect(...)` or `if let`; remaining bare unwraps are only in `#[cfg(test)]` blocks |
+| Shell isolation — sandbox modes (v0.15.7) | `src/config.rs`, `src/tools/shell.rs`, `src/shell_runner.rs` | `SandboxMode` enum: `Off` (default), `Workdir` (sets `current_dir` to project root), `Container` (Docker/Podman with `--network none`, read-only mount, `--tmpfs /tmp`); configurable via `AGENT_SANDBOX` env var or `sandbox = "workdir"` in TOML; `ShellTool` accepts `SandboxMode` at construction |
+| Security threat model doc (v0.15.7) | `docs/SECURITY.md` | Full threat model: sandbox modes, permission modes, secret scanner, audit trail, known limitations, honest labeling |
+| Edit ledger — session memory beyond summary blob (v0.15.8) | `src/session/mod.rs`, `src/session/tools.rs`, `src/session/turn.rs` | `EditedFile` struct records `first_turn`, `last_turn`, `ops_count` per file; `Session::edited_files` `HashMap` populated on every tool execution via `affected_path()`; injected as "Edit Ledger" block into `effective_system` before each LLM call (sorted by recency, capped at 20 entries, skipped on casual turns); survives sliding-window eviction |
+| Edit ledger mock-client tests (v0.15.8) | `src/session/agent_loop_tests.rs` | `edit_ledger_appears_on_next_turn`: verifies ledger injected on turn after file edit; `edit_ledger_persists_after_turns_slide_out_of_window`: 13-turn test verifying ledger still mentions turn-1 file after sliding window (window=8) |
+| Documentation diet (v0.15.8) | `ARCHITECTURE.md`, `README.md` | New `ARCHITECTURE.md` (~300 lines) derived from source: module map, data flow, design decisions, testing strategy; README trimmed from 76KB to 5.2KB — what it is, install, quickstart, providers, config, slash commands, security, link to ARCHITECTURE; 17 aspirational `.md` files archived to `docs/archive/` |
+
 ---
 
 ## Planned 🗓

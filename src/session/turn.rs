@@ -157,6 +157,22 @@ impl Session {
             format!("{}\n\n{}", self.system, skill_block)
         };
 
+        // ── Inject structured edit ledger (survives sliding-window eviction) ───
+        let effective_system = if !is_casual && !self.edited_files.is_empty() {
+            let mut sorted: Vec<_> = self.edited_files.iter().collect();
+            sorted.sort_by(|(_, a), (_, b)| b.last_turn.cmp(&a.last_turn)
+                .then_with(|| b.ops_count.cmp(&a.ops_count)));
+            let ledger: Vec<String> = sorted.iter()
+                .take(20)
+                .map(|(p, e)| e.summary(p))
+                .collect();
+            let block = format!("── Edit Ledger ──\nFiles modified this session (persists across context windows):\n  {}\n",
+                ledger.join("\n  "));
+            format!("{}\n\n{}", effective_system, block)
+        } else {
+            effective_system
+        };
+
         let msg_tokens_estimate = input.len() / 4;
 
         // Repair orphaned tool_use blocks from an interrupted previous turn.
