@@ -42,6 +42,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | | Default model bumped | `src/config.rs` | Anthropic default from `claude-opus-4-7` → `claude-opus-4-8` |
 | Resume history token-budget guard | `src/session/mod.rs` | `load_and_guard_previous_messages` — apply `windowed_history` (last 8 user turns, tool results outside last 2 turns pruned) plus a token cap at 30% of the model's context window, dropping oldest user+assistant pairs until under budget |
 
+### Tools (v0.15.4)
+| Feature | File | Notes |
+|---|---|---|
+| batch_edit count fix | `src/tools/file/edit.rs` | Replacement counts now tracked during validation pass (original content) instead of apply pass (mutated content), preventing drift when later edits introduce text matching earlier edits' old_strings |
+
 ### Code graph v2 (v0.15.0)
 | Feature | File | Notes |
 |---|---|---|

@@ -208,8 +208,11 @@ impl Tool for BatchEditTool {
             .await
             .with_context(|| format!("batch_edit: cannot read '{}'", path))?;
 
-        // Validate all edits first, collecting effective old_strings (with whitespace fallback).
+        // Validate all edits first, collecting effective old_strings + validated counts.
+        // We carry counts from validation (against original) into the apply phase
+        // so that a prior edit's new_string can't inflate a later edit's count.
         let mut effective_olds: Vec<String> = Vec::with_capacity(edits.len());
+        let mut validated_counts: Vec<usize> = Vec::with_capacity(edits.len());
         for (i, edit) in edits.iter().enumerate() {
             let old = edit["old_string"].as_str()
                 .with_context(|| format!("batch_edit: edit[{}] missing old_string", i))?;
@@ -259,21 +262,25 @@ impl Tool for BatchEditTool {
             }
 
             effective_olds.push(effective_old);
+            validated_counts.push(count);
         }
 
+        // Apply edits using validated counts (from original content) to avoid
+        // cross-edit interference in the report.
         let mut content = original.clone();
         let mut total_replacements = 0usize;
-        for (edit, effective_old) in edits.iter().zip(effective_olds.iter()) {
+        for ((edit, effective_old), &validated_count) in
+            edits.iter().zip(effective_olds.iter()).zip(validated_counts.iter())
+        {
             let old = effective_old.as_str();
             let new = edit["new_string"].as_str().unwrap_or("");
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
-            let count = content.matches(old).count();
             content = if replace_all {
                 content.replace(old, new)
             } else {
                 content.replacen(old, new, 1)
             };
-            total_replacements += count;
+            total_replacements += validated_count;
         }
 
         tokio::fs::write(path, &content)
@@ -305,4 +312,72 @@ fn make_preview(s: &str) -> String {
         String::new()
     };
     if t.is_empty() { format!("`{}`", h) } else { format!("`{}…{}`", h, t) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn batch_edit_cross_edit_no_interference() {
+        // Edit 1 replaces "foo" with "barbaz" — introducing "bar".
+        // Edit 2 replaces "bar" (pre-existing, not introduced by edit 1).
+        // Edit 2 should only match the pre-existing "bar", not the one
+        // edit 1 created. The validated count (from original content)
+        // must drive total_replacements, not the re-count on mutated content.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.txt");
+        let path_str = path.to_str().unwrap();
+        // "bar" appears once, "foo" appears once (not "barfoo" substring).
+        tokio::fs::write(&path, "hello bar foo world\n").await.unwrap();
+
+        let input = serde_json::json!({
+            "path": path_str,
+            "edits": [
+                { "old_string": "foo", "new_string": "barbaz" },
+                { "old_string": "bar", "new_string": "BAR" }
+            ]
+        });
+
+        let tool = BatchEditTool;
+        let result = tool.execute(input).await.unwrap();
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+
+        // After edit 1: "hello bar barbaz world"
+        // After edit 2 (replaces first "bar", NOT the one inside "barbaz"):
+        // "hello BAR barbaz world"
+        assert_eq!(content, "hello BAR barbaz world\n");
+
+        // Both edits replaced exactly 1 occurrence each → 2 total.
+        assert!(result.contains("2 replacement(s)"),
+            "expected 2 replacements, got: {}", result);
+    }
+
+    #[tokio::test]
+    async fn batch_edit_count_matches_validated_not_mutated() {
+        // Three occurrences of "abc" in original.
+        // Edit 1: replace "abc" with "" (deletes first occurrence).
+        // Edit 2: replace "abc" with "ABC" (replace_all).
+        // Edit 1's validated count = 3, but after edit 1 deletes one, re-count would be 2.
+        // total_replacements should be 3 + 3 = 6 (validated), not 3 + 2 = 5 (re-counted).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test2.txt");
+        let path_str = path.to_str().unwrap();
+        tokio::fs::write(&path, "abc def abc ghi abc\n").await.unwrap();
+
+        let input = serde_json::json!({
+            "path": path_str,
+            "edits": [
+                { "old_string": "abc", "new_string": "", "replace_all": true },
+                { "old_string": "abc", "new_string": "ABC", "replace_all": true }
+            ]
+        });
+
+        let tool = BatchEditTool;
+        let result = tool.execute(input).await.unwrap();
+
+        // Validated: edit 1 = 3 occurrences, edit 2 = 3 occurrences → 6 total.
+        assert!(result.contains("6 replacement(s)"),
+            "expected 6 replacements (3+3 validated), got: {}", result);
+    }
 }
