@@ -151,7 +151,11 @@ pub async fn run_repl(config: &Config) -> Result<()> {
         );
         match rl.readline(&prompt) {
             Ok(line) => {
-                let slash = std::mem::replace(&mut *slash_triggered.lock().unwrap(), false);
+                // Poisoned mutex: treat as "not triggered" rather than crashing the REPL.
+                let slash = match slash_triggered.lock() {
+                    Ok(mut g) => std::mem::replace(&mut *g, false),
+                    Err(_)    => false,
+                };
                 if slash {
                     if let Some(cmd) = show_command_picker() {
                         if session.handle_slash(&cmd, config).await {

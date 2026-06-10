@@ -286,7 +286,10 @@ impl ConditionalEventHandler for SlashHandler {
         ctx: &rustyline::EventContext<'_>,
     ) -> Option<Cmd> {
         if ctx.line().is_empty() {
-            *self.triggered.lock().unwrap() = true;
+            // Poisoned mutex: skip the trigger rather than panic the readline thread.
+            if let Ok(mut g) = self.triggered.lock() {
+                *g = true;
+            }
             Some(Cmd::AcceptLine)
         } else {
             None
