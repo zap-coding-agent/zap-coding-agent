@@ -39,9 +39,19 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Session casual | `src/session/casual.rs` | casual-message detection, context injection rules |
 | Slash commands | `src/session/commands/` | 10 focused submodules (code, index, tasks, git, skills, memory, media, provider, session_mgmt, info) |
 | Code index | `src/code_index/mod.rs` | global singleton, `spawn_background_indexer`, public types |
-| Code index impl | `src/code_index/index_impl.rs` | all `impl CodeIndex` methods (open, index, search, stats) |
-| Code index walk | `src/code_index/walk.rs` | filesystem walk, language detection, mtime helpers |
-| Code index extract | `src/code_index/extract.rs` | tree-sitter symbol extraction for Rust/Python/JS/TS/Go/Java/C# |
+| Code index impl | `src/code_index/index_impl.rs` | `open`, `index_dir`, `stats` (query/pack/rank/quality delegated to submodules) |
+| Code index walk | `src/code_index/walk.rs` | filesystem walk, language detection, mtime helpers, row helpers |
+| Code index extract (dispatcher) | `src/code_index/extract.rs` | `extract_all` dispatcher + shared helpers; per-language extraction in submodules below |
+| Extract: Rust | `src/code_index/extract_rust.rs` | tree-sitter Rust extraction — fn, struct, enum, trait, impl, macro, use tree flattening |
+| Extract: Python | `src/code_index/extract_python.rs` | tree-sitter Python extraction — class, def, call, import flattening |
+| Extract: JS/TS/TSX | `src/code_index/extract_js.rs` | tree-sitter JS/TS extraction — function, class, var decls, call, import/require |
+| Extract: Go | `src/code_index/extract_go.rs` | tree-sitter Go extraction — func, type, method, call, import flattening |
+| Extract: Java | `src/code_index/extract_java.rs` | tree-sitter Java extraction — class, method, invocation, object creation, import |
+| Extract: C# | `src/code_index/extract_csharp.rs` | tree-sitter C# extraction — class, method, property, invocation, using |
+| Index query | `src/code_index/index_query.rs` | `find_definition`, `symbols_in_path`, `search`, `find_references`, `callers_of`, `imports_for`, `importers_of`, `users_of_module` |
+| Index rank | `src/code_index/index_rank.rs` | `compute_file_ranks`, `rank_files(n)`, `file_rank(path)` — importance scoring |
+| Index pack | `src/code_index/index_pack.rs` | `pack_context(task, budget)` — keyword-driven relevance-ranked context bundle |
+| Index quality | `src/code_index/index_quality.rs` | `quality_report()` — god objects, large files, high coupling, dead code candidates, health score |
 | TUI render | `src/tui/render/` | 7 focused submodules (messages, layout, header, overlays, diff, dialogs) |
 | TUI commands | `src/tui/commands/` | command picker, filter/resolve, handle_inline; text builders in text.rs |
 | TUI turn handler | `src/tui/turn_handler.rs` | `run_normal_turn`, `handle_tui_slash` — main turn/slash routing |

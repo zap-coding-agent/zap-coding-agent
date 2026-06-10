@@ -3,7 +3,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 mod extract;
 mod extract_csharp;
+mod extract_go;
+mod extract_java;
+mod extract_js;
+mod extract_python;
+mod extract_rust;
 mod index_impl;
+mod index_pack;
+mod index_quality;
+mod index_query;
+mod index_rank;
 mod walk;
 
 // ── Public types ──────────────────────────────────────────────────────────────

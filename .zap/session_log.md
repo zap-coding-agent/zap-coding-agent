@@ -1,3 +1,7 @@
+## Session #292 — 2026-06-10
+Goal: Hi, does code index hv support for dot net
+Files: /Users/sanjeevgulati/personal-repos/ideas/Cargo.toml, /Users/sanjeevgulati/personal-repos/ideas/src/code_index/walk.rs, /Users/sanjeevgulati/personal-repos/ideas/src/code_index/index_impl.rs, /Users/sanjeevgulati/personal-repos/ideas/src/code_index/extract.rs, /Users/sanjeevgulati/personal-repos/ideas/FEATURES.md, /Users/sanjeevgulati/personal-repos/ideas/src/code_index/extract_csharp.rs, /Users/sanjeevgulati/personal-repos/ideas/src/code_index/mod.rs, src/llm_client/auth.rs, src/session/commands/provider.rs, src/tui/startup.rs, FEATURES.md, Cargo.toml
+
 ## Session #282 — 2026-06-08
 Goal: i want to create you tube videos about zap , you creatd the one around context v
 Files: (no files modified)
