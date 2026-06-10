@@ -23,7 +23,7 @@ case "$OS" in
   Darwin)
     case "$ARCH" in
       arm64)  ARTIFACT="zap-macos-arm64.tar.gz" ;;
-      x86_64) die "macOS Intel (x86_64) builds are not yet available. Build from source: https://github.com/$REPO" ;;
+      x86_64) ARTIFACT="zap-macos-x86_64.tar.gz" ;;
       *)      die "Unknown macOS architecture: $ARCH" ;;
     esac
     ;;

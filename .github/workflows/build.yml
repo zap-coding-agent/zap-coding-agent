@@ -21,6 +21,12 @@ jobs:
             binary_ext: ""
             upload_file: zap-macos-arm64.tar.gz
 
+          - os: macos-13              # Intel runner (cross-compile-free)
+            target: x86_64-apple-darwin
+            artifact: zap-macos-x86_64
+            binary_ext: ""
+            upload_file: zap-macos-x86_64.tar.gz
+
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: zap-linux-x86_64
@@ -127,6 +133,7 @@ jobs:
             | Platform | Download | Contents |
             |---|---|---|
             | macOS Apple Silicon (ARM) | `zap-macos-arm64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
+            | macOS Intel (x86_64) | `zap-macos-x86_64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
             | Linux x86_64 | `zap-linux-x86_64.tar.gz` | `zap` + `install.sh` + README.md + FEATURES.md |
             | Windows x86_64 | `zap-windows-x86_64.zip` | `zap.exe` + `install.ps1` + README.md + FEATURES.md |
 
@@ -150,5 +157,6 @@ jobs:
             ```
           files: |
             artifacts/zap-macos-arm64/zap-macos-arm64.tar.gz
+            artifacts/zap-macos-x86_64/zap-macos-x86_64.tar.gz
             artifacts/zap-linux-x86_64/zap-linux-x86_64.tar.gz
             artifacts/zap-windows-x86_64/zap-windows-x86_64.zip
