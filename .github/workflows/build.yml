@@ -15,13 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest          # GitHub ARM runner (M-series)
+          - os: macos-latest          # Apple Silicon runner — native build
             target: aarch64-apple-darwin
             artifact: zap-macos-arm64
             binary_ext: ""
             upload_file: zap-macos-arm64.tar.gz
 
-          - os: macos-13              # Intel runner (cross-compile-free)
+          - os: macos-latest          # Apple Silicon runner — cross-compile to Intel
             target: x86_64-apple-darwin
             artifact: zap-macos-x86_64
             binary_ext: ""
