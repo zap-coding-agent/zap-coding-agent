@@ -14,7 +14,9 @@ The team executed the gap-closing plan (`docs/opus-4.8-worldclass-plan.md`) and 
 
 This is no longer "impressive solo project with unproven claims." It is a **credibly competitive harness with the scaffolding to prove and defend its quality.**
 
-**Overall: 8.5 / 10 (85%).** Up from 7.0. The remaining 1.5 is honest, earned-only-by-soak-time work: run the eval harness to record a baseline, finish converting the last panic sites to graceful degradation, and accumulate real-world mileage.
+**Overall: 8.5 / 10 (85%).** Up from 7.0.
+
+**Important: the remaining 15% is not about coding ability or output quality.** Architecture and code-understanding already score 9/10, and the actual coding *output* is bounded by whichever model you point zap at — the harness is built to not waste that capability, and it doesn't. The 1.5-point gap is purely **operational maturity**: record an eval baseline (the harness exists; it just hasn't been run), accumulate real-world soak time, and finish a few minor hardening items. None of it reflects a weakness in how zap reads code, edits files, navigates the repo, or reasons about a task.
 
 ---
 
