@@ -23,7 +23,7 @@ use std::io::Stdout;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{Event, EventStream, MouseEventKind};
 use futures_util::StreamExt as _;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -57,6 +57,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
         stdout,
         crossterm::terminal::EnterAlternateScreen,
         crossterm::cursor::Hide,
+        crossterm::event::EnableMouseCapture,
     )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -91,6 +92,7 @@ pub async fn run_tui(config: &Config) -> Result<()> {
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(
         terminal.backend_mut(),
+        crossterm::event::DisableMouseCapture,
         crossterm::terminal::LeaveAlternateScreen
     );
     let _ = terminal.show_cursor();
@@ -158,7 +160,7 @@ async fn tui_loop(
                 let should_exit = turn_handler::handle_tui_slash(app, session, config, &input, terminal).await?;
                 if should_exit { break; }
             } else {
-                turn_handler::run_normal_turn(app, session, &input, terminal, rx).await?;
+                turn_handler::run_normal_turn(app, session, &input, terminal, rx, &mut event_stream).await?;
             }
 
             if let Some(ref name) = one_shot_unpin {
@@ -188,6 +190,16 @@ async fn tui_loop(
                     if key.kind != crossterm::event::KeyEventKind::Release =>
                 {
                     let action = handle_key(app, key);
+                    if actions::handle_action(action, app, session, terminal, config).await? {
+                        break;
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    let action = match mouse.kind {
+                        MouseEventKind::ScrollUp   => input::InputAction::ScrollUp(3),
+                        MouseEventKind::ScrollDown => input::InputAction::ScrollDown(3),
+                        _ => input::InputAction::None,
+                    };
                     if actions::handle_action(action, app, session, terminal, config).await? {
                         break;
                     }

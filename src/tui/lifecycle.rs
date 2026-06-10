@@ -8,6 +8,7 @@ pub(super) fn suspend_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> 
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(
         terminal.backend_mut(),
+        crossterm::event::DisableMouseCapture,
         crossterm::terminal::LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
@@ -18,7 +19,8 @@ pub(super) fn resume_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> R
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(
         terminal.backend_mut(),
-        crossterm::terminal::EnterAlternateScreen
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture,
     )?;
     terminal.clear()?;
     Ok(())

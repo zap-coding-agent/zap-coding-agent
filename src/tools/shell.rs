@@ -71,11 +71,19 @@ const BLOCKED_PATTERNS: &[&str] = &[
 
     // Recursive directory listing — hangs forever on symlink cycles
     // (.kiro/skills/.kiro/… etc.). Use list_directory or glob_read instead.
-    "dir /s",                  // Windows recursive dir
     "ls -r ",  "ls -r\n",     // Unix recursive ls (short flag)
     "ls -lr",  "ls -rl",      // recursive + long
     "ls -ar",  "ls -ra",      // recursive + all
     "ls --recursive",          // GNU long flag
+
+    // Windows recursive deletion (equivalent to rm -rf on Unix)
+    "rmdir /s",
+    "rd /s",
+    "del /f /s",               // force-delete recursively
+
+    // Windows disk format
+    "format c:",  "format d:",  "format e:",
+    "format /q c:", "format /q d:", "format /q e:",
 ];
 
 // ── Destructive patterns — require explicit confirmation even in auto mode ─────
@@ -96,6 +104,10 @@ pub const DESTRUCTIVE_PATTERNS: &[(&str, &str)] = &[
     ("chmod -r 000",    "recursive permission removal"),
     ("chmod -r 777",    "recursive world-writable permission"),
     ("chown -r root",   "recursive ownership change to root"),
+    // Windows destructive commands
+    ("del /f ",         "forced file deletion"),
+    ("reg delete",      "Windows registry key deletion"),
+    ("sfc /scannow",    "Windows system file check (requires admin)"),
 ];
 
 /// Returns Some(reason) if `command` matches a destructive pattern that requires

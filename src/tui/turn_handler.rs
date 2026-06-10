@@ -2,7 +2,8 @@ use std::io::Stdout;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyModifiers};
+use futures_util::StreamExt as _;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -183,6 +184,7 @@ pub(super) async fn run_normal_turn(
     input: &str,
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     rx: &mut UnboundedReceiver<TuiEvent>,
+    event_stream: &mut EventStream,
 ) -> Result<()> {
     app.state = AppState::Thinking;
     app.auto_scroll = true;
@@ -203,31 +205,12 @@ pub(super) async fn run_normal_turn(
                     }
                     done = true;
                 }
-                _ = tick => {
-                    // Cap at 64 events per tick so a warning flood (e.g. index errors)
-                    // cannot starve the spinner or freeze the UI.
-                    for _ in 0..64 {
-                        match rx.try_recv() {
-                            Ok(ev) => app.apply_event(ev),
-                            Err(_) => break,
-                        }
-                    }
-                    app.tick_spinner();
-
-                    if let Some(req) = channel::take_perm_request() {
-                        app.permission_popup = Some(super::app::PermissionPopup {
-                            pending: req.pending,
-                            response_tx: Some(req.response_tx),
-                        });
-                    }
-
-                    terminal.draw(|frame| render::draw(frame, app))?;
-
-                    while crossterm::event::poll(Duration::ZERO)? {
-                        if let Ok(Event::Key(k)) = crossterm::event::read() {
-                            use crossterm::event::KeyEventKind;
-                            if k.kind == KeyEventKind::Release { continue; }
-
+                // Use async EventStream (not blocking poll+read) so Windows
+                // FOCUS_EVENT/MENU_EVENT records can't freeze the executor.
+                maybe_ev = event_stream.next() => {
+                    if let Some(Ok(Event::Key(k))) = maybe_ev {
+                        use crossterm::event::KeyEventKind;
+                        if k.kind != KeyEventKind::Release {
                             if k.code == KeyCode::Char('c')
                                 && k.modifiers.contains(KeyModifiers::CONTROL)
                             {
@@ -238,10 +221,7 @@ pub(super) async fn run_normal_turn(
                                 done = true;
                                 cancelled = true;
                                 app.goal_state = None;
-                                break;
-                            }
-
-                            if app.permission_popup.is_some() {
+                            } else if app.permission_popup.is_some() {
                                 match handle_key(app, k) {
                                     InputAction::PermitAllow => {
                                         if let Some(ref mut popup) = app.permission_popup {
@@ -275,6 +255,26 @@ pub(super) async fn run_normal_turn(
                             }
                         }
                     }
+                }
+                _ = tick => {
+                    // Cap at 64 events per tick so a warning flood (e.g. index errors)
+                    // cannot starve the spinner or freeze the UI.
+                    for _ in 0..64 {
+                        match rx.try_recv() {
+                            Ok(ev) => app.apply_event(ev),
+                            Err(_) => break,
+                        }
+                    }
+                    app.tick_spinner();
+
+                    if let Some(req) = channel::take_perm_request() {
+                        app.permission_popup = Some(super::app::PermissionPopup {
+                            pending: req.pending,
+                            response_tx: Some(req.response_tx),
+                        });
+                    }
+
+                    terminal.draw(|frame| render::draw(frame, app))?;
                 }
             }
         }

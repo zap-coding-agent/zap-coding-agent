@@ -14,6 +14,13 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | /init command section | `README.md` | New "6. /init" section in "What makes zap different" — step-by-step flow, example ZAP.md output, update timing table |
 | Features table /init row | `README.md` | New "Project init" row in Features at a Glance table |
 
+### Windows fixes (v0.15.1)
+| Feature | File | Notes |
+|---|---|---|
+| Mouse scroll on Windows | `src/tui/mod.rs`, `src/tui/lifecycle.rs` | Enable `EnableMouseCapture`; handle `Event::Mouse ScrollUp/Down` in event loop — fixes mouse wheel injecting `[A[B` escape sequences into prompt on Windows cmd/ConPTY |
+| Permission popup frozen on Windows | `src/tui/turn_handler.rs` | Replace blocking `poll(Duration::ZERO)+read()` with async `EventStream` arm in `tokio::select!` — fixes FOCUS_EVENT freezing the Tokio executor so Y/N/A key presses never dismissed the popup |
+| `dir /s` unblocked | `src/tools/shell.rs` | Removed from hard-blocked patterns (Windows handles junction cycles; 60s timeout is the safety net); added missing Windows destructive patterns: `rmdir /s`, `rd /s`, `del /f /s`, `format c/d/e:`, `reg delete` |
+
 ### Code graph v2 (v0.15.0)
 | Feature | File | Notes |
 |---|---|---|
