@@ -62,6 +62,120 @@ impl Symbol {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CallSite {
+    pub path:          String,
+    pub line:          usize,
+    pub col:           usize,
+    pub name:          String,
+    pub qualifier:     String,
+    pub receiver_expr: String,
+    pub caller_scope:  String,
+    pub language:      String,
+}
+
+impl CallSite {
+    pub fn display(&self) -> String {
+        let scope = if self.caller_scope.is_empty() { "<top-level>".to_string() } else { self.caller_scope.clone() };
+        let full_name = if !self.qualifier.is_empty() {
+            format!("{}::{}", self.qualifier, self.name)
+        } else if !self.receiver_expr.is_empty() {
+            format!("{}.{}", self.receiver_expr, self.name)
+        } else {
+            self.name.clone()
+        };
+        format!("{}:{} [{}] → {}", self.path, self.line, scope, full_name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub path:          String,
+    pub line:          usize,
+    pub module:        String,
+    pub imported_name: String,
+    pub alias:         String,
+    pub language:      String,
+}
+
+impl Import {
+    pub fn display(&self) -> String {
+        let what = if self.imported_name.is_empty() {
+            self.module.clone()
+        } else if self.module.is_empty() {
+            self.imported_name.clone()
+        } else {
+            format!("{}::{}", self.module, self.imported_name)
+        };
+        if self.alias.is_empty() {
+            format!("{}:{} {}", self.path, self.line, what)
+        } else {
+            format!("{}:{} {} as {}", self.path, self.line, what, self.alias)
+        }
+    }
+}
+
+/// Whether graph data (call_sites + imports) is emitted on index.
+/// `ZAP_INDEX_MODE=symbols` falls back to symbol-only mode (B-tier).
+/// Default = graph (A-tier).
+pub fn graph_enabled() -> bool {
+    !matches!(std::env::var("ZAP_INDEX_MODE").ok().as_deref(), Some("symbols") | Some("ast"))
+}
+
+/// One element of a packed-context bundle returned by `pack_context`.
+#[derive(Debug, Clone)]
+pub struct PackedItem {
+    pub path:       String,
+    pub line:       usize,
+    pub kind:       String,       // "fn", "struct", "class" … (same vocabulary as Symbol.kind)
+    pub name:       String,
+    pub signature:  String,
+    pub provenance: String,       // why this row is in the bundle
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PackedContext {
+    pub items:        Vec<PackedItem>,
+    pub total_chars:  usize,
+    pub strategy:     String,
+    pub budget_chars: usize,
+    pub task:         String,
+}
+
+impl PackedContext {
+    /// Crude tokens estimate (chars / 4).
+    pub fn total_tokens_est(&self) -> usize { self.total_chars / 4 }
+
+    pub fn to_display(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "# Packed context for: \"{}\"\nstrategy: {} · budget: ~{} tokens · used: ~{} tokens · {} item(s)\n\n",
+            self.task,
+            self.strategy,
+            self.budget_chars / 4,
+            self.total_tokens_est(),
+            self.items.len(),
+        ));
+        if self.items.is_empty() {
+            out.push_str("(No matches found in the code index for this task.)\n");
+            return out;
+        }
+        let mut current_path = String::new();
+        for it in &self.items {
+            if it.path != current_path {
+                if !current_path.is_empty() { out.push('\n'); }
+                out.push_str(&format!("## {}\n", it.path));
+                current_path = it.path.clone();
+            }
+            out.push_str(&format!(
+                "  L{:>5} [{}] {} — {}  ({})\n",
+                it.line, it.kind, it.name, it.signature, it.provenance
+            ));
+        }
+        out
+    }
+}
+
 // ── Global singleton ──────────────────────────────────────────────────────────
 
 static GLOBAL_INDEX: OnceLock<Arc<Mutex<CodeIndex>>> = OnceLock::new();
@@ -96,6 +210,69 @@ pub fn global_search(query: &str, limit: usize) -> Vec<Symbol> {
         .and_then(|g| g.lock().ok())
         .and_then(|g| g.search(query, limit).ok())
         .unwrap_or_default()
+}
+
+pub fn global_find_references(name: &str, limit: usize) -> Vec<CallSite> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.find_references(name, limit).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_callers_of(name: &str, qualifier: Option<&str>, limit: usize) -> Vec<CallSite> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.callers_of(name, qualifier, limit).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_imports_for(path: &str) -> Vec<Import> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.imports_for(path).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_importers_of(name: &str) -> Vec<Import> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.importers_of(name).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_users_of_module(module: &str) -> Vec<Import> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.users_of_module(module).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_rank_files(limit: usize) -> Vec<(String, f32)> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.rank_files(limit).ok())
+        .unwrap_or_default()
+}
+
+pub fn global_file_rank(path: &str) -> f32 {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .map(|g| g.file_rank(path))
+        .unwrap_or(0.0)
+}
+
+pub fn global_pack_context(task: &str, token_budget: usize) -> Option<PackedContext> {
+    GLOBAL_INDEX
+        .get()
+        .and_then(|g| g.lock().ok())
+        .and_then(|g| g.pack_context(task, token_budget).ok())
 }
 
 pub fn global_list_indexed_files(limit: usize) -> Vec<(String, usize)> {

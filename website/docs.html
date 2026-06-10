@@ -57,7 +57,7 @@
           <span class="sidebar-heading">Core Features</span>
           <a class="sidebar-link" href="#init"               data-section="init">Project Init (/init)</a>
           <a class="sidebar-link" href="#skills"             data-section="skills">Skill-First Context</a>
-          <a class="sidebar-link" href="#code-index"         data-section="code-index">Code Indexing</a>
+          <a class="sidebar-link" href="#code-index"         data-section="code-index">Code Graph</a>
           <a class="sidebar-link" href="#context-visibility" data-section="context-visibility">Context Visibility</a>
           <a class="sidebar-link" href="#casual"             data-section="casual">Casual Messages</a>
           <a class="sidebar-link" href="#mcp"                data-section="mcp">Dynamic MCP Loading</a>
@@ -221,8 +221,8 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."</div>
 
         <div class="callout callout-tip" style="margin-top:28px;">
           <strong>Recommended: run <code>/init</code> after installing.</strong>
-          <p style="margin:8px 0 0;">This builds the AST code index and generates a project summary. It takes 10–30 seconds and runs once per project. With the index active, zap resolves symbol locations from <code>.zap/code.db</code> instead of grepping — typically <strong>3–5 fewer tool calls per task</strong>, and no duplicate files or invented patterns.</p>
-          <p style="margin:8px 0 0;">After big refactors, run <code>/index</code> to rebuild. See <a href="#code-index">Code Indexing ↓</a> for how this works and a real-world example.</p>
+          <p style="margin:8px 0 0;">This builds the code graph and generates a project summary. It takes 10–30 seconds and runs once per project. With the index active, the model knows every symbol, every call site, every import, and which files are load-bearing — typically <strong>3–5 fewer tool calls per task</strong> and no guesswork on impact analysis.</p>
+          <p style="margin:8px 0 0;">After big refactors, run <code>/index</code> to rebuild. See <a href="#code-index">Code Graph ↓</a> for the analogy, the schema, and five real examples that show what changes.</p>
         </div>
       </section>
 
@@ -284,8 +284,8 @@ api_key = <span class="c-str">"sk-..."</span></div>
             <p>Identifies language and framework from manifests (<code>Cargo.toml</code>, <code>package.json</code>, <code>pom.xml</code>) and fires the right skill automatically.</p>
           </div>
           <div class="feature-row-item">
-            <h4>Builds the code index</h4>
-            <p>Runs tree-sitter across your repo and writes the AST symbol index to <code>.zap/code.db</code>. The model queries what exists before writing anything new.</p>
+            <h4>Builds the code graph</h4>
+            <p>Runs tree-sitter across your repo and writes symbols, call sites, imports, and PageRank-ranked files to <code>.zap/code.db</code>. The model queries the graph before writing anything new.</p>
           </div>
           <div class="feature-row-item">
             <h4>Writes project knowledge</h4>
@@ -417,69 +417,304 @@ skill_paths = [<span class="c-str">"~/.claude/skills"</span>, <span class="c-str
 
       <div class="section-divider"></div>
 
-      <!-- ── Code Indexing ─────────────────────────────────────────────── -->
+      <!-- ── Code Graph ────────────────────────────────────────────────── -->
       <section class="doc-section" id="code-index">
-        <h2>Code Indexing</h2>
-        <p class="doc-lead">Zap builds an AST-level symbol index of your project using tree-sitter and stores it in a local SQLite database at <code>.zap/code.db</code>. The model can query it to find what already exists before deciding what to create.</p>
+        <h2>Code Graph</h2>
+        <p class="doc-lead">Most AI agents grep their way around your codebase. zap builds a structural map — what exists, what calls what, what imports what, and which files everything depends on — so the model answers questions in <strong>one query</strong> instead of guessing across ten.</p>
 
-        <div class="subsection-title">Building the index</div>
-        <div class="code-block"><span class="c-dim"># Run once per project, or after large refactors</span>
-/init</div>
-        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-top:8px;margin-bottom:20px;">Takes 10–30 seconds for medium projects. The index is gitignored by default — it's a local cache, not a committed artifact.</p>
-
-        <div class="subsection-title">What's indexed</div>
+        <div class="subsection-title">The building analogy</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">Think of your project as a building.</p>
         <div class="feature-row">
           <div class="feature-row-item">
-            <h4>Symbols</h4>
-            <p>Functions, structs, enums, traits, impls, classes, and methods — with their file path, line number, and signature.</p>
+            <h4>A file = a room</h4>
+            <p>Each source file is a room in the building. <code>config.rs</code> is one room, <code>cli.rs</code> is another.</p>
           </div>
           <div class="feature-row-item">
-            <h4>Files</h4>
-            <p>Every source file with its symbol count and last-indexed timestamp.</p>
+            <h4>A function = furniture</h4>
+            <p>Each function, struct, or class is a piece of furniture in a room — with a known name and position.</p>
           </div>
           <div class="feature-row-item">
-            <h4>Languages</h4>
-            <p>Rust, TypeScript, JavaScript, Python, Go, Java — and more via tree-sitter grammars.</p>
+            <h4>An AST = the room blueprint</h4>
+            <p>Every wall, outlet, and door in <em>one room</em>. <strong>Tree-sitter</strong> produces this for each file as it parses.</p>
           </div>
         </div>
+        <div class="feature-row">
+          <div class="feature-row-item">
+            <h4>A symbol = floor plan summary</h4>
+            <p>Just the labels for the key furniture and where it sits — name + line number + signature. The B-tier of code indexing.</p>
+          </div>
+          <div class="feature-row-item">
+            <h4>A graph = doorways &amp; corridors</h4>
+            <p>The hallways connecting rooms. <em>"This function in room A calls that one in room C."</em> <em>"Room B imports furniture from room D."</em></p>
+          </div>
+          <div class="feature-row-item">
+            <h4>PageRank = foot traffic</h4>
+            <p>Which rooms get used most — the lobby, the cafeteria, the main staircase. The load-bearing files.</p>
+          </div>
+        </div>
+        <div class="callout callout-tip" style="margin-top:8px;">
+          <strong>Most code intelligence tools stop at floor plans.</strong> zap draws the doorways too, then measures the foot traffic. That's what turns "grep and pray" into "look it up."
+        </div>
 
-        <div class="subsection-title">How the model uses it</div>
-        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">The model queries the index directly with SQLite. No fuzzy search, no hallucination — it either finds the symbol or it doesn't.</p>
-        <div class="code-block"><span class="c-dim">-- Find a symbol by name</span>
-SELECT path, line, kind, signature
-FROM symbols
-WHERE name LIKE '%UserStore%' COLLATE NOCASE LIMIT 20;
+        <div class="subsection-title">What zap actually stores</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">Running <code>/init</code> (and every file change after) walks your source with tree-sitter and writes four kinds of facts to <code>.zap/code.db</code>:</p>
+        <div class="comparison-table-wrap">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>Table</th>
+                <th>What it records</th>
+                <th>Real example from zap's own codebase</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>symbols</code></td>
+                <td>Where every function, struct, class is <strong>defined</strong></td>
+                <td><code>find_references</code> is a function at <code>src/code_index/index_impl.rs:395</code></td>
+              </tr>
+              <tr>
+                <td><code>call_sites</code></td>
+                <td>Every place one function <strong>calls</strong> another</td>
+                <td><code>mod.rs:205</code> calls <code>index_file</code> from inside <code>fn global_reindex_file</code></td>
+              </tr>
+              <tr>
+                <td><code>imports</code></td>
+                <td>Every <code>use</code> / <code>import</code> / <code>using</code> statement</td>
+                <td><code>config.rs</code> imports <code>HashMap</code> from <code>std::collections</code></td>
+              </tr>
+              <tr>
+                <td><code>file_rank</code></td>
+                <td>PageRank score per file — its structural centrality</td>
+                <td><code>tools/todo.rs</code> ranks 0.0208 — the orchestrator everything depends on</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Indexes the zap codebase in under 5 seconds: 264 files, 4,294 symbols, 20,272 call sites, 2,064 imports.</p>
 
-<span class="c-dim">-- List all functions in a file</span>
-SELECT name, line, signature
-FROM symbols
-WHERE path LIKE '%user_store%' AND kind = 'function'
-ORDER BY line;</div>
+        <div class="subsection-title">How this reduces guesswork — real examples</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:16px;">Every example below is a task you'd give an AI agent. The left column is what happens without a graph (most agents). The right column is what zap does in one query.</p>
 
-        <div class="subsection-title">Fewer tool calls per task</div>
-        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:16px;">Without an index, an agent must grep through files to find where a symbol lives — that's multiple tool calls before it can even start. With the index built, zap resolves it in one SQL query.</p>
+        <!-- Example 1 -->
+        <div class="subsection-title" style="font-size:0.95rem;color:var(--text);margin-top:24px;">Example 1 · "Where is <code>UserStore</code> used?"</div>
         <div class="two-col">
           <div>
-            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without /init (no index)</div>
-            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 3–5 tool calls to find one symbol</span>
-search_code("ProviderEntry")
-→ too many results, grep again
-search_code("ProviderEntry struct")
-→ found hint, read the file
-read_file("src/session/commands/provider.rs")
-→ got the definition</div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 5+ tool calls, 47 noisy hits</span>
+grep "UserStore"
+→ 47 matches: docs, tests, comments,
+  string literals, the definition,
+  function bodies, error messages…
+read_file(...)   # try to disambiguate
+read_file(...)
+read_file(...)
+<span class="c-dim"># Still not sure which are real callers</span></div>
           </div>
           <div>
-            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">With /init (index active)</div>
-            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 1 SQL query, exact line number</span>
-find_definition("ProviderEntry")
-→ src/session/commands/provider.rs:31
-   src/tui/turn_handler.rs:82
-<span class="c-dim"># Two copies found — the duplication</span>
-<span class="c-dim"># is visible immediately</span></div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--purple);">With the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># 1 query — exact answers</span>
+find_references("UserStore")
+→ 19 real call sites, each labelled
+  with the enclosing function:
+  · impl Session · save_context_inner
+  · fn boot
+  · impl Handler · on_request
+  …sorted by load-bearing file first</div>
           </div>
         </div>
-        <div class="callout" style="margin-top:16px;">
+
+        <!-- Example 2 -->
+        <div class="subsection-title" style="font-size:0.95rem;color:var(--text);margin-top:24px;">Example 2 · "If I rename <code>register_provider</code>, what breaks?"</div>
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Grep and pray</span>
+grep "register_provider"
+→ misses aliases:
+  <span class="c-dim">use crate::reg::register_provider</span>
+  <span class="c-dim">    as register;</span>
+  register(...)  <span class="c-dim"># &lt;- missed!</span>
+<span class="c-dim"># Rename ships. Build breaks.</span></div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--purple);">With the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Blast radius in 2 queries</span>
+where_imported("register_provider")
+→ 4 files import it
+  (including the aliased one)
+find_references("register_provider")
+→ 7 call sites — every aliased call
+  surfaces because the index tracked
+  the alias at import time.</div>
+          </div>
+        </div>
+
+        <!-- Example 3 -->
+        <div class="subsection-title" style="font-size:0.95rem;color:var(--text);margin-top:24px;">Example 3 · "Refactor the retry logic"</div>
+        <p style="color:var(--text-2);font-size:0.875rem;line-height:1.65;margin-bottom:12px;">The hard kind of task — there's no symbol literally named "retry." The logic is scattered across handlers, configs, and helpers.</p>
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Fuzzy grep, 200 matches</span>
+grep -i "retry"
+→ comments, error strings,
+  variable names, 8 real symbols
+read_file(...) × 8 files
+<span class="c-dim"># ~3,000 tokens burnt before the agent</span>
+<span class="c-dim"># even knows where to start editing.</span></div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--purple);">With the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Curated bundle in one call</span>
+pack_context(
+  task: "refactor retry logic",
+  token_budget: 4000
+)
+→ ranked symbols + callers + importers,
+  signatures only, with provenance:
+  <span class="c-dim">· "name match · 3 hits"</span>
+  <span class="c-dim">· "caller of retry_with_backoff"</span>
+  <span class="c-dim">· "importer of RetryConfig"</span></div>
+          </div>
+        </div>
+
+        <!-- Example 4 -->
+        <div class="subsection-title" style="font-size:0.95rem;color:var(--text);margin-top:24px;">Example 4 · "Add a new LLM provider — what's the pattern?"</div>
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Read multiple providers cover-to-cover</span>
+read_file("anthropic.rs")  <span class="c-dim"># ~800t</span>
+read_file("openai.rs")     <span class="c-dim"># ~700t</span>
+read_file("gemini.rs")     <span class="c-dim"># ~750t</span>
+<span class="c-dim"># ~2,500 tokens to learn the convention</span></div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--purple);">With the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Pattern visible in 2 queries</span>
+file_imports("llm_client/anthropic.rs")
+→ what an existing provider needs
+
+find_references("register_provider")
+→ where every provider plugs in
+<span class="c-dim"># ~200 tokens. Pattern obvious.</span></div>
+          </div>
+        </div>
+
+        <!-- Example 5 -->
+        <div class="subsection-title" style="font-size:0.95rem;color:var(--text);margin-top:24px;">Example 5 · "What's most important — touch carefully"</div>
+        <div class="two-col">
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--text-2);">Without the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># Subjective. Read READMEs.</span>
+<span class="c-dim"># Skim folder structure.</span>
+<span class="c-dim"># Hope you know what's load-bearing.</span></div>
+          </div>
+          <div>
+            <div class="subsection-title" style="margin-top:0;font-size:0.78rem;color:var(--purple);">With the graph</div>
+            <div class="code-block" style="font-size:0.8rem;"><span class="c-dim"># PageRank tells you</span>
+rank_files(top: 10)
+→ 1. tools/todo.rs         0.0208
+   2. llm_client/credentials.rs
+   3. code_index/index_impl.rs
+   4. tui/render.rs
+   …files everything depends on</div>
+          </div>
+        </div>
+
+        <div class="callout callout-tip" style="margin-top:24px;">
+          <strong>The pattern:</strong> every example replaces <em>"agent reads 5 files and guesses"</em> with <em>"agent asks the graph and knows."</em> Fewer tool calls, fewer tokens burnt, and — critically — no hallucinated answers. The graph either knows or it doesn't, and when it doesn't it falls back to text search transparently.
+        </div>
+
+        <div class="subsection-title">Five tools the model uses automatically</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">You don't have to think about any of this. The agent has five tools that consult the graph automatically when you ask the right kind of question:</p>
+        <div class="context-table-wrap">
+          <table class="context-table">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>What it does</th>
+                <th>When the agent reaches for it</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>find_references</code></td>
+                <td>Every call site for a symbol, ranked by file importance</td>
+                <td>Impact analysis, refactor planning</td>
+              </tr>
+              <tr>
+                <td><code>who_calls</code></td>
+                <td>Same as above, narrowed by qualifier (e.g. only <code>Bar::foo</code>)</td>
+                <td>Disambiguation when many symbols share a name</td>
+              </tr>
+              <tr>
+                <td><code>file_imports</code></td>
+                <td>List every <code>use</code> / <code>import</code> in a file</td>
+                <td>Understanding scope before editing</td>
+              </tr>
+              <tr>
+                <td><code>where_imported</code></td>
+                <td>Every file that imports a given name or module</td>
+                <td>Blast-radius check before a rename</td>
+              </tr>
+              <tr>
+                <td><code>pack_context</code></td>
+                <td>Curated context bundle within a token budget (signatures + provenance)</td>
+                <td>Loading the right code for a multi-file task</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title">Supported languages</div>
+        <div class="comparison-table-wrap">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>Language</th>
+                <th>Symbols</th>
+                <th>Call graph</th>
+                <th>Import graph</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Rust</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+              <tr><td>Python</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+              <tr><td>JavaScript / TypeScript / TSX</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+              <tr><td>Go</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+              <tr><td>Java</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+              <tr><td>C#</td><td class="good">✅</td><td class="good">✅</td><td class="good">✅</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="subsection-title">Querying the index yourself</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">The database is plain SQLite. If you want to poke at it directly:</p>
+        <div class="code-block"><span class="c-dim">-- Top 10 most-called functions in your repo</span>
+SELECT name, COUNT(*) AS calls
+FROM call_sites GROUP BY name
+ORDER BY calls DESC LIMIT 10;
+
+<span class="c-dim">-- Find all the load-bearing files</span>
+SELECT printf('%.4f', rank) AS rank, path
+FROM file_rank ORDER BY rank DESC LIMIT 20;
+
+<span class="c-dim">-- Who calls a specific qualified function?</span>
+SELECT path, line, caller_scope
+FROM call_sites
+WHERE name = 'write' AND qualifier = 'crate::log';</div>
+
+        <div class="subsection-title">The deliberate tradeoff</div>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:12px;">
+          zap resolves names, not types. That means <code>foo.bar()</code> matches any <code>bar</code> with that name — not the one a full type-checker would resolve to. The win: queries finish in <strong>microseconds</strong>, in-process, with zero external dependencies. The cost: when several symbols share a name, the agent gets all matches and disambiguates with a qualifier filter (<code>who_calls</code>). In practice this is rarely the bottleneck — agents read the file anyway to confirm.
+        </p>
+        <p style="color:var(--text-2);font-size:0.9rem;line-height:1.7;margin-bottom:16px;">
+          Going further (LSP-grade type resolution) is a year of engineering for a ~5% accuracy bump. zap chose to ship the agent-shaped layer (<code>pack_context</code>) first — the differentiator no other code-intelligence tool currently offers.
+        </p>
+
+        <div class="callout">
           <strong>Real-world example:</strong> In a live code review, zap (with index) identified that the same 13-provider list was duplicated across two files — and flagged it as a Phase 0 refactor risk. Claude Code (without index, no grep) missed it entirely. <a href="comparisons.html#case-study" style="color:var(--purple);">See the full case study →</a>
         </div>
       </section>
