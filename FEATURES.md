@@ -21,6 +21,11 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Permission popup frozen on Windows | `src/tui/turn_handler.rs` | Replace blocking `poll(Duration::ZERO)+read()` with async `EventStream` arm in `tokio::select!` — fixes FOCUS_EVENT freezing the Tokio executor so Y/N/A key presses never dismissed the popup |
 | `dir /s` unblocked | `src/tools/shell.rs` | Removed from hard-blocked patterns (Windows handles junction cycles; 60s timeout is the safety net); added missing Windows destructive patterns: `rmdir /s`, `rd /s`, `del /f /s`, `format c/d/e:`, `reg delete` |
 
+### Session resume (v0.15.2)
+| Feature | File | Notes |
+|---|---|---|
+| | Restore conversation history on resume | `src/persistence.rs`, `src/session/mod.rs` | `load_previous_messages()` finds the prior session and deserializes its saved `session_messages` JSON back into `Vec<Message>` — on resume, the LLM now sees the full previous conversation, not just the `context.md` handoff summary |
+
 ### Code graph v2 (v0.15.0)
 | Feature | File | Notes |
 |---|---|---|

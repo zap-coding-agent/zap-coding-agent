@@ -211,6 +211,7 @@ impl Session {
         }
 
         let mut startup_notices: Vec<String> = Vec::new();
+        let mut messages: Vec<Message> = Vec::new();
         if !config.is_subagent {
             if let Some(summary) = crate::project::context_summary() {
                 let files = crate::project::context_files();
@@ -228,6 +229,12 @@ impl Session {
                     if let Some(ctx) = crate::project::load_session_context() {
                         system.push_str("\n\n## Last Session Handoff\n");
                         system.push_str(&ctx);
+                    }
+                    // Restore full conversation history from the previous session.
+                    if let Ok(Some(json)) = store.load_previous_messages(session_id) {
+                        if let Ok(prev) = serde_json::from_str::<Vec<Message>>(&json) {
+                            messages = prev;
+                        }
                     }
                 } else {
                     println!("  {} Last: {}", "◌".dimmed(), summary.truecolor(180, 175, 210));
@@ -247,6 +254,12 @@ impl Session {
                         if let Some(ctx) = crate::project::load_session_context() {
                             system.push_str("\n\n## Last Session Handoff\n");
                             system.push_str(&ctx);
+                        }
+                        // Restore full conversation history from the previous session.
+                        if let Ok(Some(json)) = store.load_previous_messages(session_id) {
+                            if let Ok(prev) = serde_json::from_str::<Vec<Message>>(&json) {
+                                messages = prev;
+                            }
                         }
                     }
                 }
@@ -318,7 +331,7 @@ impl Session {
             permissions: PermissionManager::new(config.permission_mode.clone()),
             system,
             tool_defs,
-            messages: Vec::new(),
+            messages,
             model: config.model.clone(),
             base_url: config.base_url.clone(),
             session_usage: Usage::default(),

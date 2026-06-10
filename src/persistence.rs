@@ -123,6 +123,20 @@ impl Store {
         }
     }
 
+    /// Load messages from the most recent session *before* `current_session_id`.
+    /// Returns None if there is no prior session or it has no saved messages.
+    pub fn load_previous_messages(&self, current_session_id: i64) -> Result<Option<String>> {
+        // Get the 2 most recent sessions. The one with id < current_session_id
+        // and the highest id is the previous session.
+        let sessions = self.recent_sessions(2)?;
+        for (id, _, _, _) in &sessions {
+            if *id < current_session_id {
+                return self.load_messages(*id);
+            }
+        }
+        Ok(None)
+    }
+
     // ── Agent memory (key-value facts) ────────────────────────────────────────
 
     pub fn set_memory(&self, key: &str, value: &str) -> Result<()> {
