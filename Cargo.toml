@@ -1,6 +1,6 @@
 [package]
 name = "zap-coding-agent"
-version = "0.15.3"
+version = "0.15.4"
 edition = "2021"
 description = "Skill-first AI coding agent in Rust. Injects only the context your task needs — no prompt bloat. Single binary, no runtime."
 homepage = "https://zap.justpush.cloud"
@@ -57,3 +57,6 @@ git2 = "0.21.0"
 regex = "1"
 axum = { version = "0.7", features = ["ws"] }
 futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

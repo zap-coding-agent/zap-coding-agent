@@ -19,7 +19,20 @@ impl Store {
         let path = db_path();
         let conn = Connection::open(&path)
             .with_context(|| format!("failed to open database at {}", path.display()))?;
+        Self::init_schema(&conn)?;
+        Ok(Self { conn })
+    }
 
+    /// Anonymous in-memory store — used by tests so they don't touch ~/.zap/agent.db.
+    #[cfg(test)]
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()
+            .context("failed to open in-memory sqlite for tests")?;
+        Self::init_schema(&conn)?;
+        Ok(Self { conn })
+    }
+
+    fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +63,7 @@ impl Store {
         )
         .context("failed to initialise schema")?;
 
-        Ok(Self { conn })
+        Ok(())
     }
 
     // ── Sessions ──────────────────────────────────────────────────────────────

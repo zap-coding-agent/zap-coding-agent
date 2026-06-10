@@ -3554,7 +3554,7 @@ dependencies = [
 
 [[package]]
 name = "zap-coding-agent"
-version = "0.15.2"
+version = "0.15.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3584,6 +3584,7 @@ dependencies = [
  "serde_yaml",
  "similar",
  "syntect",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "toml",

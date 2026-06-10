@@ -2,6 +2,8 @@ pub mod anthropic;
 pub mod auth;
 pub mod claude_code;
 pub mod credentials;
+#[cfg(test)]
+pub mod mock;
 pub mod openai;
 
 use anyhow::Result;

@@ -7,6 +7,11 @@ mod summarizer;
 mod tools;
 mod turn;
 
+#[cfg(test)]
+mod agent_loop_tests;
+#[cfg(test)]
+mod test_factory;
+
 pub use history::model_context_limit;
 pub use casual::is_topic_shift;
 

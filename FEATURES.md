@@ -7,6 +7,14 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Test infrastructure (v0.15.4)
+| Feature | File | Notes |
+|---|---|---|
+| Mock `LlmProvider` | `src/llm_client/mock.rs` | `MockClient` — cheap-to-clone (`Arc<MockState>`), scripted `ApiResponse` queue + recorded calls. `text(...)` and `tool_call(...)` builders for end-turn vs tool-use responses. Compiled only under `#[cfg(test)]` |
+| `Session::new_for_test` | `src/session/test_factory.rs` | Minimal session constructor for tests — in-memory `persistence::Store`, in-memory `CodeIndex`, empty `HookRunner`/skills, `permission_mode=Auto`, `is_subagent=true`. Skips skill bootstrap, MCP load, project banners |
+| `Store::open_in_memory` | `src/persistence.rs` | Test-only in-memory sqlite store so tests never touch `~/.zap/agent.db` |
+| Agent-loop tests | `src/session/agent_loop_tests.rs` | Deterministic coverage of `handle_user_turn` — single text turn, one tool round (real `read_file` against tempfile), runaway-tool-call cap at `MAX_TURNS` |
+
 ### Documentation (README.md)
 | Feature | File | Notes |
 |---|---|---|
