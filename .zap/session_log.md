@@ -1,3 +1,11 @@
+## Session #297 — 2026-06-10
+Goal: deploy
+Files: FEATURES.md
+
+## Session #295 — 2026-06-10
+Goal: how is code graph implemented
+Files: (no files modified)
+
 ## Session #295 — 2026-06-10
 Goal: how is code graph implemented
 Files: docs/specs/2026-06-25-code-graph-v2-design.md

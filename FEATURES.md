@@ -25,6 +25,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 | Feature | File | Notes |
 |---|---|---|
 | | Restore conversation history on resume | `src/persistence.rs`, `src/session/mod.rs` | `load_previous_messages()` finds the prior session and deserializes its saved `session_messages` JSON back into `Vec<Message>` — on resume, the LLM now sees the full previous conversation, not just the `context.md` handoff summary |
+| Resume history token-budget guard | `src/session/mod.rs` | `load_and_guard_previous_messages` — apply `windowed_history` (last 8 user turns, tool results outside last 2 turns pruned) plus a token cap at 30% of the model's context window, dropping oldest user+assistant pairs until under budget |
 
 ### Code graph v2 (v0.15.0)
 | Feature | File | Notes |

@@ -27,6 +27,57 @@ use crate::{
 
 pub const MAX_TURNS: usize = 50;
 
+/// Load the previous session's messages, applying a context-size guard:
+/// 1. `windowed_history` — cap to 8 user turns + prune oversized tool results
+/// 2. Token budget — drop oldest user+assistant pairs until under 30% of the
+///    model's context window (leaving 70% for new conversation + prompt + tools)
+fn load_and_guard_previous_messages(
+    store: &crate::persistence::Store,
+    current_session_id: i64,
+    model: &str,
+) -> Vec<Message> {
+    let Some(json) = store.load_previous_messages(current_session_id).ok().flatten() else {
+        return Vec::new();
+    };
+    let prev: Vec<Message> = match serde_json::from_str(&json) {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+
+    // Step 1: apply the same sliding window used at runtime (last 8 user turns,
+    // tool results outside the last 2 turns pruned to 150 chars).
+    let mut windowed = history::windowed_history(&prev);
+
+    // Step 2: token budget — cap at 30% of the model's context window.
+    let budget = model_context_limit(model) * 30 / 100;
+    let mut tokens = Session::tokens_for_messages(&windowed);
+    while tokens > budget && windowed.len() > 1 {
+        // Find the oldest user-text message to drop it together with any
+        // assistant response that immediately follows it.
+        if let Some(idx) = windowed.iter().position(|m| {
+            m.role == "user"
+                && m.content
+                    .first()
+                    .is_some_and(|b| matches!(b, ContentBlock::Text { .. }))
+        }) {
+            let drop_end = if idx + 1 < windowed.len() && windowed[idx + 1].role == "assistant" {
+                idx + 2 // user + assistant pair
+            } else {
+                idx + 1 // just the user message
+            };
+            if drop_end >= windowed.len() {
+                break;
+            }
+            windowed.drain(0..drop_end);
+        } else {
+            break;
+        }
+        tokens = Session::tokens_for_messages(&windowed);
+    }
+
+    windowed
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 pub struct Session {
@@ -231,11 +282,7 @@ impl Session {
                         system.push_str(&ctx);
                     }
                     // Restore full conversation history from the previous session.
-                    if let Ok(Some(json)) = store.load_previous_messages(session_id) {
-                        if let Ok(prev) = serde_json::from_str::<Vec<Message>>(&json) {
-                            messages = prev;
-                        }
-                    }
+                    messages = load_and_guard_previous_messages(&store, session_id, &config.model);
                 } else {
                     println!("  {} Last: {}", "◌".dimmed(), summary.truecolor(180, 175, 210));
                     if !files_part.is_empty() {
@@ -256,11 +303,7 @@ impl Session {
                             system.push_str(&ctx);
                         }
                         // Restore full conversation history from the previous session.
-                        if let Ok(Some(json)) = store.load_previous_messages(session_id) {
-                            if let Ok(prev) = serde_json::from_str::<Vec<Message>>(&json) {
-                                messages = prev;
-                            }
-                        }
+                        messages = load_and_guard_previous_messages(&store, session_id, &config.model);
                     }
                 }
             }

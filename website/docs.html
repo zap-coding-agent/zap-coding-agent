@@ -119,20 +119,13 @@
             <div class="install-step">
               <div class="install-step-num">1</div>
               <div class="install-step-body">
-                <h4>Install Rust</h4>
-                <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</div>
-                <p>Restart your terminal, or run <code>source ~/.cargo/env</code>.</p>
+                <h4>Download &amp; install</h4>
+                <div class="code-block">curl -fsSL https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.sh | bash</div>
+                <p>Installs the pre-built binary to <code>~/.local/bin</code>. Requires Apple Silicon (M1/M2/M3/M4).</p>
               </div>
             </div>
             <div class="install-step">
               <div class="install-step-num">2</div>
-              <div class="install-step-body">
-                <h4>Install zap</h4>
-                <div class="code-block">cargo install zap-coding-agent</div>
-              </div>
-            </div>
-            <div class="install-step">
-              <div class="install-step-num">3</div>
               <div class="install-step-body">
                 <h4>Set your API key</h4>
                 <div class="code-block"><span class="c-dim"># Add to ~/.zshrc</span>
@@ -141,7 +134,7 @@ export ANTHROPIC_API_KEY=sk-ant-...</div>
               </div>
             </div>
             <div class="install-step last">
-              <div class="install-step-num">4</div>
+              <div class="install-step-num">3</div>
               <div class="install-step-body">
                 <h4>Run</h4>
                 <div class="code-block">cd your-project &amp;&amp; zap</div>
@@ -149,7 +142,7 @@ export ANTHROPIC_API_KEY=sk-ant-...</div>
               </div>
             </div>
           </div>
-          <p class="install-alt">Prefer a pre-built binary? <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">Download from releases ↗</a></p>
+          <p class="install-alt">Intel Mac or prefer to build from source? <code>cargo install zap-coding-agent</code> — <a href="https://rustup.rs" target="_blank" rel="noopener">get Rust here ↗</a></p>
         </div>
 
         <!-- Linux -->
@@ -158,20 +151,13 @@ export ANTHROPIC_API_KEY=sk-ant-...</div>
             <div class="install-step">
               <div class="install-step-num">1</div>
               <div class="install-step-body">
-                <h4>Install Rust</h4>
-                <div class="code-block">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env</div>
+                <h4>Download &amp; install</h4>
+                <div class="code-block">curl -fsSL https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.sh | bash</div>
+                <p>Installs the pre-built binary to <code>~/.local/bin</code>. Supports x86_64 and arm64.</p>
               </div>
             </div>
             <div class="install-step">
               <div class="install-step-num">2</div>
-              <div class="install-step-body">
-                <h4>Install zap</h4>
-                <div class="code-block">cargo install zap-coding-agent</div>
-              </div>
-            </div>
-            <div class="install-step">
-              <div class="install-step-num">3</div>
               <div class="install-step-body">
                 <h4>Set your API key</h4>
                 <div class="code-block"><span class="c-dim"># Add to ~/.bashrc or ~/.zshrc</span>
@@ -179,14 +165,14 @@ export ANTHROPIC_API_KEY=sk-ant-...</div>
               </div>
             </div>
             <div class="install-step last">
-              <div class="install-step-num">4</div>
+              <div class="install-step-num">3</div>
               <div class="install-step-body">
                 <h4>Run</h4>
                 <div class="code-block">cd your-project &amp;&amp; zap</div>
               </div>
             </div>
           </div>
-          <p class="install-alt">Pre-built binary available on the <a href="https://github.com/zap-coding-agent/zap-coding-agent/releases" target="_blank" rel="noopener">releases page ↗</a></p>
+          <p class="install-alt">Prefer to build from source? <code>cargo install zap-coding-agent</code> — <a href="https://rustup.rs" target="_blank" rel="noopener">get Rust here ↗</a></p>
         </div>
 
         <!-- Windows -->
