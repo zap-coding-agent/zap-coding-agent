@@ -48,15 +48,15 @@ impl MockClient {
     }
 
     pub fn push(&self, response: ApiResponse) {
-        self.state.responses.lock().unwrap().push_back(response);
+        self.state.responses.lock().unwrap_or_else(|e| e.into_inner()).push_back(response);
     }
 
     pub fn call_count(&self) -> usize {
-        self.state.calls.lock().unwrap().len()
+        self.state.calls.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     pub fn recorded_calls(&self) -> Vec<RecordedCall> {
-        self.state.calls.lock().unwrap().clone()
+        self.state.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Build a text-only assistant response that ends the turn (`stop_reason="end_turn"`).
@@ -95,13 +95,13 @@ impl LlmProvider for MockClient {
         if let Some(cb) = before_output {
             cb();
         }
-        self.state.calls.lock().unwrap().push(RecordedCall {
+        self.state.calls.lock().unwrap_or_else(|e| e.into_inner()).push(RecordedCall {
             system: system.to_string(),
             messages: messages.to_vec(),
             tools: tools.to_vec(),
             thinking_budget,
         });
-        let next = self.state.responses.lock().unwrap().pop_front();
+        let next = self.state.responses.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
         Ok(next.unwrap_or_else(|| Self::text("(mock: queue empty, default end-turn)")))
     }
 }
