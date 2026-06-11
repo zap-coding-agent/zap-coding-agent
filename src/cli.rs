@@ -6,6 +6,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug)]
 #[command(name = "zap")]
+#[command(version)]
 #[command(about = "⚡ zap — fast AI coding agent")]
 #[command(long_about = "\
 ⚡ zap — fast AI coding agent\n\

@@ -7,6 +7,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Install UX polish (v0.15.13)
+Friction-less first-run experience for new users coming from the website.
+
+| Feature | File | Notes |
+|---|---|---|
+| `zap --version` flag | `src/cli.rs` | `#[command(version)]` wires the Cargo.toml version into clap's `--version` / `-V`. `install.sh` already calls it (line 62) and now reports the real version instead of "local" |
+| README install table | `README.md` | Added macOS Intel (x86_64) row; the binary has shipped since v0.15.10 |
+| Website install step 3 | `website/index.html` | "Run" → "Verify & run" with `zap --version` as the first command in each OS tab; gives new users a confirm step before they enter the REPL |
+
 ### Security hardening pass 2 (v0.15.12)
 Takes the Mythos security posture from 8.0 → 9.0 (`docs/security-review-v3.md`). The four high-leverage levers from the v2 report.
 
