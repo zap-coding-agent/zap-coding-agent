@@ -334,6 +334,11 @@ p code, li code, td code, h4 code {
 .os-content { display: none; }
 .os-content.active { display: block; }
 
+/* Stop Chrome's overflow-anchor from re-positioning the page when an
+   inactive .os-content is removed from layout (display:none). The JS
+   tab-swap handler restores the exact scroll position itself. */
+.os-tabs, .os-content { overflow-anchor: none; }
+
 /* ── Install steps ────────────────────────────────────────────────── */
 .install-steps { display: flex; flex-direction: column; gap: 0; margin: 20px 0; }
 
