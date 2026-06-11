@@ -63,8 +63,14 @@ const spy = new IntersectionObserver(entries => {
       const link = document.querySelector(`.sidebar-link[data-section="${entry.target.id}"]`);
       if (link) {
         link.classList.add('active');
-        // on mobile scroll sidebar to show active link
-        link.scrollIntoView({ block: 'nearest', inline: 'center' });
+        // Center the active link inside the horizontal mobile sidebar WITHOUT
+        // touching window scroll. scrollIntoView({block:'nearest'}) was yanking
+        // the page back up whenever the sidebar sat above the viewport — which
+        // is exactly the state once you scroll into a section.
+        const bar = link.closest('.sidebar-nav');
+        if (bar && bar.scrollWidth > bar.clientWidth) {
+          bar.scrollLeft = link.offsetLeft - (bar.clientWidth - link.offsetWidth) / 2;
+        }
       }
     }
   });
