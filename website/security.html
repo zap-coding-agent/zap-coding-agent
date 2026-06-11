@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zap — Independent Security Review (Mythos)</title>
+  <meta name="description" content="Independent source-level security review of zap by Mythos — posture 8.0/10 after fixes (v2). All six trust-boundary findings addressed: remote tunnel disabled, project-trust gate, symlink-safe path guard, hardened secret egress." />
+  <link rel="canonical" href="https://zap.justpush.cloud/security.html" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="article" />
+  <meta property="og:url"         content="https://zap.justpush.cloud/security.html" />
+  <meta property="og:title"       content="Zap — Independent Security Review (8.0/10, v2)" />
+  <meta property="og:description" content="A source-level security assessment by Mythos. Six findings, all addressed in v0.15.11 — verified by a clean build and 171 passing tests." />
+  <meta property="og:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="Zap — Independent Security Review (8.0/10, v2)" />
+  <meta name="twitter:description" content="A source-level security assessment by Mythos. Six findings, all addressed in v0.15.11." />
+  <meta name="twitter:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="logo">⚡ zap</a>
+      <div class="nav-links">
+        <a href="docs.html">Docs</a>
+        <a href="comparisons.html">Comparisons</a>
+        <a href="review.html" class="nav-highlight">Opus 4.8 Review</a>
+        <a href="security.html" class="nav-highlight">Mythos/Fable Security Review</a>
+        <a href="index.html#install">Install</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">Independent Security Review · v2 (post-fix)</div>
+      <h1>Reviewed, then hardened.<br><span class="accent">8.0 / 10.</span></h1>
+      <p class="hero-sub">A source-level security assessment of zap by <strong>Mythos</strong> — every finding traced by hand to a specific <code>file:line</code>. The first pass scored <strong>6.5</strong>; all six findings were then fixed in <strong>v0.15.11</strong>, lifting the posture to <strong>8.0</strong>.</p>
+
+      <div class="stat-row" style="max-width:760px;margin:32px auto 0;">
+        <div class="stat-card"><div class="stat-num">8.0<span style="font-size:.5em;color:var(--text);opacity:.6">/10</span></div><div class="stat-label">posture after fixes (was 6.5)</div></div>
+        <div class="stat-card"><div class="stat-num">6 / 6</div><div class="stat-label">findings addressed</div></div>
+        <div class="stat-card"><div class="stat-num">171</div><div class="stat-label">tests passing · 0 warnings</div></div>
+      </div>
+
+      <p class="hero-sub" style="font-size:.85rem;opacity:.7;margin-top:20px;">Reviewer: Mythos · Method: manual trust-boundary tracing of <code>src/**</code> + re-verification after fixes · Version 0.15.11 · June 2026</p>
+
+      <div class="hero-actions">
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v2.md" target="_blank" rel="noopener" class="btn-primary">Read the v2 report ↗</a>
+        <a href="#findings" class="btn-secondary">See what was fixed</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- VERDICT -->
+  <section class="section">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>The verdict</h2>
+        <p>zap is built on a sound foundation — a single memory-safe Rust binary, a real permission model that gates write and execute tools, API keys that never reach the logs, and a refreshingly honest threat model. The first review found the unlocked doors all at the <strong>edges of the trust model</strong> — where input arrives from somewhere other than your own terminal. Those doors are now shut.</p>
+      </div>
+      <div class="callout callout-tip">
+        <strong>What changed:</strong> the first pass scored 6.5/10 and named six findings. Version 0.15.11 addressed all six — the unauthenticated remote tunnel is disabled, an untrusted cloned repo can no longer run its own hooks or MCP servers, symlinks can't smuggle a read past the path guard, the secret scanner's coverage roughly doubled, and the session database is no longer world-readable. Re-verified against a clean build and 171 passing tests. Posture: <strong>8.0/10</strong>.
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT'S SOLID -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2>What's already solid</h2>
+        <p>The review verified these by reading the code — not by trusting the README.</p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🦀</div>
+          <h3>Memory-safe by construction</h3>
+          <p>Safe Rust with no <code>unsafe</code> on the tool or execution paths. The entire class of buffer overflows, use-after-free, and dangling pointers is off the table.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔑</div>
+          <h3>Credentials handled with care</h3>
+          <p>API keys are never logged — they're only used to build the <code>Authorization</code> header. <code>~/.agent.toml</code> is written <code>0600</code>, and proxy credentials are redacted before any display.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🚪</div>
+          <h3>A real permission model</h3>
+          <p>Write and execute tools are gated behind explicit approval. Even in Auto mode, <code>rm -rf</code>, <code>git push --force</code>, and <code>DROP TABLE</code> still force a confirmation.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">📜</div>
+          <h3>An honest threat model</h3>
+          <p>The shell guardrail is documented as a footgun-catcher, <em>not</em> a security boundary — exactly right. <code>docs/SECURITY.md</code> states plainly what is and isn't protected.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINDINGS -->
+  <section class="section" id="findings">
+    <div class="container">
+      <div class="section-header">
+        <h2>Findings — and how they were fixed</h2>
+        <p>Six issues, each tied to a specific location in the source. Severity reflects realistic exploitability. Every one was addressed in v0.15.11.</p>
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Severity</th>
+              <th>Finding</th>
+              <th class="col-zap">Status (v0.15.11)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td class="bad">HIGH</td>
+              <td><code>/remote</code> tunneled the session to a public URL with no authentication — read the stream, inject prompts</td>
+              <td class="good col-zap">✅ Disabled</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>MEDIUM</td>
+              <td><code>read_file</code> guarded by a thin 15-entry denylist</td>
+              <td class="good col-zap">✅ Denylist hardened + symlink-safe</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>MEDIUM</td>
+              <td>Path guard bypassable with a symlink (no <code>canonicalize</code>)</td>
+              <td class="good col-zap">✅ Fixed — symlinks resolved</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>MEDIUM</td>
+              <td>Secret pre-flight scanner had coverage gaps</td>
+              <td class="good col-zap">✅ Improved — patterns ~doubled</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>MEDIUM</td>
+              <td>Project hooks &amp; MCP servers ran code from a cloned repo with no consent</td>
+              <td class="good col-zap">✅ Fixed — project-trust gate</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td class="good">LOW</td>
+              <td>Session history persisted to SQLite world-readable</td>
+              <td class="good col-zap">✅ Fixed — <code>0600</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">Full exploit scenarios, fixes, and the honest residual risk for each are in the v2 report. Two items are mitigated rather than fully closed — <code>/remote</code> is disabled (not yet re-built with auth), and the file/egress guards are hardened denylists, not allowlists.</p>
+    </div>
+  </section>
+
+  <!-- THE HIGH ONE -->
+  <section class="section section-alt">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>The one that mattered most</h2>
+        <p>Finding 1, in plain terms — and what was done about it.</p>
+      </div>
+      <div class="callout">
+        <p><strong>What it was:</strong> <code>/remote</code> let you drive a zap session from your phone by tunneling a local server to a public HTTPS URL via ngrok or localhost.run. The catch: the WebSocket had <strong>no authentication</strong> — no token, no password, no origin check. Anyone who saw that URL could watch everything the model output and inject their own prompts. In Auto mode that reached the shell tool.</p>
+        <p style="margin-top:12px;"><strong>What shipped:</strong> <code>/remote</code> is <strong>disabled</strong> in v0.15.11. The server and tunnel can no longer be started, so the public-ingress path is gone. <code>/remote stop</code> still works to tear down any server left running by an older build.</p>
+        <p style="margin-top:12px;"><strong>What's next:</strong> the feature returns once it mints a per-session token, appends it to the printed URL, requires it on the <code>/ws</code> upgrade, and refuses to tunnel when permissions are set to Auto. Disabled-by-default beats unauthenticated-by-default.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCORECARD -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Scorecard</h2>
+        <p>How each dimension rated in the first pass, and after the fixes landed in v0.15.11.</p>
+      </div>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr><th>Dimension</th><th>First pass</th><th class="col-zap">After fixes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Memory &amp; language safety</td><td>9</td><td class="good col-zap">9</td></tr>
+            <tr><td>Credential handling (at rest / in logs)</td><td>8</td><td class="good col-zap">9</td></tr>
+            <tr><td>Local execution model (permissions)</td><td>7</td><td class="good col-zap">7</td></tr>
+            <tr><td>Filesystem boundary</td><td>5</td><td class="good col-zap">7</td></tr>
+            <tr><td>Data egress controls</td><td>6</td><td class="good col-zap">7</td></tr>
+            <tr><td>Remote / network surface</td><td class="bad">4</td><td class="good col-zap">8</td></tr>
+            <tr><td>Supply chain (deps + project trust)</td><td>6</td><td class="good col-zap">8</td></tr>
+            <tr><td><strong>Overall</strong></td><td><strong>6.5</strong></td><td class="good col-zap"><strong>8.0</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout-tip" style="margin-top:20px;">
+        <strong>The honest residual.</strong> Two items are mitigated, not fully closed: <code>/remote</code> is disabled rather than rebuilt with token auth, and the file + egress guards are hardened denylists rather than allowlists. Both are documented and owned in the v2 report — the next cycle brings <code>/remote</code> back behind a per-session token and extends the secret scan to outbound user messages.
+      </div>
+    </div>
+  </section>
+
+  <!-- REPORTS -->
+  <section class="section section-alt">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>The full documents</h2>
+        <p>Everything above is drawn from these source-verified reports.</p>
+      </div>
+      <div class="provider-chips" style="justify-content:center;">
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v2.md" target="_blank" rel="noopener">Security Review v2 — post-fix (Mythos) ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review.md" target="_blank" rel="noopener">Security Review v1 ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security Model &amp; Threat Model ↗</a>
+        <a class="chip" href="review.html">Engineering Review (Opus 4.8) →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Security you can read for yourself</h2>
+      <p>Open source, MIT licensed. Zero telemetry. Single binary. Audit the source.</p>
+      <div class="cta-actions">
+        <a href="index.html#install" class="btn-primary">Install zap</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-secondary">Read the source</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <div id="footer-placeholder"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>

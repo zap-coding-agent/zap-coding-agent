@@ -7,6 +7,18 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Security hardening (v0.15.11)
+Addresses the six findings from the independent Mythos security review (`docs/security-review.md`); results in `docs/security-review-v2.md` (posture 6.5 → 8.0).
+
+| Feature | File | Notes |
+|---|---|---|
+| `/remote` disabled | `src/tui/commands/mod.rs` | The remote server tunneled the session to a public URL with no WebSocket auth (read stream + inject prompts; shell exec in Auto mode). Start path is now a no-op with an explanatory message; `/remote stop` still tears down an old server. Returns once a per-session token gate lands |
+| Project-trust gate | `src/trust.rs`, `src/hooks.rs`, `src/mcp.rs` | `project_trusted()` gates project-local `.zap/hooks.json` and `.mcp.json` behind explicit trust (`ZAP_TRUST_PROJECT=1`, `.zap/trusted` marker, or `~/.zap/trusted_dirs`). Global `~/.zap/` config always loads. Cloning + opening an untrusted repo no longer runs its `SessionStart` hook or spawns its MCP servers |
+| Symlink-safe path guard | `src/tools/file/mod.rs` | `resolve_symlinks()` canonicalizes the nearest existing ancestor before the denylist check, closing the bypass where a project symlink pointed at `~/.ssh/id_rsa`. Works for create-new-file writes too |
+| Hardened credential denylist | `src/tools/file/mod.rs` | `guard_path` denylist expanded to cover SSH/GPG key files by name, all major cloud credential stores, VCS/registry tokens, DB credentials, and shell history |
+| Broader secret pre-flight scan | `src/secret_scanner.rs` | Pattern set ~doubled: Google `AIza`, Hugging Face, more GitHub prefixes, Slack, Azure connection strings/keys, npm `_authToken`, OAuth `client_secret`, bearer headers, credentialed DB URLs. Over-broad needles deliberately rejected |
+| Session DB `0600` | `src/persistence.rs` | `~/.zap/agent.db` (plaintext conversation history) restricted to owner read/write at open, mirroring `~/.agent.toml` |
+
 ### Test infrastructure (v0.15.4)
 | Feature | File | Notes |
 |---|---|---|

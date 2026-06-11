@@ -526,7 +526,8 @@ footer { padding: 28px 0; border-top: 1px solid var(--border); background: var(-
   .hero-actions { flex-direction: column; align-items: center; }
   .install-box  { flex-wrap: wrap; justify-content: center; }
   nav .nav-links a:not(.btn-ghost):not(.nav-highlight) { display: none; }
-  .nav-links a.nav-highlight { padding: 4px 9px; font-size: 0.82rem; }
+  .nav-links { flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .nav-links a.nav-highlight { padding: 4px 9px; font-size: 0.78rem; }
   .hero { padding: 64px 0 52px; }
   .terminal-body { font-size: 0.67rem; }
   .provider-grid { grid-template-columns: 1fr 1fr; }

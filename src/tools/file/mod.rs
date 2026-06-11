@@ -34,32 +34,81 @@ pub(super) fn normalize_path(path: &str) -> std::path::PathBuf {
     out
 }
 
+/// Resolve symlinks on a path that may not fully exist yet.
+///
+/// `normalize_path` only does lexical `.`/`..` cleanup — it does NOT follow
+/// symlinks, so a link inside the project pointing at `~/.ssh/id_rsa` would
+/// slip past a substring guard. This walks up to the nearest existing ancestor,
+/// canonicalizes it (which resolves every symlink in that prefix), then
+/// re-appends the not-yet-existing tail. The result is the real on-disk target
+/// the OS would open, which is what the guard must inspect.
+pub(super) fn resolve_symlinks(abs: &std::path::Path) -> std::path::PathBuf {
+    let mut existing = abs.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if existing.exists() {
+            if let Ok(canon) = existing.canonicalize() {
+                let mut out = canon;
+                for comp in tail.iter().rev() {
+                    out.push(comp);
+                }
+                return out;
+            }
+            break;
+        }
+        match existing.file_name() {
+            Some(name) => {
+                tail.push(name.to_os_string());
+                if !existing.pop() {
+                    break;
+                }
+            }
+            None => break,
+        }
+    }
+    abs.to_path_buf()
+}
+
 /// Reject paths that point at known-sensitive locations (credentials, keys, config).
 /// Called before every file read or write.
+///
+/// The path is symlink-resolved first (see `resolve_symlinks`) so a link inside
+/// the project cannot be used to reach a blocked target.
 pub(super) fn guard_path(path: &str) -> Result<()> {
     let abs = normalize_path(path);
-    let abs_str = abs.to_string_lossy().to_lowercase();
+    // Resolve symlinks BEFORE matching — a link's lexical path would otherwise
+    // hide the real (blocked) destination.
+    let resolved = resolve_symlinks(&abs);
+    let abs_str = resolved.to_string_lossy().to_lowercase();
 
+    // Credential / secret surface of a typical dev machine. This is a
+    // defense-in-depth denylist, not a jail: zap is a coding agent that
+    // legitimately reads arbitrary project files, temp files, and /dev/null,
+    // so a hard allowlist would break normal use. These segments cover the
+    // high-value credential stores an exfiltration attempt would target.
     const BLOCKED_SEGMENTS: &[&str] = &[
-        "/.ssh/", "/.aws/", "/.gnupg/", "/.kube/", "/.docker/",
-        "/.config/gcloud", "/.netrc", "/.git-credentials", "/.pgpass",
+        // SSH / GPG / PKI
+        "/.ssh/", "/.gnupg/", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+        // Cloud provider credentials
+        "/.aws/", "/.azure/", "/.config/gcloud", "/.kube/", "/.docker/",
+        "/.config/containers/auth.json", "/.oci/",
+        // Git / VCS / package-registry tokens
+        "/.git-credentials", "/.config/gh/", "/.config/git/credentials",
+        "/.netrc", "/.npmrc", "/.pypirc", "/.cargo/credentials",
+        "/.gem/credentials", "/.terraform.d/credentials",
+        // Databases
+        "/.pgpass", "/.my.cnf", "/.mylogin.cnf",
+        // Shell / system
+        "/.bash_history", "/.zsh_history",
         "/etc/passwd", "/etc/shadow", "/etc/sudoers",
+        // zap's own config (API keys)
+        "/.agent.toml",
     ];
     for seg in BLOCKED_SEGMENTS {
         if abs_str.contains(seg) {
             anyhow::bail!(
                 "security: access to '{}' is blocked (sensitive path). \
                  Use the shell tool if access is intentional.",
-                path
-            );
-        }
-    }
-
-    // Block ~/.agent.toml — contains API keys.
-    if let Some(home) = dirs::home_dir() {
-        if abs == home.join(".agent.toml") {
-            anyhow::bail!(
-                "security: '{}' is blocked — it contains API keys.",
                 path
             );
         }

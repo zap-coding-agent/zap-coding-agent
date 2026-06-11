@@ -226,6 +226,13 @@ pub fn handle_inline(
         }
         "/skill" => Some(text::handle_skill_inline(session, arg)),
         "/remote" => {
+            // ── DISABLED pending an authentication fix ──────────────────────
+            // The remote server tunneled the session to a public URL with no
+            // auth on the WebSocket: anyone with the link could read the LLM
+            // stream and inject prompts (and, in Auto mode, drive the shell
+            // tool). Disabled until a per-session token gate lands. The
+            // `stop` path still works so an already-running server can be torn
+            // down after upgrade. See docs/security-review-v2.md (Finding 1).
             if arg.trim() == "stop" {
                 if crate::remote_channel::is_active() {
                     crate::remote_channel::deactivate();
@@ -234,24 +241,12 @@ pub fn handle_inline(
                     Some("Remote control is not running.".to_string())
                 }
             } else {
-                let port: u16 = arg.parse().unwrap_or(0);
-                tokio::spawn(async move {
-                    crate::remote_channel::activate();
-                    match crate::remote::start_server(port).await {
-                        Ok(actual_port) => {
-                            crate::zap_warn!("⚡ remote server listening on http://127.0.0.1:{}", actual_port);
-                            match crate::remote::launch_tunnel(actual_port).await {
-                                Ok(url) => {
-                                    crate::zap_warn!("🌐 remote URL: {}", url);
-                                    crate::zap_warn!("   Open on any device — type messages, get responses in real time.");
-                                }
-                                Err(e) => crate::zap_warn!("tunnel failed: {} — use http://127.0.0.1:{} on the same network", e, actual_port),
-                            }
-                        }
-                        Err(e) => crate::zap_warn!("remote server failed: {}", e),
-                    }
-                });
-                Some("⚡ Starting remote server and tunnel… URL will appear in a moment.".to_string())
+                Some(
+                    "⚠ /remote is disabled in this build. The tunnel exposed the \
+                     session on a public URL with no authentication. It will return \
+                     once a per-session access token is implemented."
+                        .to_string(),
+                )
             }
         }
         "/index" if arg == "quality" || arg == "health" => Some(text::index_quality_text()),

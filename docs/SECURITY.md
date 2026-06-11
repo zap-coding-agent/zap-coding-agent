@@ -114,6 +114,47 @@ Set `sandbox` in `~/.agent.toml` (or `AGENT_SANDBOX` env var) to one of:
 | Running untrusted or public LLMs | `container` |
 | Multi-tenant / CI environments | `container` |
 
+## Project trust (hooks & MCP)
+
+Hooks (`.zap/hooks.json`) and MCP servers (`.mcp.json`) execute code on your
+machine.  zap loads them from two places:
+
+- **Global** (`~/.zap/hooks.json`, `~/.zap/mcp.json`) — your own machine config;
+  always loaded.
+- **Project-local** (`.zap/hooks.json`, `.mcp.json` in the working directory) —
+  ships inside the repo.  These run **only when the directory is trusted**, so
+  cloning and opening an untrusted repository does not run its `SessionStart`
+  hook or spawn its MCP servers.
+
+A directory is trusted when any of these hold:
+
+- env `ZAP_TRUST_PROJECT` is `1` / `true` / `yes`
+- a `.zap/trusted` marker file exists in the project
+- the project's canonical path is listed in `~/.zap/trusted_dirs`
+
+When project-local config is skipped, zap prints a one-line notice telling you
+how to opt in.  Only trust repositories you have reviewed.
+
+## File-tool path guard
+
+`read_file`, `write_file`, `edit_file`, and `batch_edit` run every path through
+a guard that (1) resolves symlinks to their real on-disk target before checking
+(so a link inside the project cannot reach a blocked location) and (2) rejects a
+denylist of credential stores (`~/.ssh`, `~/.aws`, `~/.config/gcloud`,
+`~/.config/gh`, `~/.npmrc`, SSH key files by name, shell history, `~/.agent.toml`,
+`/etc/{passwd,shadow,sudoers}`, and more).  This is a guardrail, not a jail — zap
+intentionally reads arbitrary project files, temp files, and `/dev/null` — but it
+blocks the high-value credential paths an exfiltration attempt would target.  Use
+the `shell` tool if access to a blocked path is genuinely intentional.
+
+## Remote control (`/remote`)
+
+`/remote` is **disabled** in current builds.  It previously tunneled the session
+to a public URL with no authentication on the WebSocket, which allowed anyone
+with the link to read the model's output and inject prompts.  It will return once
+it requires a per-session access token and refuses to tunnel in `auto` permission
+mode.
+
 ## Reporting security issues
 
 If you discover a security issue in zap's sandboxing or tool guards, please

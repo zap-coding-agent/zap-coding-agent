@@ -27,16 +27,35 @@ const PATTERNS: &[Pattern] = &[
     Pattern { name: "OpenAI API key (legacy)", needle: "sk-or-" },
     Pattern { name: "Stripe live key",     needle: "sk_live_" },
     Pattern { name: "Stripe test key",     needle: "sk_test_" },
+    Pattern { name: "Google API key",      needle: "aiza" },          // AIza… (GCP/Gemini/Maps)
+    Pattern { name: "Hugging Face token",  needle: "hf_" },
     // VCS tokens
     Pattern { name: "GitHub token",        needle: "ghp_" },
     Pattern { name: "GitHub token",        needle: "ghs_" },
     Pattern { name: "GitHub token",        needle: "gho_" },
+    Pattern { name: "GitHub token",        needle: "ghu_" },
+    Pattern { name: "GitHub token",        needle: "ghr_" },
     Pattern { name: "GitHub token",        needle: "github_pat_" },
     Pattern { name: "GitLab token",        needle: "glpat-" },
+    Pattern { name: "npm token",           needle: "_authtoken=" },
     // Cloud
     Pattern { name: "AWS access key",      needle: "akia" },
     Pattern { name: "AWS secret key",      needle: "aws_secret_access_key" },
     Pattern { name: "GCP service account", needle: "\"type\": \"service_account\"" },
+    Pattern { name: "Azure connection string", needle: "defaultendpointsprotocol=" },
+    Pattern { name: "Azure storage key",   needle: "accountkey=" },
+    // Chat / comms tokens
+    Pattern { name: "Slack token",         needle: "xoxb-" },
+    Pattern { name: "Slack token",         needle: "xoxp-" },
+    Pattern { name: "Slack app token",     needle: "xapp-" },
+    Pattern { name: "Slack webhook",       needle: "hooks.slack.com/services/" },
+    // DB connection strings with embedded credentials
+    Pattern { name: "Postgres URL",        needle: "postgres://" },
+    Pattern { name: "Postgres URL",        needle: "postgresql://" },
+    Pattern { name: "MySQL URL",           needle: "mysql://" },
+    Pattern { name: "MongoDB URL",         needle: "mongodb://" },
+    Pattern { name: "MongoDB SRV URL",     needle: "mongodb+srv://" },
+    Pattern { name: "Redis URL",           needle: "redis://" },
     // Crypto / certs
     Pattern { name: "Private key block",   needle: "-----begin" },
     Pattern { name: "JWT token",           needle: "eyjh" },  // base64 '{"' prefix
@@ -47,10 +66,13 @@ const PATTERNS: &[Pattern] = &[
     Pattern { name: "password field",      needle: "passwd=" },
     Pattern { name: "api_key field",       needle: "api_key =" },
     Pattern { name: "api_key field",       needle: "api_key=" },
+    Pattern { name: "api_key field",       needle: "apikey=" },
     Pattern { name: "secret field",        needle: "secret =" },
     Pattern { name: "secret field",        needle: "secret=" },
+    Pattern { name: "secret field",        needle: "client_secret=" },
     Pattern { name: "token field",         needle: "access_token=" },
     Pattern { name: "token field",         needle: "access_token =" },
+    Pattern { name: "bearer token",        needle: "authorization: bearer " },
 ];
 
 /// Scan `content` and return all detected secret matches.

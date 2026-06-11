@@ -80,12 +80,36 @@ fn load_file(path: &std::path::Path) -> HooksFile {
 impl HookRunner {
     /// Load and merge global (~/.zap/hooks.json) + project (.zap/hooks.json).
     /// Project hooks are appended last so they run after global ones.
+    ///
+    /// Global hooks are the user's own machine config and always load. Project
+    /// hooks ship inside the repo and execute arbitrary shell commands, so they
+    /// are only honored when the directory is trusted (see `crate::trust`).
+    /// This prevents a cloned repo from running its `SessionStart` hook the
+    /// instant you open it.
     pub fn load() -> Self {
         let global = dirs::home_dir()
             .map(|h| load_file(&h.join(".zap/hooks.json")))
             .unwrap_or_default();
 
-        let project = load_file(std::path::Path::new(".zap/hooks.json"));
+        let project_path = std::path::Path::new(".zap/hooks.json");
+        let project = if project_path.exists() && !crate::trust::project_trusted() {
+            let skipped = load_file(project_path);
+            if skipped.pre_tool_use.len()
+                + skipped.post_tool_use.len()
+                + skipped.session_start.len()
+                + skipped.session_end.len()
+                + skipped.user_prompt_submit.len()
+                > 0
+            {
+                crate::zap_warn!(
+                    "skipped project hooks in .zap/hooks.json (untrusted directory) — {}",
+                    crate::trust::untrusted_hint()
+                );
+            }
+            HooksFile::default()
+        } else {
+            load_file(project_path)
+        };
 
         let merge = |mut a: Vec<HookEntry>, b: Vec<HookEntry>| { a.extend(b); a };
 

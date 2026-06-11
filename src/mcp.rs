@@ -187,12 +187,21 @@ pub fn load_config() -> McpConfig {
         }
     }
 
-    // Layer 2: project (overrides global if same name)
+    // Layer 2: project (overrides global if same name).
+    // Project servers are spawned as local processes, so a cloned repo's
+    // .mcp.json must not auto-load in an untrusted directory.
     let project_path = std::path::Path::new(".mcp.json");
     if project_path.exists() {
         merged.had_config = true;
-        let cfg = load_file(project_path);
-        merged.servers.extend(cfg.servers);
+        if crate::trust::project_trusted() {
+            let cfg = load_file(project_path);
+            merged.servers.extend(cfg.servers);
+        } else {
+            crate::zap_warn!(
+                "skipped project MCP servers in .mcp.json (untrusted directory) — {}",
+                crate::trust::untrusted_hint()
+            );
+        }
     }
 
     merged

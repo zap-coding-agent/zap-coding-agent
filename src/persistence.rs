@@ -19,6 +19,13 @@ impl Store {
         let path = db_path();
         let conn = Connection::open(&path)
             .with_context(|| format!("failed to open database at {}", path.display()))?;
+        // Conversation history is stored in plaintext and can contain secrets the
+        // model handled. Restrict to owner read/write, mirroring ~/.agent.toml.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
         Self::init_schema(&conn)?;
         Ok(Self { conn })
     }
