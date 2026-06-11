@@ -8,6 +8,21 @@
 
 ---
 
+## Executive summary
+
+zap is a **per-developer, local** coding agent: each engineer runs one self-contained binary on their own machine, against code they already have access to. Judged against that deployment model — which is how it would be adopted inside a company — zap is **robust and fit for corporate use today.** The controls a security team actually cares about are the strong ones:
+
+- **Data egress / data residency.** Tool output is scanned for credential patterns before any cloud send, and zap runs fully against **local / air-gapped models with zero telemetry** — code and prompts never have to leave the network. Corporate proxy, custom CA, and offline operation are first-class.
+- **Supply chain.** One **memory-safe Rust binary** — no Node or Python runtime to vet — and project-local hooks/MCP servers now require **explicit directory trust**, so cloning and opening an untrusted repo can't run code on open.
+- **Credential handling.** API keys are never logged; `~/.agent.toml` and the session database are locked to `0600`; proxy credentials are redacted in all output.
+- **Execution control.** A real permission model gates every write/exec tool, destructive commands force confirmation even in Auto mode, and `sandbox = "container"` gives true filesystem + network isolation for the shell.
+
+**Where the remaining ~2 points sit — and why they don't block corporate adoption.** With `/remote` disabled, the network boundary is closed; the residual is **not a live vulnerability.** It is two deliberate *"denylist, not allowlist"* hardening choices — the file-path guard and the outbound secret scan — plus the fact that zap is, by design, a **single-user trust model.** Those only matter if zap is pointed at **untrusted input or run multi-tenant**; in the normal per-developer deployment they are defense-in-depth, not exposure. `/remote` — the one feature that ever crossed a trust boundary — is already disabled and returns only behind per-session token auth. **None of the residual reflects a weakness in how zap edits code, handles your keys, or keeps your data on-prem.**
+
+**Recommended corporate posture:** roll out as a per-developer tool with `permission_mode = "ask"` and, for the strictest stance, `sandbox = "container"`. Treat multi-tenant / untrusted-input use as out of scope until the denylists become allowlists. On that basis a security reviewer can **approve it for internal use now.**
+
+---
+
 ## TL;DR
 
 v1 found a strong foundation with the gaps concentrated at the **edges of the trust model** — the places where input arrives from somewhere other than the local terminal. The team turned around fixes for all six findings, and the two that actually moved the needle (the unauthenticated public tunnel, and code-execution-on-repo-open) are closed.

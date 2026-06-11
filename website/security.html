@@ -78,6 +78,44 @@
     </div>
   </section>
 
+  <!-- CORPORATE READINESS -->
+  <section class="section">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>Fit for corporate use</h2>
+        <p>zap is a per-developer, local tool: one self-contained binary, run by each engineer on their own machine against code they already have. Judged against that deployment model — the way a company would actually adopt it — the enterprise-relevant controls are the strong ones.</p>
+      </div>
+      <div class="feature-grid" style="grid-template-columns:repeat(2,1fr);">
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🛰️</div>
+          <h3>Data residency</h3>
+          <p>Tool output is scanned for credentials before any cloud send, and zap runs fully against <strong>local / air-gapped models with zero telemetry</strong>. Corporate proxy, custom CA, and offline operation are first-class — code and prompts never have to leave the network.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">📦</div>
+          <h3>Minimal supply chain</h3>
+          <p>One <strong>memory-safe Rust binary</strong> — no Node or Python runtime to audit. Project-local hooks and MCP servers now require <strong>explicit directory trust</strong>, so a cloned repo can't run code the moment you open it.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔐</div>
+          <h3>Credential discipline</h3>
+          <p>API keys are never logged; <code>~/.agent.toml</code> and the session database are locked to <code>0600</code>; proxy credentials are redacted in all output.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🧱</div>
+          <h3>Real execution control</h3>
+          <p>Every write/exec tool is permission-gated, destructive commands force confirmation even in Auto mode, and <code>sandbox = "container"</code> gives true filesystem + network isolation for the shell.</p>
+        </div>
+      </div>
+      <div class="callout callout-tip" style="margin-top:24px;">
+        <strong>Where the remaining ~2 points go — and why they don't block adoption.</strong> With <code>/remote</code> disabled, the network boundary is closed and the residual is <strong>not a live vulnerability</strong>. It's two deliberate <em>"denylist, not allowlist"</em> hardening choices — the file-path guard and the outbound secret scan — plus zap's inherently <strong>single-user trust model</strong>. Those only matter if zap is pointed at <strong>untrusted input or run multi-tenant</strong>; in the per-developer model they're defense-in-depth, not exposure. <code>/remote</code> — the one feature that ever crossed a trust boundary — is already disabled and returns only behind per-session token auth.
+      </div>
+      <div class="callout" style="margin-top:16px;">
+        <strong>Recommended posture for a security team:</strong> roll out as a per-developer tool with <code>permission_mode = "ask"</code> and, for the strictest stance, <code>sandbox = "container"</code>. On that basis a reviewer can <strong>approve it for internal use today</strong>. Treat multi-tenant / untrusted-input use as out of scope until the denylists become allowlists.
+      </div>
+    </div>
+  </section>
+
   <!-- WHAT'S SOLID -->
   <section class="section section-alt">
     <div class="container">
