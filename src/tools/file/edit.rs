@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 use crate::tools::Tool;
-use super::{guard_path, print_diff};
+use super::{guard_write_path, print_diff};
 
 // ── shared whitespace-stripping fallback ──────────────────────────────────────
 
@@ -67,7 +67,7 @@ impl Tool for EditFileTool {
         let path = input["path"]
             .as_str()
             .context("edit_file: 'path' must be a string")?;
-        guard_path(path)?;
+        guard_write_path(path)?;
         let old_string = input["old_string"]
             .as_str()
             .context("edit_file: 'old_string' must be a string")?;
@@ -200,7 +200,7 @@ impl Tool for BatchEditTool {
     }
     async fn execute(&self, input: serde_json::Value) -> Result<String> {
         let path = input["path"].as_str().context("batch_edit: 'path' required")?;
-        guard_path(path)?;
+        guard_write_path(path)?;
         let edits = input["edits"].as_array().context("batch_edit: 'edits' required")?;
 
         let _ = crate::snapshot::save_snapshot(path);

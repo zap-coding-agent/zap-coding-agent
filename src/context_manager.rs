@@ -371,7 +371,15 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
     }
 
     // ── Project context (ZAP.md + .zap/understanding.md) ─────────────────────
-    if let Some(zap_md) = load_zap_md(&config.context_paths) {
+    if let Some(mut zap_md) = load_zap_md(&config.context_paths) {
+        // Redact any credentials that slipped into ZAP.md / context_paths before
+        // they enter the system prompt and ride along on every request. This is
+        // the egress gap for injected file context (tool results are scrubbed
+        // separately at the tool boundary).
+        let hits = crate::secret_scanner::scan(&zap_md);
+        if !hits.is_empty() {
+            crate::secret_scanner::redact(&mut zap_md, &hits);
+        }
         sections.push(format!("## Project Context\n{}", zap_md));
     }
     // understanding.md — always inlined (capped at 4 kchars ≈ 1k tokens).

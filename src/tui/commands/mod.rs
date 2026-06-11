@@ -226,13 +226,11 @@ pub fn handle_inline(
         }
         "/skill" => Some(text::handle_skill_inline(session, arg)),
         "/remote" => {
-            // ── DISABLED pending an authentication fix ──────────────────────
-            // The remote server tunneled the session to a public URL with no
-            // auth on the WebSocket: anyone with the link could read the LLM
-            // stream and inject prompts (and, in Auto mode, drive the shell
-            // tool). Disabled until a per-session token gate lands. The
-            // `stop` path still works so an already-running server can be torn
-            // down after upgrade. See docs/security-review-v2.md (Finding 1).
+            // Remote control is gated by a per-session token (see src/remote.rs):
+            // the public URL carries `?token=…`, and the `/ws` upgrade is rejected
+            // without it, so a leaked URL minus the token is inert. We also refuse
+            // to start in Auto permission mode, where a leaked URL could drive the
+            // shell unattended.
             if arg.trim() == "stop" {
                 if crate::remote_channel::is_active() {
                     crate::remote_channel::deactivate();
@@ -240,13 +238,41 @@ pub fn handle_inline(
                 } else {
                     Some("Remote control is not running.".to_string())
                 }
-            } else {
+            } else if matches!(session.config.permission_mode, crate::config::PermissionMode::Auto) {
                 Some(
-                    "⚠ /remote is disabled in this build. The tunnel exposed the \
-                     session on a public URL with no authentication. It will return \
-                     once a per-session access token is implemented."
+                    "⚠ /remote is refused in Auto permission mode — a leaked URL could \
+                     drive the shell unattended. Switch to ask mode first \
+                     (/permissions ask), then re-run /remote."
                         .to_string(),
                 )
+            } else {
+                let port: u16 = arg.parse().unwrap_or(0);
+                let token = crate::remote::generate_token();
+                let token_for_task = token.clone();
+                tokio::spawn(async move {
+                    crate::remote_channel::activate();
+                    match crate::remote::start_server(port, token_for_task.clone()).await {
+                        Ok(actual_port) => {
+                            crate::zap_warn!(
+                                "⚡ remote server listening on http://127.0.0.1:{}/?token={}",
+                                actual_port, token_for_task
+                            );
+                            match crate::remote::launch_tunnel(actual_port).await {
+                                Ok(url) => {
+                                    let base = url.trim_end_matches('/');
+                                    crate::zap_warn!("🌐 remote URL: {}/?token={}", base, token_for_task);
+                                    crate::zap_warn!("   Keep this URL secret — the token is the only access control. /remote stop to end.");
+                                }
+                                Err(e) => crate::zap_warn!(
+                                    "tunnel failed: {} — use http://127.0.0.1:{}/?token={} on the same network",
+                                    e, actual_port, token_for_task
+                                ),
+                            }
+                        }
+                        Err(e) => crate::zap_warn!("remote server failed: {}", e),
+                    }
+                });
+                Some("⚡ Starting authenticated remote server… URL (with token) will appear in a moment.".to_string())
             }
         }
         "/index" if arg == "quality" || arg == "health" => Some(text::index_quality_text()),

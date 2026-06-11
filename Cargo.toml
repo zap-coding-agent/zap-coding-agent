@@ -1,6 +1,6 @@
 [package]
 name = "zap-coding-agent"
-version = "0.15.11"
+version = "0.15.12"
 edition = "2021"
 description = "Skill-first AI coding agent in Rust. Injects only the context your task needs — no prompt bloat. Single binary, no runtime."
 homepage = "https://zap.justpush.cloud"
@@ -36,6 +36,7 @@ colored = "2"
 indicatif = "0.17"
 similar = "2"
 base64 = "0.22"
+getrandom = "0.2"
 rustyline = { version = "14", features = ["derive"] }
 inquire  = "0.7"
 serde_yaml = "0.9"

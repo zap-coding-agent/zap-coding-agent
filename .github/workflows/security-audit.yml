@@ -1,0 +1,47 @@
+name: security-audit
+
+# Supply-chain gate: fails the build on a known-vulnerable dependency
+# (RustSec advisory) or a banned / untrusted-source crate. Runs on every push
+# and PR to main, plus a weekly schedule so newly-disclosed advisories surface
+# even without a code change.
+#
+# NOTE: actions below are pinned to major-version tags to match the rest of the
+# CI. Pinning to full commit SHAs is a recommended follow-up hardening.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit + cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo bin (audit/deny)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-audit-deny-v1
+
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
+          command -v cargo-deny  >/dev/null 2>&1 || cargo install cargo-deny  --locked
+
+      - name: cargo audit (RustSec advisories)
+        run: cargo audit
+
+      - name: cargo deny (advisories, bans, sources)
+        run: cargo deny check advisories bans sources

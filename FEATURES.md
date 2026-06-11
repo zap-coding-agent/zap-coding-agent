@@ -7,6 +7,16 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Security hardening pass 2 (v0.15.12)
+Takes the Mythos security posture from 8.0 → 9.0 (`docs/security-review-v3.md`). The four high-leverage levers from the v2 report.
+
+| Feature | File | Notes |
+|---|---|---|
+| Egress scan at every source | `src/secret_scanner.rs`, `src/context_manager.rs`, `src/session/turn.rs` | Entropy detector for unprefixed random tokens (tuned to skip git SHAs/hex); injected project context (ZAP.md/context_paths) redacted before entering the system prompt; user's own message scanned and warned before a cloud send (warned, not auto-redacted) |
+| `/remote` with per-session token | `src/remote.rs`, `src/tui/commands/mod.rs`, `src/session/mod.rs` | `generate_token()` (OS CSPRNG, URL-safe base64) appended to the printed URL; page + `/ws` upgrade require it via constant-time-ish `token_matches`; refuses to start in Auto permission mode; re-enables the feature removed in v0.15.11 |
+| File-write jail | `src/tools/file/mod.rs`, `src/config.rs` | `guard_write_path` confines `write_file`/`edit_file`/`batch_edit` to the project root, system temp, or configured `allowed_paths` (new config field). Reads stay broad but symlink-safe + denylisted |
+| Supply-chain CI gate | `.github/workflows/security-audit.yml`, `deny.toml` | `cargo audit` + `cargo deny check advisories bans sources` on every push/PR + weekly; denies yanked crates and unknown registries/git sources |
+
 ### Security hardening (v0.15.11)
 Addresses the six findings from the independent Mythos security review (`docs/security-review.md`); results in `docs/security-review-v2.md` (posture 6.5 → 8.0).
 

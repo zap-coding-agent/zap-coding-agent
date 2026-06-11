@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 use crate::tools::Tool;
-use super::{guard_path, normalize_path};
+use super::{guard_write_path, normalize_path};
 
 pub struct WriteFileTool;
 
@@ -35,7 +35,7 @@ impl Tool for WriteFileTool {
         let path = input["path"]
             .as_str()
             .context("write_file: 'path' must be a string")?;
-        guard_path(path)?;
+        guard_write_path(path)?;
         let content = input["content"]
             .as_str()
             .context("write_file: 'content' must be a string")?;

@@ -28,6 +28,36 @@ impl Session {
             input
         };
 
+        // Egress notice: if the user's own message carries a credential, warn
+        // before it goes to a cloud model. We do NOT auto-redact user-typed text
+        // (it may be intentional — e.g. "rotate this leaked key") — but the user
+        // should know it is about to leave the machine. Skipped for local/LAN
+        // endpoints, which never leave the network.
+        let cloud_bound = matches!(self.config.provider, crate::config::Provider::Anthropic)
+            || self.config.base_url.as_deref().map(|u| {
+                !u.contains("192.168.") && !u.contains("10.") && !u.contains("localhost") && !u.contains("127.0.0.1")
+            }).unwrap_or(false);
+        if cloud_bound {
+            let hits = crate::secret_scanner::scan(input);
+            if !hits.is_empty() {
+                let kinds: Vec<&str> = {
+                    let mut k: Vec<&str> = hits.iter().map(|h| h.pattern_name).collect();
+                    k.sort();
+                    k.dedup();
+                    k
+                };
+                let msg = format!(
+                    "⚠ your message contains what looks like a credential ({}) — it will be sent to the cloud model as typed.",
+                    kinds.join(", ")
+                );
+                if crate::tui::channel::is_tui_mode() {
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(msg));
+                } else {
+                    println!("\x1b[33;1m  {msg}\x1b[0m");
+                }
+            }
+        }
+
         // In CLI mode only — TUI intercepts topic shifts before the turn starts.
         if !crate::tui::channel::is_tui_mode()
             && self.turn_count >= 3

@@ -157,6 +157,7 @@ pub struct Session {
 impl Session {
     pub async fn new(config: &Config) -> Result<Self> {
         crate::http::init(config);
+        crate::tools::file::init_allowed_write_roots(&config.allowed_paths);
         crate::tools::clear_todos();
         let store = persistence::init()?;
         let session_id = store.save_session("(repl)", &config.model)?;
@@ -528,20 +529,28 @@ impl Session {
             "/hooks"       => crate::hooks::print_hooks_list(&self.hooks),
             "/mcp"         => self.cmd_mcp(arg),
             "/remote"      => {
-                let port: u16 = arg.parse().unwrap_or(0);
-                crate::remote_channel::activate();
-                match crate::remote::start_server(port).await {
-                    Ok(actual_port) => {
-                        println!("  {} remote server on http://127.0.0.1:{}", "⚡".bright_yellow(), actual_port);
-                        match crate::remote::launch_tunnel(actual_port).await {
-                            Ok(url) => {
-                                println!("  {} {}", "🌐".truecolor(100, 200, 255), url.cyan().bold());
-                                println!("     Open on any device — type messages, get responses in real time.");
+                // Token-gated (see src/remote.rs); refused in Auto mode where a
+                // leaked URL could drive the shell unattended.
+                if matches!(self.config.permission_mode, crate::config::PermissionMode::Auto) {
+                    println!("  {} /remote is refused in Auto permission mode — switch to ask mode first (/permissions ask).", "⚠".yellow());
+                } else {
+                    let port: u16 = arg.parse().unwrap_or(0);
+                    let token = crate::remote::generate_token();
+                    crate::remote_channel::activate();
+                    match crate::remote::start_server(port, token.clone()).await {
+                        Ok(actual_port) => {
+                            println!("  {} remote server on http://127.0.0.1:{}/?token={}", "⚡".bright_yellow(), actual_port, token);
+                            match crate::remote::launch_tunnel(actual_port).await {
+                                Ok(url) => {
+                                    let base = url.trim_end_matches('/');
+                                    println!("  {} {}/?token={}", "🌐".truecolor(100, 200, 255), base.cyan().bold(), token);
+                                    println!("     Keep this URL secret — the token is the only access control.");
+                                }
+                                Err(e) => println!("  {} tunnel failed: {} — use http://127.0.0.1:{}/?token={} on same network", "⚠".yellow(), e, actual_port, token),
                             }
-                            Err(e) => println!("  {} tunnel failed: {} — use local URL on same network", "⚠".yellow(), e),
                         }
+                        Err(e) => println!("  {} {}", "✗".red(), e),
                     }
-                    Err(e) => println!("  {} {}", "✗".red(), e),
                 }
             }
             "/tasks"       => self.cmd_tasks().await,

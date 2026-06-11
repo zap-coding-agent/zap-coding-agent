@@ -142,18 +142,41 @@ a guard that (1) resolves symlinks to their real on-disk target before checking
 (so a link inside the project cannot reach a blocked location) and (2) rejects a
 denylist of credential stores (`~/.ssh`, `~/.aws`, `~/.config/gcloud`,
 `~/.config/gh`, `~/.npmrc`, SSH key files by name, shell history, `~/.agent.toml`,
-`/etc/{passwd,shadow,sudoers}`, and more).  This is a guardrail, not a jail — zap
-intentionally reads arbitrary project files, temp files, and `/dev/null` — but it
-blocks the high-value credential paths an exfiltration attempt would target.  Use
-the `shell` tool if access to a blocked path is genuinely intentional.
+`/etc/{passwd,shadow,sudoers}`, and more).
+
+**Writes are additionally jailed.**  `write_file`, `edit_file`, and `batch_edit`
+require the resolved target to live under the **project root, the system temp
+dir, or a configured `allowed_paths` root** — a prompt-injected or confused
+overwrite cannot escape the workspace.  Add extra write roots in `~/.agent.toml`:
+
+```toml
+allowed_paths = ["~/scratch", "/data/out"]
+```
+
+Reads stay intentionally broad (zap legitimately reads arbitrary project files,
+temp files, and `/dev/null`) but remain symlink-safe and denylisted.  Use the
+`shell` tool if write access to a path outside the jail is genuinely intentional.
+
+## Outbound secret scanning
+
+Before content is sent to a cloud model, zap scans for credentials at every entry
+point: **tool results** are redacted, **injected project context** (`ZAP.md`,
+`context_paths`) is redacted, and **the user's own message** is scanned and a
+visible warning is shown (user-typed text is warned, not auto-redacted — it may be
+intentional).  Detection combines ~40 known credential patterns with an
+**entropy detector** for random tokens that match no known prefix, tuned to avoid
+false positives on git SHAs and hashes.  Local / LAN endpoints are exempt — that
+content never leaves the network.
 
 ## Remote control (`/remote`)
 
-`/remote` is **disabled** in current builds.  It previously tunneled the session
-to a public URL with no authentication on the WebSocket, which allowed anyone
-with the link to read the model's output and inject prompts.  It will return once
-it requires a per-session access token and refuses to tunnel in `auto` permission
-mode.
+`/remote` tunnels the session to a public URL, gated by a **per-session access
+token**.  The token is drawn from the OS CSPRNG and appended to the printed URL
+(`?token=…`); both the page and the WebSocket upgrade reject any request without
+it, so a leaked URL minus the token is inert.  `/remote` also **refuses to start
+in `auto` permission mode**, where a leaked URL could otherwise drive the shell
+unattended — switch to `ask` mode first.  Keep the printed URL secret; the token
+is the only access control.
 
 ## Reporting security issues
 

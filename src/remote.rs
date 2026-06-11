@@ -5,12 +5,41 @@
 use anyhow::{Context, Result};
 use axum::{
     Router,
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
+    http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
 };
+use std::collections::HashMap;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
+
+/// Generate a URL-safe per-session access token from the OS CSPRNG.
+/// This token is the access control for the remote session — without it,
+/// the `/ws` upgrade is rejected, so a leaked tunnel URL minus the token
+/// cannot drive the agent.
+pub fn generate_token() -> String {
+    use base64::Engine;
+    let mut buf = [0u8; 18];
+    getrandom::getrandom(&mut buf).expect("OS RNG unavailable");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
+}
+
+/// Constant-time-ish equality for the token (avoids early-exit timing leak).
+fn token_matches(expected: &str, got: Option<&String>) -> bool {
+    if expected.is_empty() {
+        return false; // never authenticate against an empty token
+    }
+    let Some(got) = got else { return false };
+    if expected.len() != got.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in expected.bytes().zip(got.bytes()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
 
 // ── HTML UI ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +110,9 @@ function addBubble(role,text=''){
 
 function connect(){
   const proto=location.protocol==='https:'?'wss://':'ws://';
-  ws=new WebSocket(proto+location.host+'/ws');
+  // Forward the ?token=… from the page URL to the WebSocket — it is the
+  // access control for the session.
+  ws=new WebSocket(proto+location.host+'/ws'+location.search);
   ws.onopen=()=>setReady(true);
   ws.onclose=()=>{setReady(false);setTimeout(connect,2000)};
   ws.onerror=()=>ws.close();
@@ -121,19 +152,34 @@ connect();
 #[derive(Clone)]
 struct AppState {
     input_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    /// Per-session access token. Empty disables the server (defensive default).
+    token: String,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async fn serve_ui() -> impl IntoResponse {
-    Html(UI_HTML)
+async fn serve_ui(
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Require the token even for the page, so a tokenless visitor gets nothing.
+    if state.token.is_empty() || !token_matches(&state.token, params.get("token")) {
+        return (StatusCode::UNAUTHORIZED, "unauthorized — missing or invalid token").into_response();
+    }
+    Html(UI_HTML).into_response()
 }
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    // The token is the access control for the live session: reject any upgrade
+    // that does not present it. A leaked tunnel URL without the token is inert.
+    if state.token.is_empty() || !token_matches(&state.token, params.get("token")) {
+        return (StatusCode::UNAUTHORIZED, "unauthorized — missing or invalid token").into_response();
+    }
+    ws.on_upgrade(|socket| handle_socket(socket, state)).into_response()
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
@@ -188,11 +234,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 // ── Server startup ────────────────────────────────────────────────────────────
 
 /// Bind to `port` (0 = random), return the actual port used.
-pub async fn start_server(port: u16) -> Result<u16> {
+/// `token` is the per-session access control required on the page and the
+/// `/ws` upgrade. An empty token refuses all connections.
+pub async fn start_server(port: u16, token: String) -> Result<u16> {
     let input_tx = crate::remote_channel::input_sender()
         .context("remote_channel not activated — call remote_channel::activate() first")?;
 
-    let state = Arc::new(AppState { input_tx });
+    let state = Arc::new(AppState { input_tx, token });
 
     let app = Router::new()
         .route("/",   get(serve_ui))
@@ -342,4 +390,33 @@ fn extract_https_url(line: &str) -> Option<String> {
     // URL ends at whitespace or end of string.
     let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     Some(rest[..end].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_is_nonempty_and_unique() {
+        let a = generate_token();
+        let b = generate_token();
+        assert!(a.len() >= 20, "token should be reasonably long: {a}");
+        assert_ne!(a, b, "tokens must be unique per call");
+    }
+
+    #[test]
+    fn token_match_requires_exact_value() {
+        let t = generate_token();
+        assert!(token_matches(&t, Some(&t)));
+        assert!(!token_matches(&t, None));
+        assert!(!token_matches(&t, Some(&"".to_string())));
+        assert!(!token_matches(&t, Some(&format!("{t}x"))));
+        assert!(!token_matches(&t, Some(&"wrong".to_string())));
+    }
+
+    #[test]
+    fn empty_expected_never_matches() {
+        // Defensive: an empty server token must reject everything.
+        assert!(!token_matches("", Some(&"".to_string())));
+    }
 }

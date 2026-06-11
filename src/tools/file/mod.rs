@@ -117,6 +117,66 @@ pub(super) fn guard_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+// ── Write jail ──────────────────────────────────────────────────────────────────
+
+/// Extra roots the file-write tools may write to (beyond the project root and the
+/// system temp dir), populated from `config.allowed_paths` at startup.
+static ALLOWED_WRITE_ROOTS: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// Initialize the extra write roots from config. Call once at session startup.
+/// Tilde (`~`) is expanded. Idempotent — only the first call wins.
+pub fn init_allowed_write_roots(allowed_paths: &[String]) {
+    let roots: Vec<std::path::PathBuf> = allowed_paths
+        .iter()
+        .map(|p| {
+            if let Some(rest) = p.strip_prefix("~/") {
+                dirs::home_dir().map(|h| h.join(rest)).unwrap_or_else(|| std::path::PathBuf::from(p))
+            } else {
+                std::path::PathBuf::from(p)
+            }
+        })
+        .collect();
+    let _ = ALLOWED_WRITE_ROOTS.set(roots);
+}
+
+/// Guard a path that is about to be **written**. Stricter than `guard_path`:
+/// in addition to the credential denylist + symlink resolution, the resolved
+/// target must live under the project root, the system temp dir, or a configured
+/// `allowed_paths` root. The agent has no legitimate reason to write outside
+/// those, and a confined write surface contains both confused-model mistakes and
+/// prompt-injected overwrites.
+pub(super) fn guard_write_path(path: &str) -> Result<()> {
+    // Denylist + symlink resolution first.
+    guard_path(path)?;
+
+    let resolved = resolve_symlinks(&normalize_path(path));
+
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    roots.push(std::env::temp_dir());
+    if let Some(extra) = ALLOWED_WRITE_ROOTS.get() {
+        roots.extend(extra.iter().cloned());
+    }
+
+    let within = roots.iter().any(|r| {
+        let canon = r.canonicalize().unwrap_or_else(|_| r.clone());
+        resolved.starts_with(&canon) || resolved.starts_with(r)
+    });
+
+    if within {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "security: writing to '{}' is outside the project root, the system temp \
+             directory, and any configured allowed_paths. Add the directory to \
+             `allowed_paths` in ~/.agent.toml if this is intentional.",
+            path
+        )
+    }
+}
+
 // ── shared diff printer ────────────────────────────────────────────────────────
 
 pub(super) fn print_diff(before: &str, after: &str) {
@@ -143,5 +203,40 @@ pub(super) fn print_diff(before: &str, after: &str) {
     }
     if had_diff {
         println!("  {}", "───────────────────────────────────────────".dimmed());
+    }
+}
+
+#[cfg(test)]
+mod jail_tests {
+    use super::*;
+
+    #[test]
+    fn write_allowed_inside_project_and_temp() {
+        let cwd = std::env::current_dir().unwrap();
+        let in_project = cwd.join("zap_jail_test.txt");
+        assert!(guard_write_path(in_project.to_str().unwrap()).is_ok());
+        let in_temp = std::env::temp_dir().join("zap_jail_test.txt");
+        assert!(guard_write_path(in_temp.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn write_rejected_outside_project() {
+        // Home dir is a parent of the repo, not under it, and not in the
+        // credential denylist — the jail (not the denylist) must reject it.
+        if let Some(home) = dirs::home_dir() {
+            let outside = home.join("zap_jail_outside_write_test.txt");
+            let res = guard_write_path(outside.to_str().unwrap());
+            assert!(res.is_err(), "write outside project/temp must be rejected");
+            assert!(res.unwrap_err().to_string().contains("outside the project"));
+        }
+    }
+
+    #[test]
+    fn write_rejected_for_credential_path() {
+        // Denylist still applies to writes.
+        if let Some(home) = dirs::home_dir() {
+            let ssh = home.join(".ssh").join("authorized_keys");
+            assert!(guard_write_path(ssh.to_str().unwrap()).is_err());
+        }
     }
 }

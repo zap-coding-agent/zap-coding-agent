@@ -1,0 +1,29 @@
+# cargo-deny configuration — supply-chain gate for zap.
+# Run locally with:  cargo deny check advisories bans sources
+# License checking is intentionally out of scope here (handled separately);
+# this config focuses on the security-relevant dimensions.
+
+[advisories]
+# Use the upstream RustSec database.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Fail on any crate with a known vulnerability.
+yanked = "deny"
+# Advisories without a fix still warn (surfaced, not blocking) — turn to "deny"
+# once the tree is clean to keep it that way.
+ignore = []
+
+[bans]
+# Flag multiple versions of the same crate (bloat + larger attack surface).
+multiple-versions = "warn"
+# Deny crates known to execute arbitrary build scripts we don't expect, etc.
+deny = []
+# Wildcard version requirements hide what you actually depend on.
+wildcards = "warn"
+
+[sources]
+# Only crates.io and the explicitly-listed git sources are allowed — blocks a
+# dependency from being silently pulled from an untrusted registry or fork.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

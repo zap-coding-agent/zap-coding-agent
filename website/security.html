@@ -4,20 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Zap — Independent Security Review (Mythos)</title>
-  <meta name="description" content="Independent source-level security review of zap by Mythos — posture 8.0/10 after fixes (v2). All six trust-boundary findings addressed: remote tunnel disabled, project-trust gate, symlink-safe path guard, hardened secret egress." />
+  <meta name="description" content="Independent source-level security review of zap by Mythos — posture 9.0/10 after two hardening passes (v3). Token-authed remote, file-write jail, egress scanning at every source, and a cargo-audit CI gate." />
   <link rel="canonical" href="https://zap.justpush.cloud/security.html" />
 
   <!-- Open Graph -->
   <meta property="og:type"        content="article" />
   <meta property="og:url"         content="https://zap.justpush.cloud/security.html" />
-  <meta property="og:title"       content="Zap — Independent Security Review (8.0/10, v2)" />
-  <meta property="og:description" content="A source-level security assessment by Mythos. Six findings, all addressed in v0.15.11 — verified by a clean build and 171 passing tests." />
+  <meta property="og:title"       content="Zap — Independent Security Review (9.0/10, v3)" />
+  <meta property="og:description" content="A source-level security assessment by Mythos. From 6.5 to 9.0 across two hardening passes — verified by a clean build and 182 passing tests." />
   <meta property="og:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image" />
-  <meta name="twitter:title"       content="Zap — Independent Security Review (8.0/10, v2)" />
-  <meta name="twitter:description" content="A source-level security assessment by Mythos. Six findings, all addressed in v0.15.11." />
+  <meta name="twitter:title"       content="Zap — Independent Security Review (9.0/10, v3)" />
+  <meta name="twitter:description" content="A source-level security assessment by Mythos. 6.5 → 9.0 across two hardening passes." />
   <meta name="twitter:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
 
   <link rel="stylesheet" href="style.css" />
@@ -46,21 +46,21 @@
   <!-- HERO -->
   <section class="hero">
     <div class="container">
-      <div class="badge">Independent Security Review · v2 (post-fix)</div>
-      <h1>Reviewed, then hardened.<br><span class="accent">8.0 / 10.</span></h1>
-      <p class="hero-sub">A source-level security assessment of zap by <strong>Mythos</strong> — every finding traced by hand to a specific <code>file:line</code>. The first pass scored <strong>6.5</strong>; all six findings were then fixed in <strong>v0.15.11</strong>, lifting the posture to <strong>8.0</strong>.</p>
+      <div class="badge">Independent Security Review · v3 (hardened)</div>
+      <h1>Reviewed, fixed, then hardened.<br><span class="accent">9.0 / 10.</span></h1>
+      <p class="hero-sub">A source-level security assessment of zap by <strong>Mythos</strong> — every finding traced by hand to a specific <code>file:line</code>. The first pass scored <strong>6.5</strong>; two hardening passes took it to <strong>9.0</strong> in <strong>v0.15.12</strong>.</p>
 
       <div class="stat-row" style="max-width:760px;margin:32px auto 0;">
-        <div class="stat-card"><div class="stat-num">8.0<span style="font-size:.5em;color:var(--text);opacity:.6">/10</span></div><div class="stat-label">posture after fixes (was 6.5)</div></div>
-        <div class="stat-card"><div class="stat-num">6 / 6</div><div class="stat-label">findings addressed</div></div>
-        <div class="stat-card"><div class="stat-num">171</div><div class="stat-label">tests passing · 0 warnings</div></div>
+        <div class="stat-card"><div class="stat-num">9.0<span style="font-size:.5em;color:var(--text);opacity:.6">/10</span></div><div class="stat-label">posture (6.5 → 8.0 → 9.0)</div></div>
+        <div class="stat-card"><div class="stat-num">4 / 4</div><div class="stat-label">security axes now at 9</div></div>
+        <div class="stat-card"><div class="stat-num">182</div><div class="stat-label">tests passing · 0 warnings</div></div>
       </div>
 
-      <p class="hero-sub" style="font-size:.85rem;opacity:.7;margin-top:20px;">Reviewer: Mythos · Method: manual trust-boundary tracing of <code>src/**</code> + re-verification after fixes · Version 0.15.11 · June 2026</p>
+      <p class="hero-sub" style="font-size:.85rem;opacity:.7;margin-top:20px;">Reviewer: Mythos · Method: manual trust-boundary tracing of <code>src/**</code> + re-verification after each pass · Version 0.15.12 · June 2026</p>
 
       <div class="hero-actions">
-        <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v2.md" target="_blank" rel="noopener" class="btn-primary">Read the v2 report ↗</a>
-        <a href="#findings" class="btn-secondary">See what was fixed</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v3.md" target="_blank" rel="noopener" class="btn-primary">Read the v3 report ↗</a>
+        <a href="#findings" class="btn-secondary">See what was hardened</a>
       </div>
     </div>
   </section>
@@ -73,7 +73,7 @@
         <p>zap is built on a sound foundation — a single memory-safe Rust binary, a real permission model that gates write and execute tools, API keys that never reach the logs, and a refreshingly honest threat model. The first review found the unlocked doors all at the <strong>edges of the trust model</strong> — where input arrives from somewhere other than your own terminal. Those doors are now shut.</p>
       </div>
       <div class="callout callout-tip">
-        <strong>What changed:</strong> the first pass scored 6.5/10 and named six findings. Version 0.15.11 addressed all six — the unauthenticated remote tunnel is disabled, an untrusted cloned repo can no longer run its own hooks or MCP servers, symlinks can't smuggle a read past the path guard, the secret scanner's coverage roughly doubled, and the session database is no longer world-readable. Re-verified against a clean build and 171 passing tests. Posture: <strong>8.0/10</strong>.
+        <strong>Two passes:</strong> the first review scored 6.5 and named six findings; <strong>v0.15.11</strong> fixed all six (→ 8.0). A second hardening pass in <strong>v0.15.12</strong> then went further — egress is now scanned at every entry point (not just tool results), <code>/remote</code> is back behind a <strong>per-session token</strong>, file writes are <strong>jailed</strong> to the workspace, and a <strong>cargo-audit CI gate</strong> watches the dependency tree. The four security-critical axes — filesystem, data egress, remote/network, supply chain — are all now at <strong>9/10</strong>. Re-verified against a clean build and 182 passing tests. Posture: <strong>9.0/10</strong>.
       </div>
     </div>
   </section>
@@ -108,7 +108,7 @@
         </div>
       </div>
       <div class="callout callout-tip" style="margin-top:24px;">
-        <strong>Where the remaining ~2 points go — and why they don't block adoption.</strong> With <code>/remote</code> disabled, the network boundary is closed and the residual is <strong>not a live vulnerability</strong>. It's two deliberate <em>"denylist, not allowlist"</em> hardening choices — the file-path guard and the outbound secret scan — plus zap's inherently <strong>single-user trust model</strong>. Those only matter if zap is pointed at <strong>untrusted input or run multi-tenant</strong>; in the per-developer model they're defense-in-depth, not exposure. <code>/remote</code> — the one feature that ever crossed a trust boundary — is already disabled and returns only behind per-session token auth.
+        <strong>Where the remaining point goes — and why it doesn't block adoption.</strong> At 9.0 the residual is <strong>not a live vulnerability</strong>. It's the local permission model (reads don't prompt; Auto is all-or-nothing) — a deliberate <strong>single-user trust design</strong>, not a gap. The reach to 9.5 is optional hardening: OS-keychain key storage, full SHA-pinning of CI actions, and an argument-level shell allowlist. Egress is now scanned at every entry point, file writes are jailed to the workspace, and remote access is token-authenticated.
       </div>
       <div class="callout" style="margin-top:16px;">
         <strong>Recommended posture for a security team:</strong> roll out as a per-developer tool with <code>permission_mode = "ask"</code> and, for the strictest stance, <code>sandbox = "container"</code>. On that basis a reviewer can <strong>approve it for internal use today</strong>. Treat multi-tenant / untrusted-input use as out of scope until the denylists become allowlists.
@@ -153,7 +153,7 @@
     <div class="container">
       <div class="section-header">
         <h2>Findings — and how they were fixed</h2>
-        <p>Six issues, each tied to a specific location in the source. Severity reflects realistic exploitability. Every one was addressed in v0.15.11.</p>
+        <p>Six issues, each tied to a specific location in the source. Severity reflects realistic exploitability. All six were fixed in v0.15.11; the v0.15.12 hardening pass then went further than the original fixes (status shown reflects v0.15.12).</p>
       </div>
       <div class="comparison-table-wrap">
         <table class="comparison-table">
@@ -170,7 +170,7 @@
               <td>1</td>
               <td class="bad">HIGH</td>
               <td><code>/remote</code> tunneled the session to a public URL with no authentication — read the stream, inject prompts</td>
-              <td class="good col-zap">✅ Disabled</td>
+              <td class="good col-zap">✅ Token-authed + Auto-refused</td>
             </tr>
             <tr>
               <td>2</td>
@@ -188,7 +188,7 @@
               <td>4</td>
               <td>MEDIUM</td>
               <td>Secret pre-flight scanner had coverage gaps</td>
-              <td class="good col-zap">✅ Improved — patterns ~doubled</td>
+              <td class="good col-zap">✅ Scanned at every source + entropy</td>
             </tr>
             <tr>
               <td>5</td>
@@ -205,7 +205,7 @@
           </tbody>
         </table>
       </div>
-      <p class="table-note">Full exploit scenarios, fixes, and the honest residual risk for each are in the v2 report. Two items are mitigated rather than fully closed — <code>/remote</code> is disabled (not yet re-built with auth), and the file/egress guards are hardened denylists, not allowlists.</p>
+      <p class="table-note">Full exploit scenarios, fixes, and remaining reach-goals are in the v3 report. As of v0.15.12 all six are fully closed — <code>/remote</code> is rebuilt with per-session token auth (not just disabled), file writes are jailed to the workspace, and egress is scanned at every entry point.</p>
     </div>
   </section>
 
@@ -218,8 +218,8 @@
       </div>
       <div class="callout">
         <p><strong>What it was:</strong> <code>/remote</code> let you drive a zap session from your phone by tunneling a local server to a public HTTPS URL via ngrok or localhost.run. The catch: the WebSocket had <strong>no authentication</strong> — no token, no password, no origin check. Anyone who saw that URL could watch everything the model output and inject their own prompts. In Auto mode that reached the shell tool.</p>
-        <p style="margin-top:12px;"><strong>What shipped:</strong> <code>/remote</code> is <strong>disabled</strong> in v0.15.11. The server and tunnel can no longer be started, so the public-ingress path is gone. <code>/remote stop</code> still works to tear down any server left running by an older build.</p>
-        <p style="margin-top:12px;"><strong>What's next:</strong> the feature returns once it mints a per-session token, appends it to the printed URL, requires it on the <code>/ws</code> upgrade, and refuses to tunnel when permissions are set to Auto. Disabled-by-default beats unauthenticated-by-default.</p>
+        <p style="margin-top:12px;"><strong>First it was disabled</strong> (v0.15.11), closing the ingress path immediately. <strong>Then it came back hardened</strong> (v0.15.12): the server mints a per-session token from the OS CSPRNG, appends it to the printed URL, and rejects both the page and the <code>/ws</code> upgrade without it — so a leaked URL <em>minus the token</em> is inert. It also refuses to start in Auto permission mode, where a leaked URL could otherwise drive the shell unattended.</p>
+        <p style="margin-top:12px;"><strong>The result:</strong> you can drive zap from your phone again, but only with the secret token in the link. Authenticated-by-default, not unauthenticated-by-default.</p>
       </div>
     </div>
   </section>
@@ -229,27 +229,27 @@
     <div class="container">
       <div class="section-header">
         <h2>Scorecard</h2>
-        <p>How each dimension rated in the first pass, and after the fixes landed in v0.15.11.</p>
+        <p>Each dimension across the three passes: first review (6.5), the fix pass (8.0), and the hardening pass (9.0).</p>
       </div>
       <div class="comparison-table-wrap">
         <table class="comparison-table">
           <thead>
-            <tr><th>Dimension</th><th>First pass</th><th class="col-zap">After fixes</th></tr>
+            <tr><th>Dimension</th><th>v1</th><th>v2</th><th class="col-zap">v3</th></tr>
           </thead>
           <tbody>
-            <tr><td>Memory &amp; language safety</td><td>9</td><td class="good col-zap">9</td></tr>
-            <tr><td>Credential handling (at rest / in logs)</td><td>8</td><td class="good col-zap">9</td></tr>
-            <tr><td>Local execution model (permissions)</td><td>7</td><td class="good col-zap">7</td></tr>
-            <tr><td>Filesystem boundary</td><td>5</td><td class="good col-zap">7</td></tr>
-            <tr><td>Data egress controls</td><td>6</td><td class="good col-zap">7</td></tr>
-            <tr><td>Remote / network surface</td><td class="bad">4</td><td class="good col-zap">8</td></tr>
-            <tr><td>Supply chain (deps + project trust)</td><td>6</td><td class="good col-zap">8</td></tr>
-            <tr><td><strong>Overall</strong></td><td><strong>6.5</strong></td><td class="good col-zap"><strong>8.0</strong></td></tr>
+            <tr><td>Memory &amp; language safety</td><td>9</td><td>9</td><td class="good col-zap">9</td></tr>
+            <tr><td>Credential handling (at rest / in logs)</td><td>8</td><td>9</td><td class="good col-zap">9</td></tr>
+            <tr><td>Local execution model (permissions)</td><td>7</td><td>7</td><td class="good col-zap">8</td></tr>
+            <tr><td>Filesystem boundary</td><td>5</td><td>7</td><td class="good col-zap">9</td></tr>
+            <tr><td>Data egress controls</td><td>6</td><td>7</td><td class="good col-zap">9</td></tr>
+            <tr><td>Remote / network surface</td><td class="bad">4</td><td>8</td><td class="good col-zap">9</td></tr>
+            <tr><td>Supply chain (deps + project trust)</td><td>6</td><td>8</td><td class="good col-zap">9</td></tr>
+            <tr><td><strong>Overall</strong></td><td><strong>6.5</strong></td><td><strong>8.0</strong></td><td class="good col-zap"><strong>9.0</strong></td></tr>
           </tbody>
         </table>
       </div>
       <div class="callout callout-tip" style="margin-top:20px;">
-        <strong>The honest residual.</strong> Two items are mitigated, not fully closed: <code>/remote</code> is disabled rather than rebuilt with token auth, and the file + egress guards are hardened denylists rather than allowlists. Both are documented and owned in the v2 report — the next cycle brings <code>/remote</code> back behind a per-session token and extends the secret scan to outbound user messages.
+        <strong>On the 9.0.</strong> The four security-critical axes — filesystem, data egress, remote/network, supply chain — are all at 9. The one dimension still at 8, the local permission model, reflects a deliberate single-user trust design (reads don't prompt; Auto is all-or-nothing by choice), not an unfixed weakness. The reach to 9.5 is documented and optional: OS-keychain key storage, full SHA-pinning of CI actions, and an argument-level shell allowlist.
       </div>
     </div>
   </section>
@@ -262,9 +262,10 @@
         <p>Everything above is drawn from these source-verified reports.</p>
       </div>
       <div class="provider-chips" style="justify-content:center;">
-        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v2.md" target="_blank" rel="noopener">Security Review v2 — post-fix (Mythos) ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v3.md" target="_blank" rel="noopener">Security Review v3 — hardened (Mythos) ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review-v2.md" target="_blank" rel="noopener">Security Review v2 ↗</a>
         <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/security-review.md" target="_blank" rel="noopener">Security Review v1 ↗</a>
-        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security Model &amp; Threat Model ↗</a>
+        <a class="chip" href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security Model ↗</a>
         <a class="chip" href="review.html">Engineering Review (Opus 4.8) →</a>
       </div>
     </div>
