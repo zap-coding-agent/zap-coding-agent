@@ -27,12 +27,26 @@ function copyInstall(btn) {
 
 // ── OS tabs ────────────────────────────────────────────────────────
 document.querySelectorAll('.os-tab').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const tabs = btn.closest('.os-tabs');
+    // capture where the tab bar sits in the viewport before the swap
+    const beforeTop = tabs ? tabs.getBoundingClientRect().top : 0;
+
     const os = btn.dataset.os;
     document.querySelectorAll('.os-tab').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.os-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('os-' + os)?.classList.add('active');
+
+    // restore scroll so the tab bar stays in the same viewport position
+    // (prevents iOS Safari from auto-scrolling the tapped button into view)
+    if (tabs) {
+      const afterTop = tabs.getBoundingClientRect().top;
+      const delta = afterTop - beforeTop;
+      if (delta) window.scrollBy({ top: delta, behavior: 'instant' });
+    }
+    btn.blur();
   });
 });
 
