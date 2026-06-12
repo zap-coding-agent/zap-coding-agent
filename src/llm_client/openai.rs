@@ -256,6 +256,13 @@ impl LlmProvider for OpenAiClient {
                 .post(&self.url)
                 .header("content-type", "application/json")
                 .body(body_bytes.clone());
+            // Streaming responses are read incrementally — the client's global total
+            // timeout would kill long generations (and local-model prompt processing,
+            // which can take minutes before the first byte). Idle detection in the
+            // stream loop below handles stuck servers instead.
+            if !self.disable_stream {
+                req = req.timeout(std::time::Duration::from_secs(3600));
+            }
             // GcloudAdc always sends Authorization header (even empty) — Gemini accepts
             // "Bearer " (empty token) but rejects missing auth entirely (returns 400).
             let send_header = !api_key.is_empty() || self.credential.always_send_auth_header();
@@ -353,8 +360,61 @@ impl LlmProvider for OpenAiClient {
             let mut finish_reason = "stop".to_string();
             let mut usage_acc = Usage::default();
 
-            'outer: while let Some(chunk) = stream.next().await {
+            // Idle-based stream watchdog. Local models (LM Studio, Ollama) send no
+            // bytes while prompt processing — that silence is normal and can last
+            // minutes on a big prompt, so it must not be treated as a dropped stream.
+            // A stuck server is detected by idle time, and the user sees progress
+            // notices while waiting for the first token instead of a silent spinner.
+            let idle_limit_secs = std::env::var("AGENT_STREAM_IDLE_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(600);
+            let approx_prompt_ktokens = body_bytes.len() / 4 / 1000;
+            let wait_start = std::time::Instant::now();
+            let mut last_data = std::time::Instant::now();
+            let mut first_data_seen = false;
+            let mut next_notice_secs: u64 = 20;
+
+            'outer: loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    stream.next(),
+                ).await {
+                    Ok(Some(c)) => c,
+                    Ok(None) => break 'outer,
+                    Err(_elapsed) => {
+                        let idle = last_data.elapsed().as_secs();
+                        if idle >= idle_limit_secs {
+                            anyhow::bail!(
+                                "model produced no data for {idle}s (idle limit {idle_limit_secs}s) — \
+                                 the server looks stuck. Raise with AGENT_STREAM_IDLE_SECS if your \
+                                 local model legitimately needs longer."
+                            );
+                        }
+                        if !first_data_seen {
+                            let waited = wait_start.elapsed().as_secs();
+                            if waited >= next_notice_secs {
+                                next_notice_secs = waited + 30;
+                                let msg = format!(
+                                    "⏳ waiting for first token — model is processing the prompt \
+                                     (~{}k tokens, {}s elapsed)…",
+                                    approx_prompt_ktokens, waited
+                                );
+                                if crate::tui::channel::is_tui_mode() {
+                                    crate::tui::channel::tui_send(
+                                        crate::tui::channel::TuiEvent::Notice(msg),
+                                    );
+                                } else if !self.suppress_stream {
+                                    eprintln!("{msg}");
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                };
                 let bytes: bytes::Bytes = chunk.context("SSE stream error")?;
+                first_data_seen = true;
+                last_data = std::time::Instant::now();
                 buf.push_str(&String::from_utf8_lossy(&bytes));
 
                 while let Some(pos) = buf.find('\n') {

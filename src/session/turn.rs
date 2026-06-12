@@ -243,6 +243,7 @@ impl Session {
             let _ = self.store.update_session_goal(self.session_id, short);
         }
 
+        let mut stream_drops: u32 = 0;
         for turn in 0..MAX_TURNS {
             tracing::info!(turn = turn, "calling LLM");
 
@@ -310,7 +311,7 @@ impl Session {
             spinner.finish_and_clear();
 
             let response = match result {
-                Ok(r) => r,
+                Ok(r) => { stream_drops = 0; r },
                 Err(e) => {
                     let msg = e.to_string().to_lowercase();
                     let is_overflow = msg.contains("too long")
@@ -325,8 +326,15 @@ impl Session {
                     if is_overflow && !disable_compact && self.compact_failures < 3 {
                         crate::zap_warn!("Prompt too long — compacting and retrying…");
                         if self.cmd_compact().await { continue; }
-                    } else if is_stream_drop {
-                        let notice = "⚠ Stream dropped by server — retrying in 3s…";
+                    } else if is_stream_drop && stream_drops < 4 {
+                        stream_drops += 1;
+                        // Exponential backoff: 3s, 6s, 12s, 24s. A flat retry against a
+                        // local server still busy with the dropped request's prompt
+                        // stacks prefills and grinds the whole machine down.
+                        let delay = 3u64 << (stream_drops - 1);
+                        let notice = format!(
+                            "⚠ Stream dropped by server — retry {stream_drops}/4 in {delay}s…"
+                        );
                         if crate::tui::channel::is_tui_mode() {
                             crate::tui::channel::tui_send(
                                 crate::tui::channel::TuiEvent::LlmChunk(format!("\n{notice}"))
@@ -334,7 +342,7 @@ impl Session {
                         } else {
                             crate::zap_warn!("{}", notice);
                         }
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
                         continue;
                     }
                     return Err(e);

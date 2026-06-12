@@ -7,6 +7,16 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### SLM-friendly streaming + core tool profile (v0.15.15)
+Local small models (LM Studio/Ollama) prefill big prompts for minutes — zap's plumbing must tolerate that and show progress. Born from the SLM research Test 3 (`research/slm-coding-eval/`).
+
+| Feature | File | Notes |
+|---|---|---|
+| Streaming idle watchdog | `src/llm_client/openai.rs` | Streaming requests get a 1h cap instead of the 120s total timeout; a stuck server is detected by idle time (`AGENT_STREAM_IDLE_SECS`, default 600s) |
+| First-token progress notices | `src/llm_client/openai.rs` | "⏳ waiting for first token (~Nk tokens, Ns elapsed)…" every 30s in TUI/REPL while the model processes the prompt |
+| Stream-drop backoff | `src/session/turn.rs` | Retries back off 3/6/12/24s (max 4) — flat 3s retries stacked prefills against local servers and ground the machine down |
+| Core tool profile | `src/session/history.rs`, `src/config.rs` | `AGENT_TOOL_PROFILE=core` (or `tool_profile` in `~/.agent.toml`) sends only 6 tool schemas: file ops + shell + search |
+
 ### Install UX polish (v0.15.13)
 Friction-less first-run experience for new users coming from the website.
 

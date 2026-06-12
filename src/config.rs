@@ -108,6 +108,10 @@ pub struct Config {
     /// When true, suppress all startup println!s (skills, hooks, MCP).
     /// TUI mode shows this info in its welcome message instead.
     pub tui_mode: bool,
+    /// Tool surface sent to the model: "full" (default) or "core" (file ops +
+    /// shell + search only). Core cuts prompt-processing time dramatically for
+    /// local small models. Env: AGENT_TOOL_PROFILE, file: tool_profile.
+    pub tool_profile: String,
     /// Slug of the active provider, e.g. "anthropic", "lm_studio", "groq".
     pub provider_slug: String,
     /// All configured providers keyed by slug — preserved across /provider switches.
@@ -140,6 +144,7 @@ struct FileConfig {
     context_paths:   Option<Vec<String>>,
     allowed_paths:   Option<Vec<String>>,
     disable_stream:  Option<bool>,
+    tool_profile:    Option<String>,
 }
 
 impl FileConfig {
@@ -279,12 +284,19 @@ impl Config {
             .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
             .unwrap_or(file.disable_stream.unwrap_or(false));
 
+        let tool_profile = env::var("AGENT_TOOL_PROFILE")
+            .ok()
+            .or(file.tool_profile)
+            .map(|v| v.trim().to_lowercase())
+            .filter(|v| v == "core" || v == "full")
+            .unwrap_or_else(|| "full".to_string());
+
         Ok(Self {
             permission_mode, sandbox, api_key, model, provider, base_url,
             output_format: OutputFormat::Text, agent_depth: 3, is_subagent: false, spawn_depth: 0,
             proxy, no_proxy, ca_bundle, tls_skip_verify, timeout_secs,
             budget: None, skill_paths, skill_token_budget, context_paths, allowed_paths, disable_stream, skip_domain_prompt: false, tui_mode: false,
-            provider_slug, all_providers,
+            tool_profile, provider_slug, all_providers,
         })
     }
 
@@ -400,6 +412,7 @@ impl Default for Config {
             context_paths: vec![],
             allowed_paths: vec![],
             disable_stream: false,
+            tool_profile: "full".to_string(),
             skip_domain_prompt: false,
             tui_mode: false,
             provider_slug: "test".to_string(),

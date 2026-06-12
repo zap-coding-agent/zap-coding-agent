@@ -37,6 +37,21 @@ pub(super) fn select_tools_for_turn<'a>(
 ) -> Cow<'a, [serde_json::Value]> {
     use crate::config::Provider;
 
+    // Explicit "core" profile wins over everything: file ops + shell + search
+    // only. Cuts the tool-schema prefill cost ~10x — the difference between a
+    // local SLM responding in seconds vs minutes.
+    if config.tool_profile == "core" {
+        const CORE_TOOLS: &[&str] = &[
+            "list_directory", "read_file", "edit_file", "write_file",
+            "shell", "search_code",
+        ];
+        let filtered: Vec<serde_json::Value> = all.iter()
+            .filter(|def| CORE_TOOLS.contains(&def["name"].as_str().unwrap_or("")))
+            .cloned()
+            .collect();
+        return Cow::Owned(filtered);
+    }
+
     if matches!(config.provider, Provider::Anthropic) {
         return Cow::Borrowed(all);
     }
@@ -136,7 +151,7 @@ pub(super) fn windowed_history(messages: &[Message]) -> Vec<Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ctx_bar, model_context_limit, windowed_history};
+    use super::{ctx_bar, model_context_limit, select_tools_for_turn, windowed_history};
     use crate::llm_client::{ContentBlock, Message};
 
     fn user_text(t: &str) -> Message {
@@ -281,5 +296,34 @@ mod tests {
         }).unwrap_or("");
         assert!(!first_text.contains("[History summary"), "no synthetic summary in windowed output");
         assert!(!first_text.contains("[Compressed history"), "no compressed history in windowed output");
+    }
+
+    #[test]
+    fn core_tool_profile_filters_to_core_set() {
+        let all: Vec<serde_json::Value> = [
+            "read_file", "write_file", "edit_file", "list_directory", "shell",
+            "search_code", "code_map", "find_definition", "git_status",
+            "memory_save", "web_fetch", "todo_write",
+        ].iter().map(|n| serde_json::json!({ "name": n })).collect();
+
+        let mut config = crate::config::Config {
+            tool_profile: "core".to_string(),
+            ..Default::default()
+        };
+
+        let filtered = select_tools_for_turn(&all, "fix the bug", &config, &[]);
+        let names: Vec<&str> = filtered.iter()
+            .filter_map(|d| d["name"].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["read_file", "write_file", "edit_file", "list_directory", "shell", "search_code"],
+            "core profile keeps exactly the core tools in input order"
+        );
+
+        // full profile (default) keeps everything except gated web tools
+        config.tool_profile = "full".to_string();
+        let full = select_tools_for_turn(&all, "fix the bug", &config, &[]);
+        assert_eq!(full.len(), all.len() - 1, "full profile only gates web_fetch");
     }
 }
