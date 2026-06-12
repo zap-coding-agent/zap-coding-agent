@@ -192,7 +192,8 @@ pub fn load_all_skills(extra_dirs: &[String]) -> Vec<Skill> {
                 // Flat file: <name>.md
                 if path.extension().and_then(|e| e.to_str()) == Some("md") {
                     match parse_skill_file(&path, source.clone()) {
-                        Ok(skill) => {
+                        Ok(mut skill) => {
+                            ensure_triggers(&mut skill);
                             if let Some(pos) = skills.iter().position(|s| s.name == skill.name) {
                                 skills[pos] = skill;
                             } else {
@@ -212,6 +213,7 @@ pub fn load_all_skills(extra_dirs: &[String]) -> Vec<Skill> {
                         match parse_skill_file(&skill_md, source.clone()) {
                             Ok(mut skill) => {
                                 skill.name = dir_name;
+                                ensure_triggers(&mut skill);
                                 if let Some(pos) = skills.iter().position(|s| s.name == skill.name) {
                                     skills[pos] = skill;
                                 } else {
@@ -341,6 +343,151 @@ pub fn build_always_on_prompt(skills: &[&Skill]) -> String {
     parts.join("\n\n")
 }
 
+/// Approximate token cost of a skill (declared `tokens:` or content length / 4).
+fn skill_tokens(skill: &Skill) -> usize {
+    if skill.token_estimate > 0 { skill.token_estimate } else { skill.content.len() / 4 }
+}
+
+/// Build the always-on block under a token budget. Skills are ranked by
+/// declared priority (desc), then source (project > external > global >
+/// bundled), then size (smallest first). Returns the block, the included
+/// token total, and the names of skills dropped by the budget.
+///
+/// The budget exists because always-on skills are paid on EVERY prompt of
+/// every session — an unbounded block silently taxes cloud-model cost and
+/// makes local models unusable (multi-minute prompt processing).
+pub fn build_always_on_prompt_budgeted(
+    skills: &[&Skill],
+    budget_tokens: usize,
+) -> (String, usize, Vec<String>) {
+    if skills.is_empty() {
+        return (String::new(), 0, Vec::new());
+    }
+    let source_rank = |s: &SkillSource| match s {
+        SkillSource::Project     => 3,
+        SkillSource::External(_) => 2,
+        SkillSource::Global      => 1,
+        SkillSource::Bundled     => 0,
+    };
+    let mut ranked: Vec<&&Skill> = skills.iter().collect();
+    ranked.sort_by(|a, b| {
+        b.priority.cmp(&a.priority)
+            .then(source_rank(&b.source).cmp(&source_rank(&a.source)))
+            .then(skill_tokens(a).cmp(&skill_tokens(b)))
+    });
+
+    let mut included: Vec<&Skill> = Vec::new();
+    let mut dropped:  Vec<String> = Vec::new();
+    let mut used = 0usize;
+    for skill in ranked {
+        let cost = skill_tokens(skill);
+        if used + cost <= budget_tokens {
+            used += cost;
+            included.push(skill);
+        } else {
+            dropped.push(skill.name.clone());
+        }
+    }
+    // Stable output order: alphabetical, independent of budget ranking.
+    included.sort_by(|a, b| a.name.cmp(&b.name));
+    let refs: Vec<&Skill> = included;
+    let mut parts = vec!["## Always-Active Guidelines".to_string()];
+    for skill in &refs {
+        parts.push(format!("### {}\n{}", skill.name, skill.content.trim()));
+    }
+    (parts.join("\n\n"), used, dropped)
+}
+
+/// Assemble the always-on system-prompt block plus an optional user-facing
+/// warning (skills dropped by budget, or block heavy enough to matter).
+pub fn assemble_always_on_block(
+    always_on: &[&Skill],
+    budget_tokens: usize,
+) -> (String, Option<String>) {
+    let (block, used_tokens, dropped) = build_always_on_prompt_budgeted(always_on, budget_tokens);
+    let warning = if !dropped.is_empty() {
+        Some(format!(
+            "⚠ {} always-on skill(s) dropped to stay within the {}-token budget: {}. \
+             Add `triggers:` to their frontmatter to load them on-demand, or raise \
+             `skill_token_budget` in ~/.agent.toml.",
+            dropped.len(), budget_tokens, dropped.join(", ")
+        ))
+    } else if used_tokens > 2_000 {
+        Some(format!(
+            "⚠ Always-on skills add ~{:.1}k tokens to EVERY prompt ({} skill(s)). \
+             Consider adding `triggers:` frontmatter so they load on-demand.",
+            used_tokens as f64 / 1_000.0, always_on.len()
+        ))
+    } else {
+        None
+    };
+    (block, warning)
+}
+
+/// REPL startup line: skill counts + core/scope note + optional bloat warning.
+pub fn print_repl_skill_summary(
+    skills: &[Skill],
+    always_on: &[&Skill],
+    domain_scope: &std::collections::HashSet<String>,
+    warning: Option<&str>,
+) {
+    use colored::Colorize;
+    let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
+    let mut notes: Vec<String> = Vec::new();
+    if !core_names.is_empty() {
+        notes.push(format!("core: {}", core_names.join(", ")));
+    }
+    if !domain_scope.is_empty() {
+        let mut names: Vec<&str> = domain_scope.iter().map(String::as_str).collect();
+        names.sort_unstable();
+        notes.push(format!("scope: {}", names.join(", ")));
+    }
+    let note = if notes.is_empty() { String::new() } else {
+        format!("  {}", notes.join("  ·  ").dimmed())
+    };
+    let practice_count = skills.iter().filter(|s| s.category == SkillCategory::Practice).count();
+    let domain_count   = skills.iter().filter(|s| s.category == SkillCategory::Domain).count();
+    println!(
+        "  {} {} skill(s): {} core · {} practice · {} domain{}",
+        "◎".truecolor(255, 200, 60),
+        skills.len().to_string().cyan(),
+        always_on.len(),
+        practice_count,
+        domain_count,
+        note,
+    );
+    if let Some(warning) = warning {
+        println!("  {}", warning.yellow());
+    }
+}
+
+/// Derive trigger keywords from a skill's name for foreign skills (frontmatter
+/// with a description but no zap `triggers:`). "dispatching-parallel-agents" →
+/// ["dispatching-parallel-agents", "dispatching parallel agents", "dispatching",
+/// "parallel", "agents"]. Generic short words (<4 chars) are skipped.
+fn derive_triggers_from_name(name: &str) -> Vec<String> {
+    let lower = name.to_lowercase();
+    let mut triggers = vec![lower.clone()];
+    let spaced = lower.replace(['-', '_'], " ");
+    if spaced != lower {
+        triggers.push(spaced.clone());
+    }
+    for word in spaced.split_whitespace() {
+        if word.len() >= 4 && !triggers.iter().any(|t| t == word) {
+            triggers.push(word.to_string());
+        }
+    }
+    triggers
+}
+
+/// Foreign skills (no triggers, classified Practice) get name-derived triggers
+/// so they still activate on-demand. Called after any name override.
+fn ensure_triggers(skill: &mut Skill) {
+    if skill.triggers.is_empty() && skill.category == SkillCategory::Practice {
+        skill.triggers = derive_triggers_from_name(&skill.name);
+    }
+}
+
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
 fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill> {
@@ -355,10 +502,23 @@ fn parse_skill_file(path: &std::path::Path, source: SkillSource) -> Result<Skill
         if let Some(end_idx) = content_after_fence.find("\n---") {
             let fm       = parse_frontmatter(&content_after_fence[..end_idx]);
             let body     = content_after_fence[end_idx + 4..].trim_start().to_string();
+            let foreign  = fm.triggers.is_empty() && !fm.description.is_empty();
             let category = fm.category.unwrap_or({
-                // Backwards compat: no triggers → Core; triggers present → Practice
-                if fm.triggers.is_empty() { SkillCategory::Core } else { SkillCategory::Practice }
+                if !fm.triggers.is_empty() {
+                    SkillCategory::Practice
+                } else if foreign {
+                    // Foreign skill (Claude/Kiro-style frontmatter: has a description,
+                    // no zap triggers). NEVER always-on — a mounted external skill
+                    // collection must not bloat every prompt. Triggers are derived
+                    // from the name so it still activates on-demand.
+                    SkillCategory::Practice
+                } else {
+                    // zap-native frontmatter without description or triggers → Core
+                    SkillCategory::Core
+                }
             });
+            // Trigger derivation for foreign skills happens in load_all_skills,
+            // after the subdirectory-name override (<name>/SKILL.md).
             return Ok(Skill {
                 name,
                 description:    fm.description,
@@ -821,6 +981,83 @@ When working on tasks related to [topic], follow these guidelines:
 
     std::fs::write(&path, template)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod foreign_skill_tests {
+    use super::*;
+
+    fn skill(name: &str, content_len: usize, priority: u8, source: SkillSource) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: String::new(),
+            license: None,
+            priority,
+            triggers: Vec::new(),
+            token_estimate: 0,
+            content: "x".repeat(content_len),
+            source,
+            category: SkillCategory::Core,
+        }
+    }
+
+    #[test]
+    fn foreign_frontmatter_is_never_always_on() {
+        // Claude/Kiro-style SKILL.md: description but no zap triggers.
+        let dir = std::env::temp_dir().join(format!("zap-skill-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dispatching-parallel-agents.md");
+        std::fs::write(&path, "---\nname: dispatching-parallel-agents\ndescription: Use when facing independent tasks\n---\n\n# Big foreign skill\ncontent").unwrap();
+
+        let parsed = parse_skill_file(&path, SkillSource::External(dir.clone())).unwrap();
+        assert_eq!(parsed.category, SkillCategory::Practice, "foreign skill must not be Core");
+        assert!(!parsed.is_always_on());
+
+        let mut parsed = parsed;
+        ensure_triggers(&mut parsed);
+        assert!(parsed.triggers.iter().any(|t| t == "dispatching-parallel-agents"));
+        assert!(parsed.triggers.iter().any(|t| t == "parallel"));
+        assert!(!parsed.triggers.iter().any(|t| t.len() < 4), "no generic short triggers");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn zap_native_no_description_no_triggers_stays_core() {
+        let dir = std::env::temp_dir().join(format!("zap-skill-test2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("house-rules.md");
+        std::fs::write(&path, "---\npriority: 5\n---\n\nAlways do X.").unwrap();
+
+        let parsed = parse_skill_file(&path, SkillSource::Global).unwrap();
+        assert_eq!(parsed.category, SkillCategory::Core, "zap-native always-on stays Core");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn always_on_budget_drops_overflow_and_reports() {
+        // 3 skills × ~1000 tokens (4000 chars) with a 2500-token budget →
+        // two fit, one dropped. Higher priority wins a slot.
+        let a = skill("alpha", 4_000, 9, SkillSource::Project);
+        let b = skill("beta",  4_000, 5, SkillSource::Global);
+        let c = skill("gamma", 4_000, 1, SkillSource::Bundled);
+        let refs: Vec<&Skill> = vec![&a, &b, &c];
+
+        let (block, used, dropped) = build_always_on_prompt_budgeted(&refs, 2_500);
+        assert!(block.contains("### alpha") && block.contains("### beta"));
+        assert!(!block.contains("### gamma"));
+        assert_eq!(dropped, vec!["gamma".to_string()]);
+        assert!(used <= 2_500);
+    }
+
+    #[test]
+    fn always_on_budget_empty_input() {
+        let (block, used, dropped) = build_always_on_prompt_budgeted(&[], 4_000);
+        assert!(block.is_empty());
+        assert_eq!(used, 0);
+        assert!(dropped.is_empty());
+    }
 }
 
 #[cfg(test)]

@@ -185,10 +185,17 @@ impl Session {
         let skills    = crate::skill_manager::load_all_skills(&config.skill_paths);
         let always_on = crate::skill_manager::always_on_skills(&skills);
 
+        let mut skill_warning: Option<String> = None;
         if !always_on.is_empty() {
-            let block = crate::skill_manager::build_always_on_prompt(&always_on);
-            system.push_str("\n\n");
-            system.push_str(&block);
+            let (block, warning) = crate::skill_manager::assemble_always_on_block(
+                &always_on,
+                config.skill_token_budget,
+            );
+            if !block.is_empty() {
+                system.push_str("\n\n");
+                system.push_str(&block);
+            }
+            skill_warning = warning;
         }
 
         let project_meta = crate::project::load_project_meta();
@@ -223,33 +230,8 @@ impl Session {
         };
 
         if !skills.is_empty() && !config.is_subagent && !config.tui_mode {
-            let core_names: Vec<_> = always_on.iter().map(|s| s.name.as_str()).collect();
-            let mut notes: Vec<String> = Vec::new();
-            if !core_names.is_empty() {
-                notes.push(format!("core: {}", core_names.join(", ")));
-            }
-            if !domain_scope.is_empty() {
-                let mut names: Vec<&str> = domain_scope.iter().map(String::as_str).collect();
-                names.sort_unstable();
-                notes.push(format!("scope: {}", names.join(", ")));
-            }
-            let note = if notes.is_empty() { String::new() } else {
-                format!("  {}", notes.join("  ·  ").dimmed())
-            };
-            let practice_count = skills.iter()
-                .filter(|s| s.category == crate::skill_manager::SkillCategory::Practice)
-                .count();
-            let domain_count = skills.iter()
-                .filter(|s| s.category == crate::skill_manager::SkillCategory::Domain)
-                .count();
-            println!(
-                "  {} {} skill(s): {} core · {} practice · {} domain{}",
-                "◎".truecolor(255, 200, 60),
-                skills.len().to_string().cyan(),
-                always_on.len(),
-                practice_count,
-                domain_count,
-                note,
+            crate::skill_manager::print_repl_skill_summary(
+                &skills, &always_on, &domain_scope, skill_warning.as_deref(),
             );
         }
 
@@ -344,6 +326,11 @@ impl Session {
                     startup_notices.push(nudge);
                 } else {
                     println!("  {} {}", "◌".dimmed(), nudge);
+                }
+            }
+            if config.tui_mode {
+                if let Some(ref warning) = skill_warning {
+                    startup_notices.push(warning.clone());
                 }
             }
         }

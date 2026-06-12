@@ -7,6 +7,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Skill prompt-bloat guardrails (v0.15.16)
+External skill collections (Claude/Kiro-style SKILL.md) used to be classified always-on — mounting `~/.claude/skills` injected ~28k tokens into EVERY prompt, silently taxing cloud cost and making local models unusable. Verified: with 63 foreign skills mounted, the system prompt stays at ~3.2k tokens.
+
+| Feature | File | Notes |
+|---|---|---|
+| Foreign skills never always-on | `src/skill_manager.rs` | Frontmatter with `description:` but no `triggers:` → Practice (triggered), with triggers derived from the skill name. Zap-native trigger-less skills stay Core |
+| Always-on token budget | `src/skill_manager.rs` | `build_always_on_prompt_budgeted` caps the Core block at `skill_token_budget` (default 4000); ranked by priority → source → size; overflow dropped |
+| User warning | `src/session/mod.rs` | Warns (REPL + TUI startup notice) when skills are dropped by budget or the always-on block exceeds ~2k tokens |
+
 ### SLM-friendly streaming + core tool profile (v0.15.15)
 Local small models (LM Studio/Ollama) prefill big prompts for minutes — zap's plumbing must tolerate that and show progress. Born from the SLM research Test 3 (`research/slm-coding-eval/`).
 
