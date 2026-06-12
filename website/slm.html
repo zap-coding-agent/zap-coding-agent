@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zap — Local SLM Support</title>
+  <meta name="description" content="zap runs a frontier model for design and a local small model for the actual coding — propose-and-confirm routing, structured plan execution, pre-indexed code graph, and a verify-aware watchdog. The only agent that treats small models as first-class executors." />
+  <link rel="canonical" href="https://zap.justpush.cloud/slm.html" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="article" />
+  <meta property="og:url"         content="https://zap.justpush.cloud/slm.html" />
+  <meta property="og:title"       content="Zap — Local SLM Support" />
+  <meta property="og:description" content="Frontier model designs, local model codes — 100% success on structured plans, near-zero cost, full privacy, and a verify-aware watchdog that bounds failure to minutes." />
+  <meta property="og:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="Zap — Local SLM Support" />
+  <meta name="twitter:description" content="Frontier model designs, local model codes. Near-zero cost, full privacy, bounded failure." />
+  <meta name="twitter:image"       content="https://img.youtube.com/vi/-wa1t2YiHDg/maxresdefault.jpg" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="logo">⚡ zap</a>
+      <div class="nav-links">
+        <a href="docs.html">Docs</a>
+        <a href="comparisons.html">Comparisons</a>
+        <a href="slm.html" class="nav-highlight" style="color:var(--purple);font-weight:600;">SLM Support</a>
+        <a href="review.html" class="nav-highlight">Opus 4.8 Review</a>
+        <a href="security.html" class="nav-highlight">Security Review</a>
+        <a href="index.html#install">Install</a>
+        <a href="https://github.com/zap-coding-agent/zap-coding-agent" target="_blank" rel="noopener" class="btn-ghost">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge">Local Models · Production-Ready</div>
+      <h1>Frontier model designs.<br><span class="accent">Local model codes.</span></h1>
+      <p class="hero-sub">zap runs a <strong>frontier model</strong> for design and a <strong>local small model</strong> for the actual coding — and it <strong>proposes</strong> which model fits a task, then waits for you to confirm. No silent downgrades, no cloud round-trip for the bulk of the edits.</p>
+
+      <div class="stat-row" style="max-width:760px;margin:32px auto 0;">
+        <div class="stat-card"><div class="stat-num">100<span style="font-size:.5em;color:var(--text);opacity:.6">%</span></div><div class="stat-label">structured plan success rate</div></div>
+        <div class="stat-card"><div class="stat-num">294<span style="font-size:.5em;color:var(--text);opacity:.6">s</span></div><div class="stat-label">wall-clock per task</div></div>
+        <div class="stat-card"><div class="stat-num">5 / 6</div><div class="stat-label">models score 80%+ on eval</div></div>
+      </div>
+
+      <p class="hero-sub" style="font-size:.85rem;opacity:.7;margin-top:20px;">Validated on qwen3-coder-30b, devstral-small-2, gemma-4-e4b, glm-4.7-flash-reap, and more — through the real zap TUI, objective verification, 191 passing tests. As of v0.15.18.</p>
+    </div>
+  </section>
+
+  <!-- WHY SLM -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Why run code generation on your own machine?</h2>
+        <p>Frontier models are the right tool for <em>deciding what to change</em>. They're an expensive, slow, privacy-leaking tool for <em>mechanically applying</em> a change you've already specified. That mechanical majority of agentic coding can run on a 14B model on your laptop.</p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon-wrap">💸</div>
+          <h3>Near-Zero Cost</h3>
+          <p>The frontier model is only paid for the thinking — add a field, rename a symbol, wire a route. The bulk of the edits run locally with no per-token billing.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔒</div>
+          <h3>Full Privacy</h3>
+          <p>The bulk of your code never leaves your laptop. Only the task plan (a few hundred tokens) goes to the cloud. The actual code changes happen locally.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">⚡</div>
+          <h3>Low Latency</h3>
+          <p>No network hop for the execution half. Local inference on scoped tasks is fast — a 4-step structured plan completes in under 5 minutes end-to-end.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">✈️</div>
+          <h3>Works Offline</h3>
+          <p>Once the plan is written, execution works on a plane or air-gapped network. The local model handles the entire execution phase without internet access.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2>Propose, don't switch. Confirm, don't assume.</h2>
+        <p>zap never silently changes models. It <strong>proposes</strong> and waits — the frontier model writes a step-by-step plan with exact code snippets, then recommends which local model should execute it. Nothing runs until you press a key.</p>
+      </div>
+
+      <div class="feature-row-item reveal" style="flex-direction:row;align-items:flex-start;gap:40px;max-width:840px;margin:0 auto;">
+        <div style="flex:1;">
+          <h3>1. Declare your models</h3>
+          <div class="code-block" style="margin-top:12px;">
+<span class="c-dim"># ~/.agent.toml</span>
+[providers.anthropic]
+model = "claude-sonnet-4-6"
+role  = "frontier"
+
+[providers.lm_studio]
+model = "qwen3-coder-30b"
+role  = "local-coder"
+base_url = "http://localhost:1234/v1/chat/completions"</div>
+        </div>
+        <div style="flex:1;">
+          <h3>2. The model proposes</h3>
+          <div class="code-block" style="margin-top:12px;">
+◈ Task 3 — Add created_at field (+4 callers)
+  Recommended: qwen3-coder-30b (local)
+  reason: mechanical, well-scoped
+
+  [Enter] run on qwen
+  [o] keep frontier model
+  [m] pick another model
+  [s] skip this task</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STRUCTURED PLAN EXECUTION -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Structured plan execution — 100% success rate</h2>
+        <p>The optimal SLM workflow: a <strong>frontier model pre-writes a step-by-step plan</strong> with exact code snippets, and the SLM executes it mechanically — one step, one verification, one result. No improvisation, no dead ends.</p>
+      </div>
+
+      <div class="comparison-table-wrap" style="max-width:760px;">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Open-ended goal</th>
+              <th class="col-zap">Structured plan</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Success rate</td>
+              <td class="bad">50% per attempt</td>
+              <td class="good col-zap">100% first attempt</td>
+            </tr>
+            <tr>
+              <td>Wall-clock</td>
+              <td class="bad">305–905s</td>
+              <td class="good col-zap">294s</td>
+            </tr>
+            <tr>
+              <td>Model turns</td>
+              <td class="bad">4–8</td>
+              <td class="good col-zap">2</td>
+            </tr>
+            <tr>
+              <td>Failure mode</td>
+              <td class="bad">Wrong conditional → 13 min debugging</td>
+              <td class="good col-zap">None — plan is unambiguous</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note">Test 6: Add a <code>GET /todos</code> REST endpoint to a Node.js Express app. The plan had 4 numbered steps with exact code in fenced blocks and a verification command per step. The model followed every step, made two correct edits in one turn, and verification passed.</p>
+
+      <div class="code-block" style="max-width:760px;margin:24px auto 0;">
+<span class="c-dim"># Example plan (frontier model writes this, SLM executes it)</span>
+Step 1 — Read the current code (code_map app.js)
+Step 2 — Add todo data array (exact code provided)
+Step 3 — Add GET /todos route (exact code provided)
+Step 4 — Run `node test.js` and confirm "ok"</div>
+    </div>
+  </section>
+
+  <!-- KEY FEATURES -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2>Purpose-built for small model success</h2>
+        <p>Four features that make the difference between an SLM that spins for 20 minutes and one that ships correct code in 2 turns.</p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🗺️</div>
+          <h3>Pre-Indexed Code Graph</h3>
+          <p><code>zap --index-only</code> builds an AST index (tree-sitter + SQLite) so the SLM navigates with <code>find_definition</code> and <code>find_references</code> instead of reading dozens of files. For a 300-file project, this is the difference between a 2-turn execution and a 12-turn goose chase.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🔧</div>
+          <h3>Core Tool Profile</h3>
+          <p><code>AGENT_TOOL_PROFILE=core</code> sends only 6 tool schemas (file ops, shell, search). Small models struggle with large tool schemas — this profile makes tool-calling tractable without sacrificing capability.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">⏳</div>
+          <h3>Streaming Watchdog</h3>
+          <p>Local models prefill big prompts for minutes. zap tolerates that: 1-hour streaming cap, idle detection at 10 minutes, and "waiting for first token" progress notices every 30 seconds. Backoff on stream drops prevents stacked prefills from grinding your machine.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrap">🛡️</div>
+          <h3>Verify-Aware Watchdog</h3>
+          <p>If the SLM gets stuck in a verification loop (3 consecutive failed shell runs), zap injects a rethink nudge. At 6 failures, tools are withdrawn and the model must produce a structured handoff summary. No other local-first agent has this — OpenHands' StuckDetector only catches identical repeated actions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECOMMENDED MODELS -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Recommended local models</h2>
+        <p>Backed by a full multi-turn agentic eval — 3 realistic tasks, objective verification, through the real zap TUI.</p>
+      </div>
+
+      <div class="comparison-table-wrap" style="max-width:700px;">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Size</th>
+              <th>Score</th>
+              <th>Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>qwen3-coder-30b</code></td>
+              <td>30B (MoE, ~3.3B active)</td>
+              <td class="good col-zap">3/3</td>
+              <td><strong>Default executor pick</strong> — RL-tuned for the agent loop</td>
+            </tr>
+            <tr>
+              <td><code>devstral-small-2</code></td>
+              <td>24B</td>
+              <td class="good col-zap">3/3</td>
+              <td>Co-built with OpenHands scaffold; great alt</td>
+            </tr>
+            <tr>
+              <td><code>gemma-4-e4b</code></td>
+              <td>4B</td>
+              <td class="good col-zap">3/3</td>
+              <td>Punches far above its size on scoped tasks</td>
+            </tr>
+            <tr>
+              <td><code>glm-4.7-flash-reap</code></td>
+              <td>23B (MoE)</td>
+              <td class="good col-zap">2/3</td>
+              <td>Solid on fixes/renames, weaker on multi-step</td>
+            </tr>
+            <tr>
+              <td><code>qwen2.5-coder-14b</code></td>
+              <td>14B</td>
+              <td class="bad">1/3</td>
+              <td>⚠️ Completion model — avoid for executor role</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note"><strong>Key lesson:</strong> model <em>class</em> beats model <em>size</em>. Pick an <strong>agentic-tuned</strong> model (Devstral, Qwen3-Coder) for the executor role — not a generic "coder" completion model. Scoped single-file tasks passed on every model tested.</p>
+    </div>
+  </section>
+
+  <!-- RESEARCH RESULTS -->
+  <section class="section section-alt">
+    <div class="container">
+      <div class="section-header">
+        <h2>Validated — through the real TUI</h2>
+        <p>All tests run through the <strong>real zap TUI</strong> with qwen3-coder-30b via LM Studio on a 32 GB Apple M-series machine. Full evidence, scripts, and raw logs in the <a href="https://github.com/zap-coding-agent/zap-coding-agent/tree/main/research/slm-coding-eval" target="_blank" rel="noopener">research repo</a>.</p>
+      </div>
+
+      <div class="comparison-table-wrap" style="max-width:800px;">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Test</th>
+              <th>Scenario</th>
+              <th>Result</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Test 3</td>
+              <td>Frontier-decomposed task (tool validation)</td>
+              <td class="good col-zap">✅ PASS</td>
+              <td>214s</td>
+            </tr>
+            <tr>
+              <td>Test 4 r1</td>
+              <td>Goal-level task (8 behaviors)</td>
+              <td class="bad">❌ 7/8</td>
+              <td>905s</td>
+            </tr>
+            <tr>
+              <td>Test 4 r2</td>
+              <td>Same goal, retry</td>
+              <td class="good col-zap">✅ 8/8</td>
+              <td>305s</td>
+            </tr>
+            <tr>
+              <td>Test 5</td>
+              <td>Impossible task — escalation drill</td>
+              <td>⚠️ partial</td>
+              <td>10–45s</td>
+            </tr>
+            <tr>
+              <td>Test 6</td>
+              <td>Structured plan execution</td>
+              <td class="good col-zap">✅ PASS</td>
+              <td>294s</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-note"><strong>Bottom line:</strong> Give an SLM a scoped, pre-written plan with exact verification steps → it executes reliably and fast. Give it an open-ended goal with ambiguous constraints → success is model and run dependent, but zap's watchdog bounds the failure cost to minutes. The recommended production workflow is the structured plan pattern (Test 6).</p>
+    </div>
+  </section>
+
+  <!-- GETTING STARTED -->
+  <section class="section">
+    <div class="container container-sm">
+      <div class="section-header">
+        <h2>Get started in 3 steps</h2>
+      </div>
+
+      <div class="install-steps">
+        <div class="install-step">
+          <div class="install-step-num">1</div>
+          <div class="install-step-body">
+            <h4>Install zap</h4>
+            <div class="code-block">curl -fsSL https://raw.githubusercontent.com/zap-coding-agent/zap-coding-agent/main/install.sh | bash</div>
+            <p>Single binary, no runtime. Cold start in milliseconds.</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="install-step-num">2</div>
+          <div class="install-step-body">
+            <h4>Configure your local model</h4>
+            <div class="code-block"><span class="c-dim"># ~/.agent.toml</span>
+[providers.lm_studio]
+kind     = "openai"
+model    = "qwen3-coder-30b"
+role     = "local-coder"
+base_url = "http://localhost:1234/v1/chat/completions"</div>
+            <p>Works with LM Studio, Ollama, or any OpenAI-compatible endpoint. Set <code>role = "local-coder"</code> to enable propose-and-confirm routing.</p>
+          </div>
+        </div>
+        <div class="install-step last">
+          <div class="install-step-num">3</div>
+          <div class="install-step-body">
+            <h4>Pre-index and run</h4>
+            <div class="code-block">cd your-project
+zap --index-only          <span class="c-dim"># builds .zap/code.db</span>
+zap                        <span class="c-dim"># start with index available</span></div>
+            <p>The index gives the SLM <code>find_definition</code>, <code>find_references</code>, <code>code_map</code>, and <code>who_calls</code> — it navigates directly to symbols instead of reading dozens of files.</p>
+          </div>
+        </div>
+      </div>
+
+      <p style="text-align:center;margin-top:32px;">Full docs: <a href="https://github.com/zap-coding-agent/zap-coding-agent/blob/main/docs/slm-support.md" target="_blank" rel="noopener">SLM Support Guide ↗</a> · Research: <a href="https://github.com/zap-coding-agent/zap-coding-agent/tree/main/research/slm-coding-eval" target="_blank" rel="noopener">SLM Coding Eval ↗</a></p>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Local models, frontier results.</h2>
+      <p>Open source, MIT licensed. Zero telemetry. No cloud for the bulk of your edits.</p>
+      <div class="cta-actions">
+        <a href="index.html#install" class="btn-primary">Install zap</a>
+        <a href="docs.html" class="btn-secondary">Read the Docs</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <div id="footer-placeholder"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>

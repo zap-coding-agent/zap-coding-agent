@@ -5,6 +5,7 @@
 ## What makes zap different
 
 - **Skill-first context**: Skills are markdown files injected only when your message triggers them. A Rust question gets the Rust skill. A greeting costs 31 tokens, not 2,000.
+- **Local SLM execution**: Run a frontier model for design and a local small model for the bulk of the coding — propose-and-confirm routing, structured plan execution, pre-indexed code graph. Near-zero cost, full privacy.
 - **Code Graph Index**: Tree-sitter + SQLite map of your repo — symbols, function calls, imports, and PageRank-ranked files. The model answers "who calls X" or "what breaks if I rename Y" in one query instead of ten greps. Supports Rust, Python, JS/TS/TSX, Go, Java, C#.
 - **Context visibility**: See exactly what's in the context window. Remove stale messages with `/context drop` without starting a new session.
 - **Dynamic MCP loading**: MCP servers stay pending at startup. Tool schemas only enter context when explicitly needed.
@@ -22,6 +23,7 @@ Or download a pre-built binary from https://github.com/zap-coding-agent/zap-codi
 
 ## Docs
 
+- [SLM Support](https://zap.justpush.cloud/slm.html)
 - [Getting Started](https://zap.justpush.cloud/docs.html#install)
 - [Configuration](https://zap.justpush.cloud/docs.html#config)
 - [Project Init (/init)](https://zap.justpush.cloud/docs.html#init)
@@ -45,6 +47,7 @@ Or download a pre-built binary from https://github.com/zap-coding-agent/zap-codi
 ## Links
 
 - Website: https://zap.justpush.cloud
+- SLM Support: https://zap.justpush.cloud/slm.html
 - GitHub: https://github.com/zap-coding-agent/zap-coding-agent
 - Crates.io: https://crates.io/crates/zap-coding-agent
 - Issues: https://github.com/zap-coding-agent/zap-coding-agent/issues
