@@ -10,7 +10,16 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 # Advisories without a fix still warn (surfaced, not blocking) — turn to "deny"
 # once the tree is clean to keep it that way.
-ignore = []
+ignore = [
+    # paste is unmaintained (proc-macro, no network/IO surface). Pulled in by
+    # ratatui 0.29; upstream advisory says no safe upgrade exists. Revisit when
+    # ratatui drops it.
+    "RUSTSEC-2024-0436",
+    # bincode 1.x is unmaintained. Pulled in by syntect for decoding its own
+    # bundled binary syntax dumps (trusted, compile-time data — not attacker
+    # input). No safe upgrade; revisit when syntect moves off bincode 1.
+    "RUSTSEC-2025-0141",
+]
 
 [bans]
 # Flag multiple versions of the same crate (bloat + larger attack surface).
