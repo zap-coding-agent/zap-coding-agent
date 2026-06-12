@@ -279,6 +279,40 @@ pub fn normalize_openai_url(base_url: Option<&str>) -> String {
     }
 }
 
+/// Fetch available models from an OpenAI-compatible `/models` endpoint.
+///
+/// `base_url` is a chat completions endpoint (e.g. `http://localhost:1234/v1/chat/completions`).
+/// Returns model IDs on success, or an empty vec if the request fails.
+pub fn fetch_openai_compatible_models(base_url: &str) -> Vec<String> {
+    let base = base_url
+        .trim_end_matches('/')
+        .strip_suffix("/chat/completions")
+        .unwrap_or(base_url);
+    let url = format!("{}/models", base.trim_end_matches('/'));
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+    match client.get(&url).send() {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>() {
+                Ok(json) => {
+                    if let Some(arr) = json["data"].as_array() {
+                        arr.iter()
+                            .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                }
+                Err(_) => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod url_tests {
     use super::{normalize_openai_url, normalize_anthropic_url, ANTHROPIC_DEFAULT_URL, OPENAI_DEFAULT_BASE};

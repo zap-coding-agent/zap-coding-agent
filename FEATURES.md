@@ -7,6 +7,16 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Dynamic LM Studio model list (v0.15.19)
+LM Studio's model list was hardcoded — new models downloaded in LM Studio never appeared in zap's provider/model pickers. Now zap queries LM Studio's `/v1/models` endpoint at provider-selection time to show the actual available models. Falls back to a sensible default list if LM Studio isn't running.
+
+| Feature | File | Notes |
+|---|---|---|
+| `fetch_openai_compatible_models` | `src/llm_client/mod.rs` | Sync HTTP request to `/v1/models`, parses `data[].id`, 5s timeout. Reusable for Ollama and other local providers. |
+| CLI provider picker | `src/session/commands/provider.rs` | `models` field changed from `&'static [&'static str]` to `Vec<String>`; LM Studio entry uses dynamic fetch with hardcoded fallback |
+| TUI onboarding | `src/tui/startup.rs` | Same dynamic fetch logic on first-launch provider picker |
+| TUI `/provider` command | `src/tui/turn_handler.rs` | Same dynamic fetch logic on manual provider switch |
+
 ### Verify-aware progress watchdog (v0.15.17)
 Bounds the cost of a stuck agent. Counts consecutive failing verification runs (shell exit ≠ 0) within a turn — catches a model trying *different* broken fixes, which identical-action loop detectors (OpenHands StuckDetector) miss. Born from SLM research Test 4: 13 minutes of methodical-but-fruitless debugging on one conditional.
 

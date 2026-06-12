@@ -78,8 +78,17 @@ pub(super) async fn handle_tui_slash(
             || crate::llm_client::auth::check_google_api_key_env().is_some();
         let claude_code_ready = crate::llm_client::auth::check_claude_code().is_some();
 
+        // Fetch LM Studio models dynamically; fall back to hardcoded list.
+        let mut lm_studio_models = crate::llm_client::fetch_openai_compatible_models(
+            "http://localhost:1234/v1/chat/completions");
+        if lm_studio_models.is_empty() {
+            lm_studio_models = vec!["qwen3-coder-30b".into(), "devstral-small-2".into(),
+                "gemma-4-e4b".into(), "qwen2.5-coder-7b-instruct".into(),
+                "mistral-7b-instruct".into(), "Other…".into()];
+        }
+
         let entries: Vec<ProviderEntry> = vec![
-            ProviderEntry { slug: "lm_studio".into(),  name: "LM Studio".into(),                  hint: "local · OpenAI-compatible".into(),             kind: ProviderKind::OpenAi,    models: vec!["qwen3-coder-30b".into(), "devstral-small-2".into(), "gemma-4-e4b".into(), "qwen2.5-coder-7b-instruct".into(), "mistral-7b-instruct".into(), "Other…".into()],    base_url: Some("http://localhost:1234/v1/chat/completions".into()),                     needs_key: false, coming_soon: false, auth_header: None,       ready: true },
+            ProviderEntry { slug: "lm_studio".into(),  name: "LM Studio".into(),                  hint: "local · OpenAI-compatible".into(),             kind: ProviderKind::OpenAi,    models: lm_studio_models,                                                                                    base_url: Some("http://localhost:1234/v1/chat/completions".into()),                     needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderEntry { slug: "ollama".into(),     name: "Ollama".into(),                     hint: "local · OpenAI-compatible".into(),             kind: ProviderKind::OpenAi,    models: vec!["llama3.2".into(), "llama3.1:70b".into(), "codellama".into(), "qwen2.5-coder".into(), "Other…".into()],   base_url: Some("http://localhost:11434/v1/chat/completions".into()),                      needs_key: false, coming_soon: false, auth_header: None,       ready: true },
             ProviderEntry { slug: "anthropic".into(),  name: "Anthropic".into(),                  hint: "claude-sonnet-4-6 / claude-opus-4-7".into(),   kind: ProviderKind::Anthropic, models: vec!["claude-sonnet-4-6".into(), "claude-opus-4-7".into(), "claude-haiku-4-5".into(), "Other…".into()],    base_url: None,                                                                                 needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderEntry { slug: "claude_code".into(),name: "Claude Code (Pro/Max API)".into(),  hint: if claude_code_ready { "claude-sonnet-4-6 / claude-opus-4-7 · via claude CLI".into() } else { "requires claude CLI · Pro/Max plan".into() }, kind: ProviderKind::Anthropic, models: vec!["claude-sonnet-4-6".into(), "claude-opus-4-7".into()],                                            base_url: None,                                                                                 needs_key: false, coming_soon: !claude_code_ready, auth_header: None, ready: claude_code_ready },
