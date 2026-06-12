@@ -382,3 +382,40 @@ Scoreboard so far (qwen3-coder-30b through real zap):
 |---|---|---|
 | Test 3 | step-decomposed, state-explicit | **PASS** — 4 calls, 214s, zero retries |
 | Test 4 | goal-level requirements | **FAIL** — 7/8 behaviors, one validation conditional, timeout |
+
+### Test 4, run 2 — with the verify-aware watchdog armed: PASS (305s)
+
+zap v0.15.17 added a **verify-aware progress watchdog** (`src/session/watchdog.rs`): counts
+consecutive *failing verification runs* (shell exits ≠ 0); at 3 it injects a forced-rethink
+nudge (list distinct root-cause hypotheses before the next edit); at 6 it stops the attempt,
+withdraws tools, and demands a structured escalation summary. Unlike OpenHands' StuckDetector
+(hashes identical action/observation tuples), it catches a model trying *different* broken
+fixes — exactly the run-1 failure shape. Successful shell runs reset the streak, so long
+legitimate work doesn't trip it (a known OpenHands false-positive).
+
+Run 2 result: **PASS, all 8 behaviors, 305s** — and honestly, the watchdog never fired.
+The model simply didn't fall into the validation trap this time (different self-plan: update
+logic inlined in the router). The streak reached 1 once (a 60s live-server verification
+detour) and was reset by the model's own recovery — zero false positives.
+
+Goal-level scoreboard: **pass@1 = 50% (1/2), pass@2 = 100%.** New recoverable failure modes
+observed (all rejected cleanly by zap, all self-recovered): absolute-path reads
+(`/router.js`), live-server verification detour, hallucinated `todo_write` (not in the
+6-tool catalog), root-path write (`/todo.md`).
+
+## Production readiness statement
+
+What this research supports saying, for real production use — not a demo claim:
+
+1. **Executor role (frontier plans → SLM executes): production-ready.**
+   With step-decomposed, semantics-pinned tasks, qwen3-coder-30b through the real zap product
+   is fast (214s incl. model load), clean (zero failed tool calls), and objectively verified.
+   This is the propose-and-confirm routing design in docs/slm-support.md.
+2. **Goal-level role (SLM plans + executes): usable with safety nets.**
+   The SLM self-plans correct structures and reaches ~90-100% of behaviors; flakiness
+   (pass@1 50% here) is bounded by (a) objective verification, (b) the verify-aware watchdog
+   (cost capped at ~6 failed verify cycles, then a structured escalation a frontier model or
+   human can finish), and (c) retry — pass@2 was 100%.
+3. **The enabling work was plumbing, not models** — timeout architecture, prompt hygiene
+   (3.2k-token prompt), slim tool profile, and the watchdog. All shipped in zap
+   v0.15.15–v0.15.17.

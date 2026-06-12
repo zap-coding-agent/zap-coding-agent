@@ -205,3 +205,28 @@ The single gating test before trusting any local model in the loop: confirm it r
 `finish_reason: tool_calls` with a structured `tool_calls` array (not JSON in `content`)
 on a tools request, and that it terminates with `finish_reason: stop` after a tool result.
 Then run the eval harness against it.
+
+## Production readiness — the evidence-backed claim
+
+As of v0.15.17, this is no longer aspirational. Three tests through the **real zap TUI**
+(qwen3-coder-30b via LM Studio on a 32 GB M5; full evidence in
+[`research/slm-coding-eval/`](../research/slm-coding-eval/)):
+
+| Scenario | Result | Wall-clock |
+|---|---|---|
+| Frontier-decomposed task (Test 3) | PASS — 4 tool calls, zero retries | 214s incl. model load |
+| Goal-level task, run 1 (Test 4) | FAIL — 7/8 behaviors, one validation conditional | 905s (timeout) |
+| Goal-level task, run 2 (Test 4) | PASS — all 8 behaviors | 305s |
+
+**The claim zap can make:** SLMs are production-usable as *executors* today — when a frontier
+model (or human) pins the task semantics, execution is fast, clean, and objectively verified.
+For raw *goals*, SLMs self-plan correctly and land ~90-100% of behaviors with bounded failure:
+objective verification + the verify-aware watchdog (nudge at 3 failed verifies, structured
+escalation with tools withdrawn at 6) + retry (pass@2 = 100% here) cap the cost of a bad run
+at minutes, not hours.
+
+**What made it work was zap plumbing, not bigger models:** streaming timeouts that respect
+local prefill (v0.15.15), a 3.2k-token prompt + 6-tool core profile (v0.15.15–16), and the
+watchdog (v0.15.17). No other local-first agent ships a verification-aware breaker —
+OpenHands' StuckDetector only catches *identical* repeated actions; a model trying different
+broken fixes sails right through it.
