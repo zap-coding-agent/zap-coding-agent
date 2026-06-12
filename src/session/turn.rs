@@ -236,6 +236,8 @@ impl Session {
         };
         self.messages.push(user_msg);
         self.turn_count += 1;
+        self.failed_verify_streak = 0;
+        self.verify_escalated = false;
         audit::record(&format!("user_turn: {}", input))?;
 
         if self.turn_count == 1 {
@@ -278,7 +280,13 @@ impl Session {
             let turn_tools = select_tools_for_turn(
                 &self.tool_defs, input, &self.config, &self.messages,
             );
-            let effective_tools: &[serde_json::Value] = if is_casual { &[] } else { &turn_tools };
+            // After a watchdog escalation, withdraw tools — the model can only
+            // write its escalation summary, not keep editing.
+            let effective_tools: &[serde_json::Value] = if is_casual || self.verify_escalated {
+                &[]
+            } else {
+                &turn_tools
+            };
             let effective_msgs_owned: Vec<Message> = if is_casual {
                 self.messages.last().cloned().into_iter().collect()
             } else {

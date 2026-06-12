@@ -6,6 +6,7 @@ mod preview;
 mod summarizer;
 mod tools;
 mod turn;
+mod watchdog;
 
 #[cfg(test)]
 mod agent_loop_tests;
@@ -152,6 +153,12 @@ pub struct Session {
     /// Message index marking the start of the previous context window.
     /// Used to detect which turns newly slid off and need summarization.
     pub last_window_start: usize,
+    /// Consecutive failing verification (shell) runs this turn — verify-aware
+    /// progress watchdog. Reset on shell success and at each new user turn.
+    pub failed_verify_streak: u32,
+    /// Set when the watchdog escalates: tools are withdrawn for the rest of
+    /// the turn so the model can only write its escalation summary.
+    pub verify_escalated: bool,
 }
 
 impl Session {
@@ -416,6 +423,8 @@ impl Session {
             skill_trace: Vec::new(),
             dropped_summary: String::new(),
             last_window_start: 0,
+            failed_verify_streak: 0,
+            verify_escalated: false,
         })
     }
 

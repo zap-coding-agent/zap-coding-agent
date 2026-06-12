@@ -87,6 +87,8 @@ impl Session {
             dropped_summary: String::new(),
             last_window_start: 0,
             edited_files: std::collections::HashMap::new(),
+            failed_verify_streak: 0,
+            verify_escalated: false,
         })
     }
 }

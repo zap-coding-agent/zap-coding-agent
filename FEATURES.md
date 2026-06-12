@@ -7,6 +7,15 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### Verify-aware progress watchdog (v0.15.17)
+Bounds the cost of a stuck agent. Counts consecutive failing verification runs (shell exit ≠ 0) within a turn — catches a model trying *different* broken fixes, which identical-action loop detectors (OpenHands StuckDetector) miss. Born from SLM research Test 4: 13 minutes of methodical-but-fruitless debugging on one conditional.
+
+| Feature | File | Notes |
+|---|---|---|
+| Streak tracking | `src/session/watchdog.rs`, `src/session/tools.rs` | Failing `shell` results increment; any successful shell resets (no false positives on long legitimate work). `AGENT_VERIFY_BREAKER_N` (default 3, 0 disables) |
+| Rethink nudge (streak = N) | `src/session/watchdog.rs` | Injected into the failing tool result: stop editing, list 2-3 distinct root-cause hypotheses (incl. conditional/validation classes), test one directly |
+| Escalation (streak = 2N) | `src/session/turn.rs` | Tools withdrawn for the rest of the turn; model must write a structured handoff summary (works/fails/files/hypotheses ruled out). User sees ⚠ watchdog warnings in TUI + REPL |
+
 ### Skill prompt-bloat guardrails (v0.15.16)
 External skill collections (Claude/Kiro-style SKILL.md) used to be classified always-on — mounting `~/.claude/skills` injected ~28k tokens into EVERY prompt, silently taxing cloud cost and making local models unusable. Verified: with 63 foreign skills mounted, the system prompt stays at ~3.2k tokens.
 

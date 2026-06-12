@@ -329,12 +329,53 @@ impl Session {
                 }
             }
         });
-        let new_results = join_all(exec_futures).await;
+        let mut new_results = join_all(exec_futures).await;
 
         // Fire PostToolUse hooks (informational — cannot block).
         for ((name, input), result) in approved_meta.iter().zip(new_results.iter()) {
             if let ContentBlock::ToolResult { content, .. } = result {
                 self.hooks.fire_post_tool_use(name, input, content);
+            }
+        }
+
+        // Verify-aware watchdog: track consecutive failing shell runs and
+        // intervene (nudge, then escalate) when verification never goes green.
+        let breaker_n = super::watchdog::breaker_n();
+        for ((name, _), result) in approved_meta.iter().zip(new_results.iter_mut()) {
+            let ContentBlock::ToolResult { content, .. } = result else { continue };
+            if name != "shell" { continue }
+            if super::watchdog::is_failed_verify(name, content) {
+                self.failed_verify_streak += 1;
+                match super::watchdog::assess(self.failed_verify_streak, breaker_n) {
+                    super::watchdog::WatchdogVerdict::Nudge => {
+                        content.push_str(&super::watchdog::nudge_text(self.failed_verify_streak));
+                        let note = format!(
+                            "⚠ watchdog: {} failing verification runs — forcing a rethink before more edits",
+                            self.failed_verify_streak
+                        );
+                        if crate::tui::channel::is_tui_mode() {
+                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(note));
+                        } else {
+                            crate::zap_warn!("{}", note);
+                        }
+                    }
+                    super::watchdog::WatchdogVerdict::Escalate => {
+                        content.push_str(&super::watchdog::escalate_text(self.failed_verify_streak));
+                        self.verify_escalated = true;
+                        let note = format!(
+                            "⚠ watchdog: {} failing verification runs — stopping this attempt, requesting escalation summary",
+                            self.failed_verify_streak
+                        );
+                        if crate::tui::channel::is_tui_mode() {
+                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(note));
+                        } else {
+                            crate::zap_warn!("{}", note);
+                        }
+                    }
+                    super::watchdog::WatchdogVerdict::Quiet => {}
+                }
+            } else {
+                self.failed_verify_streak = 0;
             }
         }
 
