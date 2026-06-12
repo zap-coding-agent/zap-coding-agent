@@ -3,11 +3,11 @@
 
 <!-- zap:auto-stats:begin -->
 ## Project
-ideas v0.15.0 · 279 files · 4335 symbols
+ideas v0.15.14 · 306 files · 4636 symbols
 
 ### Languages
   - python: 3154 symbols
-  - rust: 1179 symbols
+  - rust: 1480 symbols
   - javascript: 2 symbols
 
 ### Source modules
@@ -20,6 +20,7 @@ ideas v0.15.0 · 279 files · 4335 symbols
 
 ## Analysis
 <!-- Run `/init` for a detailed LLM-powered analysis of architecture, patterns, and key modules. -->
+
 
 
 

@@ -1,0 +1,11 @@
+scratch: /tmp/zap-test3-Ljs8tr/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+task sent 13:29:31
+WARN: never saw busy status in 60s — prompt may not have submitted
+status back to idle after 70s — turn finished
+wall-clock: 70s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test3-zap-run/results/tui-pane-20260612-132907.log
+✓ node test.js green
+✗ DELETE behavior wrong: got '404 200 404' want '204 404 404'
+✓ existing test content preserved
+RESULT: FAIL

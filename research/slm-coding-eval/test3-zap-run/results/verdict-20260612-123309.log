@@ -1,0 +1,10 @@
+scratch: /tmp/zap-test3-3ugoh5/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+task sent 12:33:31
+status back to idle after 520s — turn finished
+wall-clock: 520s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test3-zap-run/results/tui-pane-20260612-123309.log
+✓ node test.js green
+✗ DELETE behavior wrong: got '404 200 404' want '204 404 404'
+✓ existing test content preserved
+RESULT: FAIL
