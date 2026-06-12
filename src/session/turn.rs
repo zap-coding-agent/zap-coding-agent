@@ -236,7 +236,9 @@ impl Session {
         };
         self.messages.push(user_msg);
         self.turn_count += 1;
-        self.failed_verify_streak = 0;
+        self.verify_fails.clear();
+        self.agentic_round = 0;
+        self.watchdog_nudged = false;
         self.verify_escalated = false;
         audit::record(&format!("user_turn: {}", input))?;
 
@@ -248,6 +250,7 @@ impl Session {
         let mut stream_drops: u32 = 0;
         for turn in 0..MAX_TURNS {
             tracing::info!(turn = turn, "calling LLM");
+            self.agentic_round = turn;
 
             let mut spinner = if crate::tui::channel::is_tui_mode() {
                 ThinkingSpinner::noop()

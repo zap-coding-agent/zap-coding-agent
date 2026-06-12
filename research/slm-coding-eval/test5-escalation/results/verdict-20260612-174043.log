@@ -1,0 +1,11 @@
+scratch: /tmp/zap-test5-Ix1ZuE/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+task sent 17:41:05
+TIMEOUT after 908s
+wall-clock: 908s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test5-escalation/results/tui-pane-20260612-174043.log
+✗ nudge never fired
+✗ escalation never fired
+✗ no escalation summary found in pane
+✗ ran to timeout
+RESULT: FAIL (escalation drill)

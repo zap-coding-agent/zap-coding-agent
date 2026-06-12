@@ -1,0 +1,12 @@
+scratch: /tmp/zap-test6-RLHCC0/proj
+indexing project...
+  ✓ 2 file(s) · 2 symbol(s) indexed  (.zap/code.db)
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+task sent 19:25:07
+turn finished after 293s
+wall-clock: 294s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test6-structured/results/tui-pane-20260612-192459.log
+✓ test.js passes — task completed
+✓ /todos route found in app.js
+✓ finished within timeout (294s)
+RESULT: PASS (structured task)

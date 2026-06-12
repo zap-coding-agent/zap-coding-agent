@@ -1,0 +1,1 @@
+node check.js is failing. Fix parser.js so that node check.js passes and prints 'ok'. You must NOT modify check.js — it is the acceptance spec. Run node check.js after each change to verify. Keep going until it passes.

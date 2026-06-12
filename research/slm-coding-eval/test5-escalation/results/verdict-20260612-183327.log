@@ -1,0 +1,11 @@
+scratch: /tmp/zap-test5-Q4d2nF/proj
+loading qwen/qwen3-coder-30b ...
+[K[?25hError: Model loading was stopped due to insufficient system resources. Continuing to load the model would likely overload your system and cause it to freeze. If you think this is incorrect, you can adjust the model loading guardrails in settings.
+watchdog thresholds: N=3 ROUNDS=8
+task sent 18:33:35
+wall-clock: 10s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test5-escalation/results/tui-pane-20260612-183327.log
+✓ watchdog nudge injected into conversation (1× markers)
+✓ escalation directive injected
+✗ no escalation summary found in pane
+✓ attempt ended before timeout (10s — bounded cost)
+RESULT: FAIL (escalation drill)

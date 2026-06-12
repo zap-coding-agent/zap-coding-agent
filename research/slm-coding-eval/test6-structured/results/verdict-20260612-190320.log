@@ -1,0 +1,42 @@
+scratch: /tmp/zap-test6-kCcl1U/proj
+starting server...
+server up on :3456
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+task sent 19:03:32
+wall-clock: 139s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test6-structured/results/tui-pane-20260612-190320.log
+✗ test.js does NOT pass
+node:internal/process/promises:332
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1193:18)
+    at afterConnectMultiple (node:net:1783:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:3456
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3456
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:3456
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3456
+    }
+  ]
+}
+
+Node.js v25.9.0
+✓ /todos route found in app.js
+✓ finished within timeout (139s)
+RESULT: FAIL (structured task)

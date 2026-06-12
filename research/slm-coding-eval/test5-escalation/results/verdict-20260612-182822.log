@@ -1,0 +1,12 @@
+scratch: /tmp/zap-test5-k0qUiy/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+watchdog thresholds: N=3 ROUNDS=8
+task sent 18:28:40
+turn finished after 292s
+wall-clock: 292s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test5-escalation/results/tui-pane-20260612-182822.log
+✓ watchdog nudge injected into conversation (1× markers)
+✓ escalation directive injected
+✗ no escalation summary found in pane
+✓ attempt ended before timeout (292s — bounded cost)
+RESULT: FAIL (escalation drill)

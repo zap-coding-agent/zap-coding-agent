@@ -1,13 +1,22 @@
 /// Verify-aware progress watchdog.
 ///
-/// Counts consecutive FAILING verification runs (shell commands that exit
-/// non-zero or error) within a single user turn. Unlike identical-action loop
-/// detectors (OpenHands-style), this catches a model trying DIFFERENT broken
-/// fixes: the actions vary, but the verification signal never goes green.
+/// Tracks failures PER VERIFICATION COMMAND: the same shell command (normalized)
+/// failing N times within a turn without ever passing is the stuck signal.
+/// Unlike identical-action loop detectors (OpenHands-style), this catches a
+/// model trying DIFFERENT broken fixes between runs — the edits vary, but the
+/// same verify command keeps failing. And unlike a global consecutive-failure
+/// streak, interleaved successful diagnostics (exit-0 traces, greps, file
+/// reads via shell) do NOT mask the signal: only the failing command itself
+/// passing clears its counter.
 ///
-/// Stages:
-/// - streak == N      → nudge: stop editing, list hypotheses, test one directly
-/// - streak == 2 * N  → escalate: write a handoff summary, tools withdrawn
+/// Frontier-model safety: normal work is untouched. TDD red→green clears the
+/// counter on green; diagnostic commands don't count; only "same command,
+/// N straight failures, never passed" triggers — a state where intervention
+/// is justified for any model.
+///
+/// Stages (per command):
+/// - fails == N      → nudge: stop editing, list hypotheses, test one directly
+/// - fails == 2 * N  → escalate: write a handoff summary, tools withdrawn
 ///
 /// N defaults to 3; configurable via AGENT_VERIFY_BREAKER_N (0 disables).
 
@@ -15,6 +24,10 @@
 pub enum WatchdogVerdict {
     Quiet,
     Nudge,
+    /// An outstanding failing verification hasn't been re-run for R rounds —
+    /// the model is wandering (probing with one-off commands) instead of
+    /// re-verifying. Tell it to re-run the real check now.
+    StaleNudge,
     Escalate,
 }
 
@@ -25,6 +38,17 @@ pub fn breaker_n() -> u32 {
         .unwrap_or(3)
 }
 
+/// Rounds (LLM calls) an outstanding failure may go un-re-verified before the
+/// staleness nudge; 2× this escalates. Evasion-proof complement to the
+/// per-command fail count: a model that stops re-running the acceptance check
+/// can't dodge the clock.
+pub fn breaker_rounds() -> usize {
+    std::env::var("AGENT_VERIFY_BREAKER_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8)
+}
+
 /// A shell result counts as a failed verification when the command exited
 /// non-zero (shell tool appends "[exit code: N]") or errored outright.
 pub fn is_failed_verify(tool_name: &str, content: &str) -> bool {
@@ -32,17 +56,46 @@ pub fn is_failed_verify(tool_name: &str, content: &str) -> bool {
         && (content.contains("[exit code:") || content.starts_with("Error:"))
 }
 
-pub fn assess(streak: u32, n: u32) -> WatchdogVerdict {
+/// Normalize a shell command so trivial whitespace differences map to the
+/// same failure counter.
+pub fn normalize_cmd(cmd: &str) -> String {
+    cmd.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Combined verdict for an outstanding failing command: fail-count thresholds
+/// (precise) plus staleness-in-rounds (evasion-proof). `nudged` suppresses
+/// repeat nudges within a turn.
+pub fn assess_outstanding(
+    fails: u32,
+    rounds_outstanding: usize,
+    n: u32,
+    r: usize,
+    nudged: bool,
+) -> WatchdogVerdict {
     if n == 0 {
         return WatchdogVerdict::Quiet;
     }
-    if streak == 2 * n {
-        WatchdogVerdict::Escalate
-    } else if streak == n {
-        WatchdogVerdict::Nudge
-    } else {
-        WatchdogVerdict::Quiet
+    if fails >= 2 * n || (r > 0 && rounds_outstanding >= 2 * r) {
+        return WatchdogVerdict::Escalate;
     }
+    if !nudged {
+        if fails >= n {
+            return WatchdogVerdict::Nudge;
+        }
+        if r > 0 && rounds_outstanding >= r {
+            return WatchdogVerdict::StaleNudge;
+        }
+    }
+    WatchdogVerdict::Quiet
+}
+
+pub fn stale_nudge_text(cmd: &str, rounds: usize) -> String {
+    format!(
+        "\n\n[zap watchdog] The verification command `{cmd}` failed earlier and has NOT been \
+         re-run for {rounds} rounds. One-off probe commands are not verification. Re-run \
+         `{cmd}` NOW. If it still fails, stop and reconsider whether the requirements are \
+         even mutually satisfiable before editing further."
+    )
 }
 
 pub fn nudge_text(streak: u32) -> String {
@@ -80,17 +133,27 @@ mod tests {
     }
 
     #[test]
-    fn thresholds() {
-        assert_eq!(assess(2, 3), WatchdogVerdict::Quiet);
-        assert_eq!(assess(3, 3), WatchdogVerdict::Nudge);
-        assert_eq!(assess(4, 3), WatchdogVerdict::Quiet); // nudge fires once
-        assert_eq!(assess(6, 3), WatchdogVerdict::Escalate);
-        assert_eq!(assess(7, 3), WatchdogVerdict::Quiet);
+    fn command_normalization() {
+        assert_eq!(normalize_cmd("node  test.js"), normalize_cmd("node test.js"));
+        assert_eq!(normalize_cmd("  node test.js \n"), "node test.js");
+        assert_ne!(normalize_cmd("node test.js"), normalize_cmd("node check.js"));
     }
 
     #[test]
-    fn disabled_with_zero() {
-        assert_eq!(assess(3, 0), WatchdogVerdict::Quiet);
-        assert_eq!(assess(0, 0), WatchdogVerdict::Quiet);
+    fn outstanding_combines_fails_and_staleness() {
+        // fail-count path
+        assert_eq!(assess_outstanding(3, 0, 3, 8, false), WatchdogVerdict::Nudge);
+        assert_eq!(assess_outstanding(6, 0, 3, 8, false), WatchdogVerdict::Escalate);
+        // staleness path: outstanding failure, not re-run for R rounds
+        assert_eq!(assess_outstanding(1, 8, 3, 8, false), WatchdogVerdict::StaleNudge);
+        assert_eq!(assess_outstanding(1, 16, 3, 8, false), WatchdogVerdict::Escalate);
+        // nudged suppresses repeat nudges but never escalation
+        assert_eq!(assess_outstanding(4, 0, 3, 8, true), WatchdogVerdict::Quiet);
+        assert_eq!(assess_outstanding(1, 9, 3, 8, true), WatchdogVerdict::Quiet);
+        assert_eq!(assess_outstanding(6, 0, 3, 8, true), WatchdogVerdict::Escalate);
+        // healthy: low fails, recently re-run
+        assert_eq!(assess_outstanding(1, 2, 3, 8, false), WatchdogVerdict::Quiet);
+        // disabled
+        assert_eq!(assess_outstanding(10, 99, 0, 8, false), WatchdogVerdict::Quiet);
     }
 }

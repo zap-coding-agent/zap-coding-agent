@@ -1,0 +1,11 @@
+scratch: /tmp/zap-test5-eshF9q/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+task sent 18:04:00
+turn finished after 396s
+wall-clock: 396s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test5-escalation/results/tui-pane-20260612-180338.log
+✗ no watchdog injection found in conversation
+✗ escalation never fired
+✓ model produced an escalation/impossibility summary
+✓ attempt ended before timeout (396s — bounded cost)
+RESULT: FAIL (escalation drill)

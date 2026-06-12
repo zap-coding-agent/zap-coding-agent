@@ -1,0 +1,10 @@
+scratch: /tmp/zap-test6-AeSb19/proj
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+task sent 19:06:34
+TIMEOUT after 305s
+wall-clock: 305s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test6-structured/results/tui-pane-20260612-190626.log
+✓ test.js passes — task completed
+✓ /todos route found in app.js
+✗ timeout
+RESULT: FAIL (structured task)

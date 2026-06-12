@@ -338,44 +338,72 @@ impl Session {
             }
         }
 
-        // Verify-aware watchdog: track consecutive failing shell runs and
-        // intervene (nudge, then escalate) when verification never goes green.
+        // Verify-aware watchdog. Two stuck signals, both per verification
+        // command: (a) the same command failing N times — catches a model
+        // trying DIFFERENT broken fixes; (b) an outstanding failure not re-run
+        // for R rounds — catches a model wandering in exit-0 probe commands
+        // instead of re-verifying. A command passing clears its entry, so
+        // healthy work (TDD red→green, diagnostics, long builds with periodic
+        // re-verifies) never trips it.
         let breaker_n = super::watchdog::breaker_n();
-        for ((name, _), result) in approved_meta.iter().zip(new_results.iter_mut()) {
+        let breaker_r = super::watchdog::breaker_rounds();
+        for ((name, input), result) in approved_meta.iter().zip(new_results.iter_mut()) {
             let ContentBlock::ToolResult { content, .. } = result else { continue };
             if name != "shell" { continue }
+            let Some(cmd) = input["command"].as_str() else { continue };
+            let key = super::watchdog::normalize_cmd(cmd);
             if super::watchdog::is_failed_verify(name, content) {
-                self.failed_verify_streak += 1;
-                match super::watchdog::assess(self.failed_verify_streak, breaker_n) {
+                let entry = self.verify_fails.entry(key).or_insert((0, self.agentic_round));
+                entry.0 += 1;
+                entry.1 = self.agentic_round;
+            } else {
+                self.verify_fails.remove(&key);
+            }
+        }
+
+        if !self.verify_escalated && breaker_n > 0 {
+            // Assess every outstanding failure; act on the worst verdict.
+            let mut action: Option<(super::watchdog::WatchdogVerdict, String, u32, usize)> = None;
+            for (cmd, (fails, last_round)) in &self.verify_fails {
+                let stale_rounds = self.agentic_round.saturating_sub(*last_round);
+                let verdict = super::watchdog::assess_outstanding(
+                    *fails, stale_rounds, breaker_n, breaker_r, self.watchdog_nudged,
+                );
+                let worse = matches!(verdict, super::watchdog::WatchdogVerdict::Escalate)
+                    || (action.is_none() && verdict != super::watchdog::WatchdogVerdict::Quiet);
+                if worse {
+                    let is_escalate = matches!(verdict, super::watchdog::WatchdogVerdict::Escalate);
+                    action = Some((verdict, cmd.clone(), *fails, stale_rounds));
+                    if is_escalate { break; }
+                }
+            }
+            if let Some((verdict, cmd, fails, stale_rounds)) = action {
+                let (text, note) = match verdict {
                     super::watchdog::WatchdogVerdict::Nudge => {
-                        content.push_str(&super::watchdog::nudge_text(self.failed_verify_streak));
-                        let note = format!(
-                            "⚠ watchdog: {} failing verification runs — forcing a rethink before more edits",
-                            self.failed_verify_streak
-                        );
-                        if crate::tui::channel::is_tui_mode() {
-                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(note));
-                        } else {
-                            crate::zap_warn!("{}", note);
-                        }
+                        self.watchdog_nudged = true;
+                        (super::watchdog::nudge_text(fails),
+                         format!("⚠ watchdog: `{cmd}` failed {fails}× — forcing a rethink before more edits"))
+                    }
+                    super::watchdog::WatchdogVerdict::StaleNudge => {
+                        self.watchdog_nudged = true;
+                        (super::watchdog::stale_nudge_text(&cmd, stale_rounds),
+                         format!("⚠ watchdog: `{cmd}` still failing, not re-verified for {stale_rounds} rounds"))
                     }
                     super::watchdog::WatchdogVerdict::Escalate => {
-                        content.push_str(&super::watchdog::escalate_text(self.failed_verify_streak));
                         self.verify_escalated = true;
-                        let note = format!(
-                            "⚠ watchdog: {} failing verification runs — stopping this attempt, requesting escalation summary",
-                            self.failed_verify_streak
-                        );
-                        if crate::tui::channel::is_tui_mode() {
-                            crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(note));
-                        } else {
-                            crate::zap_warn!("{}", note);
-                        }
+                        (super::watchdog::escalate_text(fails.max(1)),
+                         format!("⚠ watchdog: `{cmd}` never went green ({fails} fails, {stale_rounds} rounds stale) — stopping, requesting escalation summary"))
                     }
-                    super::watchdog::WatchdogVerdict::Quiet => {}
+                    super::watchdog::WatchdogVerdict::Quiet => unreachable!(),
+                };
+                if let Some(ContentBlock::ToolResult { content, .. }) = new_results.last_mut() {
+                    content.push_str(&text);
                 }
-            } else {
-                self.failed_verify_streak = 0;
+                if crate::tui::channel::is_tui_mode() {
+                    crate::tui::channel::tui_send(crate::tui::channel::TuiEvent::Warning(note));
+                } else {
+                    crate::zap_warn!("{}", note);
+                }
             }
         }
 

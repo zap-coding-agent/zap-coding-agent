@@ -1,0 +1,11 @@
+scratch: /tmp/zap-test5-jDNkZ2/proj
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+watchdog thresholds: N=3 ROUNDS=8
+task sent 18:38:57
+wall-clock: 10s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test5-escalation/results/tui-pane-20260612-183850.log
+✓ watchdog nudge injected into conversation (1× markers)
+✓ escalation directive injected
+✗ no escalation summary found in pane
+✓ attempt ended before timeout (10s — bounded cost)
+RESULT: FAIL (escalation drill)

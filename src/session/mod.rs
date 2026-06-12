@@ -153,9 +153,15 @@ pub struct Session {
     /// Message index marking the start of the previous context window.
     /// Used to detect which turns newly slid off and need summarization.
     pub last_window_start: usize,
-    /// Consecutive failing verification (shell) runs this turn — verify-aware
-    /// progress watchdog. Reset on shell success and at each new user turn.
-    pub failed_verify_streak: u32,
+    /// Per-command failing verification state this turn (verify-aware progress
+    /// watchdog). Keyed by normalized shell command → (fail count, round of
+    /// last failed run). Cleared when that command passes and at each new
+    /// user turn.
+    pub verify_fails: std::collections::HashMap<String, (u32, usize)>,
+    /// Current agentic round within this user turn (LLM call index).
+    pub agentic_round: usize,
+    /// A watchdog nudge has been issued this turn (suppresses repeats).
+    pub watchdog_nudged: bool,
     /// Set when the watchdog escalates: tools are withdrawn for the rest of
     /// the turn so the model can only write its escalation summary.
     pub verify_escalated: bool,
@@ -423,7 +429,9 @@ impl Session {
             skill_trace: Vec::new(),
             dropped_summary: String::new(),
             last_window_start: 0,
-            failed_verify_streak: 0,
+            verify_fails: std::collections::HashMap::new(),
+            agentic_round: 0,
+            watchdog_nudged: false,
             verify_escalated: false,
         })
     }

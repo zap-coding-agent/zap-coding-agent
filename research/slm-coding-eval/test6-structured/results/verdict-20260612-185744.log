@@ -1,0 +1,30 @@
+scratch: /tmp/zap-test6-5hl3Ut/proj
+starting server...
+server up on :3456
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+task sent 18:57:54
+wall-clock: 283s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test6-structured/results/tui-pane-20260612-185744.log
+✗ test.js does NOT pass
+node:internal/process/promises:332
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+AssertionError [ERR_ASSERTION]: /todos should return 200
+
+404 !== 200
+
+    at Timeout.run [as _onTimeout] (/private/tmp/zap-test6-5hl3Ut/proj/test.js:28:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 404,
+  expected: 200,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v25.9.0
+✓ /todos route found in app.js
+✓ finished within timeout (283s)
+RESULT: FAIL (structured task)

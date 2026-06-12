@@ -7,6 +7,7 @@ pub mod audit;
 pub mod cli;
 pub mod code_index;
 pub mod config;
+pub mod plan_execution;
 pub mod context_manager;
 pub mod context_utils;
 pub mod llm_client;

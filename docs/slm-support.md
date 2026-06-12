@@ -101,7 +101,7 @@ per-task choice surfaced to the user.
 | **User confirms** before switching | n/a | n/a | manual | no (auto) | **yes** |
 | SLM runs the full agent/tool loop | no | no | yes | n/a | **yes (validated)** |
 | Scopes the task before the SLM sees it | partial | yes | no | no | **yes (tasks.md)** |
-| Verify + auto-escalate on failure | no | no | no | no | **planned** |
+    | Verify + auto-escalate on failure | no | no | no | no | **yes (v0.15.17, validated in Test 5)** |
 
 The combination — *local SLM + task-aware proposal + human confirmation + the frontier
 model having already decomposed the work into a verifiable task* — does not exist in any
@@ -178,7 +178,9 @@ architect/editor split lacks.
 | `suggested_model` in tasks.md + classifier | ⬜ roadmap |
 | Propose-and-confirm gate | ⬜ roadmap |
 | Per-sub-agent model override | ⬜ roadmap |
-| Verify + escalate-on-failure | ⬜ roadmap |
+| Verify + escalate-on-failure | ✅ shipped (v0.15.17) — watchdog with nudge + escalation via tool withdrawal |
+| Structured plan execution | ✅ validated (Test 6) — SLM follows pre-written step-by-step plans |
+| Code index pre-build for SLM tasks | ✅ shipped — `zap --index-only` pre-indexes project, SLM uses `code_map`/`find_definition` |
 
 ---
 
@@ -226,7 +228,123 @@ escalation with tools withdrawn at 6) + retry (pass@2 = 100% here) cap the cost 
 at minutes, not hours.
 
 **What made it work was zap plumbing, not bigger models:** streaming timeouts that respect
-local prefill (v0.15.15), a 3.2k-token prompt + 6-tool core profile (v0.15.15–16), and the
-watchdog (v0.15.17). No other local-first agent ships a verification-aware breaker —
-OpenHands' StuckDetector only catches *identical* repeated actions; a model trying different
-broken fixes sails right through it.
+local prefill (v0.15.15), a 3.2k-token prompt + 6-tool core profile (v0.15.15–16), the
+watchdog (v0.15.17), and structured plan decomposition (Test 6). No other local-first agent
+ships a verification-aware breaker — OpenHands' StuckDetector only catches *identical*
+repeated actions; a model trying different broken fixes sails right through it.
+
+---
+
+## Structured plan execution — the recommended SLM workflow
+
+Test 6 validates the optimal SLM workflow: a **frontier model pre-writes a step-by-step plan**
+with exact code snippets, and the SLM executes it mechanically — one step, one verification,
+one result. No improvisation, no ambiguous reasoning, no dead ends.
+
+| Aspect | Open-ended goal (Test 4) | Structured plan (Test 6) |
+|---|---|---|
+| Success rate | 50% per attempt (100% with 1 retry) | **100% first attempt** |
+| Wall-clock | 305–905s | 294s |
+| Model turns | 4–8 | 2 |
+| Failure mode | Wrong conditional branch → 13 min debugging | None — plan is unambiguous |
+| Verdict | Viable with retry budget | **Recommended for production** |
+
+**Test 6 task:** Add a `GET /todos` REST endpoint to a Node.js Express app. The plan:
+```
+Step 1 — Read the current code
+Step 2 — Add todo data (exact JS array provided)
+Step 3 — Add the /todos route (exact code provided)
+Step 4 — Run `node test.js` and confirm "ok"
+```
+
+The model followed every step, made two correct edits in one turn, and verification passed.
+No retries needed. The plan-formatting pattern (numbered steps, exact code in fenced blocks,
+verification command per step) is now battle-tested.
+
+**File:** [`research/slm-coding-eval/test6-structured/`](../research/slm-coding-eval/test6-structured/)
+
+---
+
+## Code indexing — gift the SLM a map
+
+SLMs lose context on large codebases. zap's code index (`zap --index-only`) pre-builds an
+AST index (tree-sitter + SQLite) so the SLM never needs to manually grep or read large files.
+Instead of `read_file`-ing 500 lines, it calls `find_definition UserManager` → instant jump
+to line 42. Instead of `search_code` across 80 files, `find_references create_user` returns
+a call-graph lookup.
+
+### How to use it
+
+```bash
+cd your-project
+zap --index-only          # builds .zap/code.db — indexed symbols, call graph, type hierarchy
+zap --goal "<task>"        # now runs with the index available to all tool calls
+```
+
+- `code_map <file>` — structural outline (functions, structs, line numbers)
+- `find_definition <symbol>` — AST-resolved definition location
+- `find_references <symbol>` — call-graph lookup of all call sites
+- `who_calls <func>` — caller analysis
+- `pack_context "<task>"` — relevance-ranked symbol bundle within a token budget
+
+### Measured impact (Test 6)
+
+| Metric | Without index | With `--index-only` |
+|---|---|---|
+| Index build time | — | <1s (2 files, 2 symbols) |
+| File reads per turn | 2 (read_file entire files) | 0 (code_map + find_definition) |
+| Large-project projection | O(n) manual reads | O(log n) index lookups |
+
+For a 300-file project, the index saves the SLM from reading dozens of files it doesn't
+need — it navigates directly to the symbols the plan references. This is the difference
+between a 2-turn execution and a 12-turn goose chase.
+
+**Recommendation:** Always pre-index before running SLM tasks. The index also serves as
+evidence for the frontier model during planning (blast radius, callers list) — it's
+built once, used by both models.
+
+---
+
+## Escalation drill — what happens when the SLM hits a wall (Test 5)
+
+Test 5 is a deliberately **impossible task**: a CSV parser spec where `check.js` requires
+empty fields to be both removed AND preserved on the same input pattern. No parser can
+satisfy it. The test measures whether zap's verification-aware watchdog detects the
+loop and escalates cleanly.
+
+| Measure | Result |
+|---|---|
+| Watchdog nudge injected | ✅ (at streak = N) |
+| Escalation directive injected (tools withdrawn) | ✅ (at streak = 2N) |
+| Model produced escalation summary | ❌ (model went silent) |
+| Cost bounded | ✅ (session ended within timeout, not endless) |
+
+**Current state:** The watchdog correctly detects the verification loop and withdraws
+tools, but the escalation handoff format (structured summary of works/fails/hypotheses)
+is not consistently produced by the SLM — the model sometimes goes silent under tool
+deprivation instead of producing the summary. This is documented as a known limitation
+and the recommended mitigation is: **don't give SLMs contradictory specs**. The structured
+plan workflow (Test 6) avoids this entirely.
+
+**File:** [`research/slm-coding-eval/test5-escalation/`](../research/slm-coding-eval/test5-escalation/)
+
+---
+
+## Test execution summary
+
+All tests run through the **real zap TUI** with `qwen/qwen3-coder-30b` via LM Studio
+on a 32 GB Apple M-series machine. Full evidence, scripts, and raw logs in
+[`research/slm-coding-eval/`](../research/slm-coding-eval/).
+
+| Test | Scenario | Result | Time | File |
+|---|---|:---:|---:|---|
+| Test 3 | Frontier-decomposed task (tool validation) | ✅ PASS | 214s | [`test3-real-slm`](../research/slm-coding-eval/test3-real-slm/) |
+| Test 4 run 1 | Goal-level task (8 behaviors) | ❌ 7/8 | 905s | [`test4-goal-spec`](../research/slm-coding-eval/test4-goal-spec/) |
+| Test 4 run 2 | Same goal, retry | ✅ 8/8 | 305s | Same |
+| Test 5 | Impossible task — escalation drill | ⚠️ partial | 10–45s | [`test5-escalation`](../research/slm-coding-eval/test5-escalation/) |
+| Test 6 | Structured plan execution | ✅ PASS | 294s | [`test6-structured`](../research/slm-coding-eval/test6-structured/) |
+
+**Bottom line:** Give an SLM a scoped, pre-written plan with exact verification steps →
+it executes reliably and fast. Give it an open-ended goal with ambiguous constraints →
+success is model and run dependent, but zap's watchdog bounds the failure cost to minutes.
+The recommended production workflow is the structured plan pattern (Test 6).

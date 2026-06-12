@@ -1,0 +1,7 @@
+{
+  "name": "test6-structured",
+  "private": true,
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

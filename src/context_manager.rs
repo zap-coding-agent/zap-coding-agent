@@ -342,6 +342,8 @@ pub fn build_system_prompt_with_skills(config: &Config, skill_block: &str) -> Re
             .to_string(),
     );
 
+    sections.push(crate::plan_execution::build_plan_execution_section());
+
     // ── Agent memory (persistent key-value facts) ─────────────────────────────
     if let Ok(store) = crate::persistence::init() {
         if let Ok(entries) = store.all_memory() {
@@ -593,5 +595,13 @@ mod tests {
     fn casual_prompt_omits_tool_policy() {
         let prompt = build_casual_system_prompt(&Config::default());
         assert!(!prompt.contains("batch_edit"), "casual prompt must not include full tool policy");
+    }
+
+    #[test]
+    fn system_prompt_contains_plan_execution() {
+        let prompt = build_system_prompt(&Config::default()).unwrap();
+        assert!(prompt.contains("Plan Execution"), "system prompt must include plan execution section");
+        assert!(prompt.contains("Verification is non-negotiable"), "must include verification rule");
+        assert!(prompt.contains("edits between verification runs is forbidden"), "must forbid stacked edits");
     }
 }

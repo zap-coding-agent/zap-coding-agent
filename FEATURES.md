@@ -16,6 +16,27 @@ Bounds the cost of a stuck agent. Counts consecutive failing verification runs (
 | Rethink nudge (streak = N) | `src/session/watchdog.rs` | Injected into the failing tool result: stop editing, list 2-3 distinct root-cause hypotheses (incl. conditional/validation classes), test one directly |
 | Escalation (streak = 2N) | `src/session/turn.rs` | Tools withdrawn for the rest of the turn; model must write a structured handoff summary (works/fails/files/hypotheses ruled out). User sees ⚠ watchdog warnings in TUI + REPL |
 
+
+### Structured plan execution for SLMs (v0.15.18)
+A frontier model pre-writes a step-by-step plan; an SLM executes it mechanically — one step, one verification, one result. Validated in Test 6.
+
+| Feature | File | Notes |
+|---|---|---|
+| Plan execution system prompt | `src/context_manager.rs` | "Plan Execution (for Pre-Written Task Plans)" section: read all steps first, execute one at a time, verify after every edit, hard stop after 2 failures |
+| Plan execution test | `src/context_manager.rs` (tests) | `system_prompt_contains_plan_execution` test — verifies the section and key rules are in the prompt |
+| Structured task test (Test 6) | `research/slm-coding-eval/test6-structured/` | SLM follows a pre-written 4-step plan to add a REST endpoint, passes verification in 2 turns, 294s wall-clock. 100% first-attempt success vs. 50% for open-ended goals |
+
+### Pre-index for SLM tasks (v0.15.18)
+`zap --index-only` pre-builds the AST index (tree-sitter + SQLite) so the SLM uses `code_map`/`find_definition`/`find_references` instead of manual file reads. Documented in `docs/slm-support.md`.
+
+### Escalation drill (Test 5)
+Deliberately impossible task validates the watchdog detects verification loops and escalates. Watchdog nudge + tool-withdrawal works; escalation summary production is inconsistent (known limitation). Mitigation: use structured plans, not contradictory specs.
+
+| File | Description |
+|---|---|
+| `research/slm-coding-eval/test5-escalation/` | Contradictory CSV parser spec — watchdog validates, escalation handoff inconsistent |
+| `research/slm-coding-eval/test6-structured/` | Structured plan execution — SLM follows pre-written plan, 100% success |
+
 ### Skill prompt-bloat guardrails (v0.15.16)
 External skill collections (Claude/Kiro-style SKILL.md) used to be classified always-on — mounting `~/.claude/skills` injected ~28k tokens into EVERY prompt, silently taxing cloud cost and making local models unusable. Verified: with 63 foreign skills mounted, the system prompt stays at ~3.2k tokens.
 

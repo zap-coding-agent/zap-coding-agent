@@ -1,0 +1,5 @@
+scratch: /tmp/zap-test5-qRrgNw/proj
+loading qwen/qwen3-coder-30b ...
+model already loaded, skipping load
+watchdog thresholds: N=3 ROUNDS=8
+task sent 18:43:13
