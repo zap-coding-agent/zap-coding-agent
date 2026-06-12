@@ -331,3 +331,54 @@ with richer tools and zero scaffolding tweaks. The candidate fixes the handoff f
 produced a failing tool call through zap's real tool implementations.
 
 Caveat: `n = 1` task through the TUI; the Test-1/2 caveats (variance, bigger repos) still apply.
+
+---
+
+## Test 4 — level up: goal-level spec, no step decomposition
+
+Same model, same product (zap v0.15.16 TUI), harder brief: a requirements-style spec for
+`PATCH /tasks/:id` with body validation (title: non-empty string, completed: boolean,
+400 on invalid, 404 on missing, tests, suite green) ending with "Decide yourself which
+files to change and how." No files named, no steps. Assets: [`test4-goal-level/`](test4-goal-level/).
+
+**Verdict: FAIL (timeout at 905s) — but 7 of 8 behaviors correct, and the failure is a
+single subtle conditional.**
+
+What the SLM did unprompted (all of which Test 3 had to prescribe):
+- explored (`list_directory`, read all 4 files), then self-planned the right structure:
+  `store.update()` + router PATCH handler + test extension — identical shape to the
+  frontier-authored Test 3 plan
+- implemented validation: invalid-title 400 ✓, invalid-completed 400 ✓, empty-body 400 ✓,
+  unknown-id 404 ✓, completed-update 200 ✓, existing routes untouched ✓, tests extended ✓
+- ran the suite, saw the failure, and debugged methodically for ~13 minutes: re-ran the
+  suite, isolated the exact failing case (PATCH with title), bisected store vs router,
+  added trace logging — never thrashed, every tool call succeeded
+
+The one bug it could not see (router.js):
+```js
+if (body && typeof body.completed !== 'boolean') {   // absent ⇒ 'undefined' ⇒ 400
+  return { status: 400, json: { error: 'invalid body' } };
+}
+```
+Rejecting *absent* optional fields instead of *present-but-invalid* ones. `PATCH {title}`
+→ 400. The fix is `'completed' in body && …` — a one-liner a frontier model spots on sight.
+It stared at this conditional repeatedly and kept debugging *around* it.
+
+### Findings
+1. **Self-planning works; subtle semantics don't.** The decomposition gap between Test 3
+   and Test 4 was NOT the problem — the SLM derived the same plan on its own. The failure
+   was a semantic blind spot (absent vs invalid optional field), exactly the kind of detail
+   the Test-2 lesson says the frontier must specify ("validate completed ONLY IF present").
+2. **The debugging loop needs a circuit breaker.** ~10 debug/edit cycles on the same failing
+   assertion without convergence, then timeout. The handoff's proposed "N consecutive failed
+   verifies → stop & escalate" is now evidence-backed: an escalation to the frontier (or the
+   user) at cycle 3–4 would have saved 10 minutes and shipped a fix.
+3. **Cost of one level of autonomy:** prescribed steps = 4 tool calls / 214s / PASS.
+   Goal-level = ~30 tool calls / 905s / 7-of-8. The frontier-decomposition requirement is
+   not about *planning* — it is about *pinning semantics that are easy to get subtly wrong*.
+
+Scoreboard so far (qwen3-coder-30b through real zap):
+| Level | Brief style | Result |
+|---|---|---|
+| Test 3 | step-decomposed, state-explicit | **PASS** — 4 calls, 214s, zero retries |
+| Test 4 | goal-level requirements | **FAIL** — 7/8 behaviors, one validation conditional, timeout |

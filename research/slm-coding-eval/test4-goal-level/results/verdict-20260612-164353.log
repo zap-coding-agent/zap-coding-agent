@@ -1,0 +1,13 @@
+scratch: /tmp/zap-test4-dD7gQO/proj
+loading qwen/qwen3-coder-30b ...
+To use the model in the API/SDK, use the identifier "qwen/qwen3-coder-30b".
+task sent 16:44:13
+TIMEOUT after 905s
+wall-clock: 905s — pane log: /Users/sanjeevgulati/personal-repos/ideas/research/slm-coding-eval/test4-goal-level/results/tui-pane-20260612-164353.log
+✗ node test.js failed: node:assert:149
+  throw new AssertionError(obj);
+  ^
+✗ PATCH behavior wrong: got '200 true 400 undefined 400 400 400 404' want '200 true 200 renamed 400 400 400 404'
+✓ existing routes still work (GET list/id, POST validation)
+✓ tests extended, existing content preserved
+RESULT: FAIL
