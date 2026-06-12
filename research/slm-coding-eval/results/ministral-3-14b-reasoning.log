@@ -1,0 +1,15 @@
+    [turn 0] API ERROR: HTTP 400: {
+    "error": {
+        "message": "Failed to load model \"mistralai/ministral-3-14b-reasoning\". Error: Model loading was stopped due to insufficient system resources. Under the current settings, th
+❌ FAIL  task A  mistralai/ministral-3-14b-reasoning  (1 turns, 0 tool calls)  — multiply not in calc.js
+
+    [turn 0] API ERROR: HTTP 400: {
+    "error": {
+        "message": "Failed to load model \"mistralai/ministral-3-14b-reasoning\". Error: Model loading was stopped due to insufficient system resources. Under the current settings, th
+❌ FAIL  task B  mistralai/ministral-3-14b-reasoning  (1 turns, 0 tool calls)  — wrong output: "3 Infinity" (want '3 null')
+
+    [turn 0] API ERROR: HTTP 400: {
+    "error": {
+        "message": "Failed to load model \"mistralai/ministral-3-14b-reasoning\". Error: Model loading was stopped due to insufficient system resources. Under the current settings, th
+❌ FAIL  task C  mistralai/ministral-3-14b-reasoning  (1 turns, 0 tool calls)  — 'greet' still referenced in greet.js, main.js
+

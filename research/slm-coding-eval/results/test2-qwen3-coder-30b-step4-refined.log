@@ -1,0 +1,18 @@
+
+Test 2 — tasks REST API feature · model: qwen/qwen3-coder-30b · only step 4
+
+      [t0] list_dir({"path":"."}) -> router.js
+      [t1] read_file({"path":"test.js"}) -> const assert = require('assert');
+      [t2] edit_file({"path":"test.js","old_string":"const assert = require('assert')…","new_string":"const assert = require('assert')…"}) -> OK: edited
+      [t3] run_cmd({"command":"node test.js"}) -> exit=0
+      [t4] FINAL (stop): I've successfully added the new test assertions to test.js as requested. The changes include:
+
+1. Added `store._reset()`
+  ✅ step 4 (tests for the new behavior)  —  5 turns, 4 tools, 43.0s, 18 tok/s  —  suite green with new PATCH + filter assertions
+
+  ── summary ──
+  steps passed:   1/1
+  full suite:     ✅ green
+  total LLM time: 43.0s   ·   total output tokens: 767
+  avg throughput: 18 tok/s (incl. prompt processing)
+
