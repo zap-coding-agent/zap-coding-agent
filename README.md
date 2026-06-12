@@ -148,6 +148,18 @@ Set `GOOGLE_API_KEY` in your environment to use an API key instead.
 | `/clear` | Clear the screen |
 | `/exit` | End the session |
 
+## SLM Support
+
+Zap is the only coding agent that runs **local small language models** as first-class executors for the mechanical bulk of coding work — while frontier models handle the thinking.
+
+- **Run local models** via LM Studio, Ollama, or any OpenAI-compatible endpoint
+- **Structured plan execution** — a frontier model designs the plan, your local model executes it step-by-step (100% success rate on pre-written plans in research)
+- **Pre-indexing** — `zap --index-only` builds an AST index so SLMs navigate code with `code_map`/`find_definition` instead of slow manual reads
+- **Streaming watchdog** — tolerates long local-model prefills (minutes) with progress notices and idle detection
+- **Core tool profile** — `AGENT_TOOL_PROFILE=core` sends only 6 tool schemas, making tool-calling tractable for small models
+
+[Full SLM support docs →](docs/slm-support.md) · [Research results →](research/slm-coding-eval/)
+
 ## Security
 
 Zap has a hard security boundary:
