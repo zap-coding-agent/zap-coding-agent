@@ -278,3 +278,56 @@ node test2.mjs "qwen/qwen3-coder-30b" --only=4 --verbose
 
 lms unload --all
 ```
+
+---
+
+## Test 3 — executed by zap itself (the real product)
+
+Test 1–2 used a toy harness. Test 3 ran the same class of task — frontier-authored,
+state-explicit plan for `DELETE /tasks/:id` — through the **real zap TUI** (driven via tmux,
+`AGENT_PERMISSION_MODE=auto`), with qwen3-coder-30b on LM Studio. Assets + runbook:
+[`test3-zap-run/`](test3-zap-run/).
+
+**Verdict: PASS — but only after fixing zap.** The model was never the problem.
+
+### Run 1 (zap v0.15.14): total failure, zero tool calls
+The request died mid-prompt-processing 5× and the machine ground to a halt. Root causes,
+all in zap, none in the SLM:
+
+1. **34k-token prompt.** `skill_paths = ["~/.claude/skills"]` + "no `triggers:` → always-on"
+   classification injected 63 Claude-format skills (~28k tokens) into every prompt.
+   LM Studio prefill was still at 93% after 2¼ minutes.
+2. **120s total HTTP timeout** killed the streaming request during legitimately-silent prefill.
+3. **Flat 3s retry** re-sent the full prompt while the server was still chewing the dropped
+   one — a prefill stampede (LM Studio kept burning CPU on dead requests, eventually crashed).
+4. **Silent spinner** — nothing told the user prefill was happening.
+
+### Fixes shipped (v0.15.15 + v0.15.16)
+- Streaming idle watchdog (`AGENT_STREAM_IDLE_SECS`, default 600s) instead of total timeout;
+  first-token progress notices ("⏳ ~Nk tokens, Ns elapsed"); exponential stream-drop backoff.
+- `AGENT_TOOL_PROFILE=core` — 6 tool schemas (file ops + shell + search).
+- Foreign skills (description, no `triggers:`) are **never always-on**: classified Practice
+  with name-derived triggers. Always-on block budgeted at `skill_token_budget`. User warned
+  when skills are dropped or the block exceeds ~2k tokens.
+- Net: system prompt 34k → **3.2k tokens**, even with all 63 foreign skills mounted.
+
+### Run 2 (zap v0.15.16): clean pass, 214s wall-clock including model load
+```
+Step 1: ✓ edit_file store.js   (88ms)   — remove(id) added + exported
+Step 2: ✓ edit_file router.js  (2ms)    — DELETE /tasks/:id, 204/404
+Step 3: ✓ edit_file test.js    (41ms)   — state-explicit assertions appended
+Step 4: ✓ shell node test.js   (474ms)  — "all tests passed"
+```
+4 tool calls, zero failed edits, zero retries, zero `old_string not found` thrash. Objective
+verification: suite green, `DELETE` returns 204 → task gone (404) → missing id 404, existing
+assertions untouched.
+
+### Answer to the open question
+**Better than the hypothesis.** zap needed *code* changes, not for SLM capability but for
+SLM *latency tolerance* (timeouts/retries) and *prompt hygiene* (skill/tool budget). Once the
+plumbing respected local-model physics, zap's real harness matched the toy harness's pass —
+with richer tools and zero scaffolding tweaks. The candidate fixes the handoff flagged
+(edit-error hints, repeated-failure breaker) were **not needed** for this task: the model never
+produced a failing tool call through zap's real tool implementations.
+
+Caveat: `n = 1` task through the TUI; the Test-1/2 caveats (variance, bigger repos) still apply.
