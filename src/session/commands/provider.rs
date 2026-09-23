@@ -10,7 +10,7 @@ pub fn provider_slugs() -> Vec<&'static str> {
         "lm_studio", "ollama", "anthropic", "claude_code", "codex",
         "openai", "gemini", "deepseek", "groq", "mistral",
         "xai", "together", "perplexity", "cohere",
-        "openrouter", "kimi", "zhipu", "qwen", "fireworks", "cerebras", "opencode_zen", "custom",
+        "openrouter", "kimi", "zhipu", "qwen", "fireworks", "cerebras", "opencode_zen", "yolo-auto", "custom",
     ]
 }
 
@@ -73,6 +73,7 @@ impl Session {
             ProviderDef { slug: "fireworks",  name: "Fireworks AI",               hint: "Llama / DeepSeek / Qwen · fast inference",    kind: ProviderKind::OpenAi,    models: vec!["accounts/fireworks/models/llama-v3p3-70b-instruct".into(), "accounts/fireworks/models/deepseek-r1".into(), "accounts/fireworks/models/qwen3-235b-a22b".into(), "Other…".into()], base_url: Some("https://api.fireworks.ai/inference/v1/chat/completions"), needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderDef { slug: "cerebras",   name: "Cerebras",                   hint: "gpt-oss-120b · glm-4.7 · wafer-scale inference", kind: ProviderKind::OpenAi,    models: vec!["gpt-oss-120b".into(), "zai-glm-4.7".into(), "Other…".into()], base_url: Some("https://api.cerebras.ai/v1/chat/completions"),                needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderDef { slug: "opencode_zen", name: "OpenCode Zen (Go plan)",   hint: "grok-4.5 / glm-5.2 / kimi-k3 / deepseek-v4-pro …", kind: ProviderKind::OpenAi,    models: vec!["grok-4.5".into(), "glm-5.2".into(), "glm-5.1".into(), "kimi-k3".into(), "kimi-k2.7-code".into(), "kimi-k2.6".into(), "deepseek-v4-pro".into(), "deepseek-v4-flash".into(), "mimo-v2.5".into(), "mimo-v2.5-pro".into(), "Other…".into()], base_url: Some("https://opencode.ai/zen/go/v1/chat/completions"), needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
+            ProviderDef { slug: "yolo-auto",  name: "Yolo-Auto",                  hint: "yolo / yolo-small · OpenAI-compatible · flat-rate", kind: ProviderKind::OpenAi,    models: vec!["yolo".into(), "yolo-small".into(), "Other…".into()], base_url: Some("https://yolo-auto.com/v1/chat/completions"),          needs_key: true,  coming_soon: false, auth_header: None,       ready: false },
             ProviderDef { slug: "custom",     name: "Custom (OpenAI-compatible)", hint: "any OpenAI-compatible endpoint",               kind: ProviderKind::OpenAi,    models: vec!["Other…".into()],                                                                base_url: None,                                                                                needs_key: false, coming_soon: false, auth_header: None,       ready: false },
         ];
 
