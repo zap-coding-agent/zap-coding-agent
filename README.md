@@ -1449,4 +1449,4 @@ All providers speak the OpenAI wire format — adding one is usually just a new 
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
