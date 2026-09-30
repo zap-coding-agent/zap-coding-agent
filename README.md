@@ -731,9 +731,12 @@ First run will prompt for an API key and model. Use `/provider` to switch later.
 | Ollama | llama3, deepseek-coder | None (local) |
 | Groq | llama-3.3-70b-versatile | API key |
 | OpenRouter | (various) | API key |
+| Yolo-Auto | yolo, yolo-small | API key ([free keys](https://yolo-auto.com)) |
 | DeepSeek | deepseek-chat | API key |
 | xAI | grok-beta | API key |
 | Any OpenAI-compatible | — | API key or none |
+
+Yolo-Auto is OpenAI-compatible: set `base_url` to `https://yolo-auto.com/v1/chat/completions` and use a `yolo_...` key. The model catalog for your key is discoverable at `https://yolo-auto.com/v1/models` — zap's model picker and `/models` read it automatically.
 
 ---
 
