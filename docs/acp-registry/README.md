@@ -4,21 +4,14 @@ Files for listing zap in the [ACP Registry](https://github.com/agentclientprotoc
 which Zed and JetBrains use for one-click agent installs. `zap/agent.json`
 validates against the registry's `agent.schema.json`.
 
-## Submitting (after the v0.16.3 GitHub release exists)
+## Status
 
-1. Check the archive URLs in `zap/agent.json` resolve (they point at the
-   `v0.16.3` release assets).
-2. Optionally pin checksums — add `"sha256"` to each platform entry:
-   `curl -sL <archive-url> | shasum -a 256`.
-3. Fork `agentclientprotocol/registry`, copy the `zap/` folder to the repo root,
-   and open a PR. CI validates the JSON and the icon.
+Submitted as [agentclientprotocol/registry#654](https://github.com/agentclientprotocol/registry/pull/654)
+(v0.16.3, checksums pinned). Once merged, the registry picks up new GitHub
+releases automatically every hour — no PR per release.
 
-Each new zap release needs a registry PR bumping `version` and the archive URLs.
+Validated before submitting: the registry's `build_registry.py --dry-run` and
+`verify_agents.py --auth-check --agent zap` both pass, and the released macOS
+arm64 archive downloads, extracts and runs on macOS 26.
 
-## Before submitting, verify
-
-- **macOS Gatekeeper:** the registry downloads the release archive and runs
-  `./zap` directly. On macOS 26 unsigned/ad-hoc binaries downloaded by an app
-  can be killed (`Code Signature Invalid`). Install via the registry on a clean
-  Mac and confirm it launches before submitting.
-- **Windows** is intentionally not listed — `zap acp` is untested there.
+Windows is intentionally not listed — `zap acp` is untested there.

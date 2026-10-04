@@ -14,6 +14,7 @@
     "binary": {
       "darwin-aarch64": {
         "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.3/zap-macos-arm64.tar.gz",
+        "sha256": "834ad54b74581f5370d4fd02b0a81e262e73ebe7846fb63c36faa17c2bdfcb75",
         "cmd": "./zap",
         "args": [
           "acp"
@@ -21,6 +22,7 @@
       },
       "darwin-x86_64": {
         "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.3/zap-macos-x86_64.tar.gz",
+        "sha256": "37fc23f6ffd12131d4b504b9e6d90f5b2c03c6ef262c98e7902db17ce37bea74",
         "cmd": "./zap",
         "args": [
           "acp"
@@ -28,6 +30,7 @@
       },
       "linux-aarch64": {
         "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.3/zap-linux-arm64.tar.gz",
+        "sha256": "04333335c3962de237c2e6e19dcb1f4af0bad7c509fb9f23339d082c3de901a1",
         "cmd": "./zap",
         "args": [
           "acp"
@@ -35,6 +38,7 @@
       },
       "linux-x86_64": {
         "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.3/zap-linux-x86_64.tar.gz",
+        "sha256": "f005ea5560c3b07003dcc5d9a480fe0556767a9ad43cfca8a24bcb0d92b7395b",
         "cmd": "./zap",
         "args": [
           "acp"
