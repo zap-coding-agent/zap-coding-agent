@@ -7,6 +7,20 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### fix(deps): bump rustls to 0.23.45 for RUSTSEC-2026-0285 (v0.16.2 patch)
+
+CI security audit (`cargo audit`) was failing on
+[RUSTSEC-2026-0285](https://rustsec.org/advisories/RUSTSEC-2026-0285) —
+*"TLS 1.3 handshake messages incorrectly accepted across encryption level
+boundaries"* — against `rustls 0.23.40`, the TLS stack under `reqwest` (every
+LLM API call). Fixed with a lockfile-only bump `rustls 0.23.40 → 0.23.45` and
+`rustls-webpki 0.103.13 → 0.103.15` (`cargo update -p rustls`);
+semver-compatible, no code changes.
+
+**Files:** `Cargo.lock`
+
+---
+
 ### feat(acp): `zap acp` — run zap inside Zed, JetBrains and VS Code (v0.16.0 – v0.16.1)
 
 zap now speaks the [Agent Client Protocol](https://agentclientprotocol.com):
