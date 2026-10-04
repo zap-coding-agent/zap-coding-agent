@@ -4192,7 +4192,7 @@ dependencies = [
 
 [[package]]
 name = "zap-coding-agent"
-version = "0.15.142"
+version = "0.16.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",

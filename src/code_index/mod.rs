@@ -438,6 +438,13 @@ pub fn global_reindex_file(path: &Path) {
 /// Spawn a background tokio task that periodically re-indexes changed files.
 /// Interval: `ZAP_INDEX_INTERVAL` env var (seconds), default 120.
 pub fn spawn_background_indexer(cwd: PathBuf) {
+    // One indexer per directory per process — ACP mode opens a Session (and
+    // so calls this) for every editor thread.
+    static STARTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    if let Ok(mut started) = STARTED.lock() {
+        if started.contains(&cwd) { return; }
+        started.push(cwd.clone());
+    }
     tokio::spawn(async move {
         let secs = std::env::var("ZAP_INDEX_INTERVAL")
             .ok()

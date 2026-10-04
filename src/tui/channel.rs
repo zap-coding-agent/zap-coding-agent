@@ -85,7 +85,9 @@ pub enum TuiEvent {
     LlmChunk(String),
     /// A chunk of extended-thinking text (Anthropic thinking blocks).
     ThinkingChunk(String),
-    ToolStart { id: String, name: String, label: String },
+    /// `input` is the tool's raw arguments — the TUI shows only `label`; ACP
+    /// mode uses it for file locations and edit diffs.
+    ToolStart { id: String, name: String, label: String, input: serde_json::Value },
     ToolDone  { id: String, elapsed_ms: u64, success: bool, preview: String },
     CostUpdate { total_usd: f64, input: u32, output: u32, cache_read: u32 },
     ContextUpdate { pct: u8, turn: usize },

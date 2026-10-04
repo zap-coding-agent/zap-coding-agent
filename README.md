@@ -619,6 +619,7 @@ zap is the only coding agent that runs **local small language models** as first-
 
 | | |
 |---|---|
+| **Editors (ACP)** | `zap acp` — native agent in Zed, JetBrains IDEs, and VS Code (via ACP extensions): streaming replies, tool calls with diffs, permission prompts, cancel, session resume |
 | **TUI** | Ratatui terminal UI — streaming output, sidebar with token counts, diff viewer (Ctrl+G), file browser (Ctrl+F), syntax highlighting |
 | **Providers** | LM Studio, Ollama, Anthropic, OpenAI, Gemini, DeepSeek, Groq, Mistral, xAI, Together AI, Perplexity, Cohere, OpenRouter + any OpenAI-compatible endpoint; per-provider settings persisted in `~/.agent.toml` |
 | **Tools** | 15 built-in — read, edit, write, batch-edit, undo, shell, search, glob, code-map, find-def, find-refs, web-fetch, web-search, spawn-agent |
@@ -966,6 +967,51 @@ ai-review:
   run: |
     zap --auto --goal "read the changed files, add docstrings where missing, and commit"
 ```
+
+---
+
+## Editor Integration (ACP) — Zed, JetBrains, VS Code
+
+`zap acp` runs zap as an [Agent Client Protocol](https://agentclientprotocol.com) agent, so editors can drive it natively: replies stream into the editor's agent panel, edits show up as diffs, and permission prompts use the editor's own Allow / Reject buttons. Same skills, code index, providers and config as the terminal UI.
+
+Set up a provider first by running `zap` once in a terminal (`/provider`).
+
+**Zed** — Agent Settings → External Agents → Add Custom Agent, or in `~/.config/zed/settings.json`:
+
+```json
+{
+  "agent_servers": {
+    "Zap": { "type": "custom", "command": "zap", "args": ["acp"] }
+  }
+}
+```
+
+Then pick **Zap** from the Agent Panel's new-thread menu. To debug, run `dev: open acp logs` from the command palette.
+
+**JetBrains IDEs** — in the AI Chat tool window, choose **Add Custom Agent**; it opens `~/.jetbrains/acp.json`:
+
+```json
+{
+  "agent_servers": {
+    "Zap": { "command": "zap", "args": ["acp"] }
+  }
+}
+```
+
+**VS Code** — no built-in ACP support yet; install an ACP client extension such as [vscode-acp-provider](https://github.com/gayanper/vscode-acp-provider) and point it at `zap` with argument `acp`.
+
+| Supported | |
+|---|---|
+| Protocol | ACP v1 (v2 is still a draft) |
+| Prompts | text, images, `@`-mentioned files (embedded or linked) |
+| Tool calls | kind, file locations, edit/write diffs, live status |
+| Permissions | Allow / Always allow / Reject, mapped onto zap's ask mode |
+| Modes | `ask`, `auto`, `read-only` — switch from the editor |
+| Sessions | new, resume (`session/load` replays history), cancel |
+| MCP | stdio MCP servers configured in the editor are added to the session (lazy-loaded) |
+| Conformance | passes the official [ACP TCK](https://github.com/agentclientprotocol/acp-tck) v1 suite (all mandatory requirements) |
+
+Limits: one prompt runs at a time per `zap acp` process, and editor file-system / terminal delegation is not used — zap edits files and runs commands itself.
 
 ---
 

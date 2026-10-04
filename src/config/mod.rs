@@ -307,6 +307,17 @@ fn resolve_provider_kind(provider_slug: &str, entry_kind: Option<&str>) -> Provi
 }
 
 impl Config {
+    /// True when the user has never set up a provider: nothing in
+    /// `~/.agent.toml` and no API-key env vars. Drives first-run onboarding.
+    pub fn no_provider_configured(&self) -> bool {
+        self.all_providers.is_empty()
+            && self.api_key.is_empty()
+            && std::env::var("AGENT_API_KEY").is_err()
+            && std::env::var("ANTHROPIC_API_KEY").is_err()
+            && std::env::var("OPENAI_API_KEY").is_err()
+            && std::env::var("GOOGLE_API_KEY").is_err()
+    }
+
     /// Priority (highest wins): env vars → ~/.agent.toml → built-in defaults.
     pub fn load() -> Result<Self> {
         let file = FileConfig::load();

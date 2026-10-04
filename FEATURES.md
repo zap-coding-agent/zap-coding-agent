@@ -7,30 +7,53 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
-### feat(acp): `zap acp` — stdio isolation + initialize handshake (ACP step 1 of 10, unreleased)
+### feat(acp): `zap acp` — run zap inside Zed, JetBrains and VS Code (v0.16.0)
 
-First step of Agent Client Protocol support, so ACP clients (Zed, JetBrains
-IDEs, VS Code via ACP extensions, Neovim, Emacs) can drive zap. Full plan in
-`docs/roadmap/acp.md`; ships as v0.16.0 once the remaining steps land.
+zap now speaks the [Agent Client Protocol](https://agentclientprotocol.com):
+`zap acp` runs it as a native agent in any ACP client — Zed, JetBrains IDEs,
+VS Code (via ACP extensions), Neovim, Emacs. Replies stream into the editor's
+agent panel, tool calls show kind / file locations / diffs, permission prompts
+use the editor's Allow / Always allow / Reject buttons, and threads can be
+cancelled and resumed. Plan and design notes: `docs/roadmap/acp.md`.
 
-`zap acp` speaks JSON-RPC over stdio using the official `agent-client-protocol`
-crate (2.2, the one Zed uses). Only **ACP v1** is implemented — v2 is still a
-draft — so a client offering v2 is answered with v1, per the spec's negotiation
-rule. `initialize` returns `agentInfo` (`zap` + version) and empty capabilities;
-sessions and prompts come in later steps.
+**Protocol:** ACP v1 via the official `agent-client-protocol` crate (2.2, the
+one Zed uses); clients offering the draft v2 are answered with v1. Methods:
+`initialize`, `authenticate`, `session/new`, `session/load` (replays the stored
+conversation), `session/prompt`, `session/cancel`, `session/set_mode`
+(`ask` / `auto` / `read-only` ↔ `PermissionMode`). Prompts accept text, images
+and `@`-mentions (embedded resources or links). Editor-configured stdio MCP
+servers are added to the session's lazy MCP pool. A `terminal` auth method
+("Set up zap" → the TUI's `/provider`) is offered only to clients that advertise
+`auth.terminal`; with no provider configured, `session/new` returns
+`auth_required`.
 
-**Stdio isolation** is the load-bearing part: zap has ~500 `println!` sites
-outside the TUI plus child processes (shell tool, LSP, MCP) that inherit fd 0/1,
-and any stray byte on stdout corrupts the protocol. Rather than auditing every
-call site, `acp::stdio::isolate()` runs first: it takes private close-on-exec
-duplicates of fd 0/1 for the protocol, points fd 1 at stderr and fd 0 at the
-null device (Unix: `fcntl(F_DUPFD_CLOEXEC)` + `dup2`; Windows: CRT `_dup`/`_dup2`,
-which also update the Win32 std handles). E2E tests cover the handshake, v2→v1
-negotiation, stdout carrying only JSON-RPC, exit on stdin EOF, and — via the
-`ZAP_ACP_TEST_STRAY_OUTPUT` hook — that a stray `println!` and a child's echo
-both land on stderr.
+**Design:**
+- `acp::stdio` — the protocol gets private close-on-exec dups of fd 0/1; fd 1 is
+  pointed at stderr and fd 0 at the null device, so zap's ~500 `println!` sites
+  and child processes (shell, LSP, MCP) can never corrupt the JSON-RPC stream.
+- `acp::worker` — a dedicated thread (own multi-threaded runtime — the
+  background indexer's `block_in_place` panics on a current-thread one) owns all
+  `Session`s. It installs itself as the consumer of `tui::channel`, exactly as
+  the TUI does, so no agent-loop changes were needed: `TuiEvent`s become
+  `session/update`s, `PERM_REQUEST` becomes `session/request_permission`, and
+  cancel drops the turn future (same as TUI Ctrl+C). The channel is
+  process-global, so prompts are serialized per process.
+- `acp::translate` — pure zap ⇄ ACP mapping (tool kinds, diffs from edit
+  arguments, todo list → `plan`, prompt flattening, history replay, MCP config).
+- `TuiEvent::ToolStart` gained an `input` field (raw tool arguments) for
+  locations and diffs; `Config::no_provider_configured()` is now shared by TUI
+  onboarding and ACP; `spawn_background_indexer` starts at most one indexer per
+  directory per process (ACP opens a `Session` per editor thread).
 
-**Files:** `src/acp/mod.rs`, `src/acp/stdio.rs`, `src/cli.rs`, `src/lib.rs`, `tests/acp_e2e.rs`, `docs/roadmap/acp.md`, `Cargo.toml`
+**Verification:** 16 unit tests (every emitted update shape round-trips through
+the crate's typed structs), 12 e2e tests that drive the real binary over stdio
+against a scripted fake OpenAI-compatible server in a temp HOME (handshake,
+stdout isolation incl. a mutation check, streaming, tool call + permission +
+diff + file written, reject, cancel within 5 s while the LLM hangs,
+`auth_required`, set_mode, load across a process restart), and the official
+**ACP TCK v1 suite: CONFORMANT** (21/21 mandatory, 0 failures).
+
+**Files:** `src/acp/{mod,stdio,worker,translate}.rs`, `src/cli.rs`, `src/lib.rs`, `src/tui/channel.rs`, `src/tui/app.rs`, `src/session/tools.rs`, `src/config/mod.rs`, `src/tui/startup.rs`, `src/code_index/mod.rs`, `tests/acp_e2e.rs`, `docs/roadmap/acp.md`, `README.md`, `Cargo.toml`
 
 ---
 

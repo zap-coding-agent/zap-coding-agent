@@ -551,7 +551,7 @@ impl App {
                     _ => self.streaming_blocks.push(StreamingBlock::Thinking(text)),
                 }
             }
-            TuiEvent::ToolStart { id, name, label } => {
+            TuiEvent::ToolStart { id, name, label, .. } => {
                 self.state = AppState::ToolRunning { name: name.clone(), label: label.clone() };
                 self.streaming_blocks.push(StreamingBlock::Tool(UiToolCall {
                     id,

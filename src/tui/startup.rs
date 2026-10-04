@@ -189,14 +189,7 @@ fn build_ui_blocks(
 
 /// On first launch with no provider configured, auto-open the provider picker.
 pub(super) fn maybe_open_onboarding_picker(app: &mut App, config: &crate::config::Config) {
-    let no_provider_configured = config.all_providers.is_empty()
-        && config.api_key.is_empty()
-        && std::env::var("AGENT_API_KEY").is_err()
-        && std::env::var("ANTHROPIC_API_KEY").is_err()
-        && std::env::var("OPENAI_API_KEY").is_err()
-        && std::env::var("GOOGLE_API_KEY").is_err();
-
-    if !no_provider_configured { return; }
+    if !config.no_provider_configured() { return; }
 
     let gemini_ready = crate::llm_client::auth::check_gcloud_adc().is_some()
         || crate::llm_client::auth::check_google_api_key_env().is_some();

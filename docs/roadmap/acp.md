@@ -1,6 +1,6 @@
 # ACP (Agent Client Protocol) support — `zap acp`
 
-Status: planned · Target: v0.16.0 (minor — new integration surface)
+Status: **implemented in v0.16.0** (steps 1–9) · step 10 (registry submission) pending — see `docs/acp-registry/`
 
 ## Goal
 

@@ -180,6 +180,7 @@ impl Session {
                 id:    call.id.clone(),
                 name:  "mcp_connect".to_string(),
                 label: server_name.clone(),
+                input: call.input.clone(),
             });
             if !crate::tui::channel::is_tui_mode() {
                 println!(
@@ -262,6 +263,7 @@ impl Session {
                 id: call.id.clone(),
                 name: call.name.clone(),
                 label: ctx_display.clone(),
+                input: call.input.clone(),
             });
             if !crate::tui::channel::is_tui_mode() {
                 println!(
