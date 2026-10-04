@@ -61,7 +61,10 @@ fn initialize_response(req: &InitializeRequest) -> Result<InitializeResponse, Er
     // The ACP registry lists only agents with an auth method. zap's "login" is
     // picking a provider, which its terminal UI already does — but the spec
     // forbids offering a terminal method to clients that can't run one.
-    let auth_methods = if to_json(req)["clientCapabilities"]["auth"]["terminal"] == true {
+    // Clients signal support either through `auth.terminal` (current spec) or
+    // the older `_meta["terminal-auth"]` convention the registry validator uses.
+    let caps = &to_json(req)["clientCapabilities"];
+    let auth_methods = if caps["auth"]["terminal"] == true || caps["_meta"]["terminal-auth"] == true {
         json!([{
             "type": "terminal",
             "id": "zap-setup",
@@ -376,9 +379,11 @@ mod tests {
         };
         let without = init(json!({}));
         assert!(without["authMethods"].as_array().is_none_or(|a| a.is_empty()), "{without}");
-        let with = init(json!({ "auth": { "terminal": true } }));
-        assert_eq!(with["authMethods"][0]["type"], "terminal");
-        assert_eq!(with["authMethods"][0]["id"], "zap-setup");
+        for caps in [json!({ "auth": { "terminal": true } }), json!({ "_meta": { "terminal-auth": true } })] {
+            let with = init(caps.clone());
+            assert_eq!(with["authMethods"][0]["type"], "terminal", "{caps}");
+            assert_eq!(with["authMethods"][0]["id"], "zap-setup");
+        }
     }
 
     #[test]

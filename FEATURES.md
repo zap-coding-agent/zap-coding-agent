@@ -7,6 +7,21 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### fix(acp): offer terminal setup to clients using the legacy `terminal-auth` signal (v0.16.3 patch)
+
+The ACP Registry's CI validator (and older clients) announce terminal-login
+support as `clientCapabilities._meta["terminal-auth"]: true` rather than the
+current spec's `clientCapabilities.auth.terminal`. zap only recognised the
+latter, so its `authMethods` came back empty and the registry's auth check —
+"at least one method of type `agent` or `terminal`" — would have rejected it.
+`initialize` now offers the "Set up zap" terminal method for either signal, and
+still offers nothing to clients that advertise neither (spec MUST NOT; ACP TCK
+`ACP-AUTH-002`). Verified with the registry's own `run_auth_check`.
+
+**Files:** `src/acp/mod.rs`
+
+---
+
 ### fix(deps): bump rustls to 0.23.45 for RUSTSEC-2026-0285 (v0.16.2 patch)
 
 CI security audit (`cargo audit`) was failing on
