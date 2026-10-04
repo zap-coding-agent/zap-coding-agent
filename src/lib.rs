@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod agent_core;
 pub mod tui;
 pub mod hooks;

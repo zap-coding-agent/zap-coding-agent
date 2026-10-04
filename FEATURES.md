@@ -7,6 +7,33 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
+### feat(acp): `zap acp` — stdio isolation + initialize handshake (ACP step 1 of 10, unreleased)
+
+First step of Agent Client Protocol support, so ACP clients (Zed, JetBrains
+IDEs, VS Code via ACP extensions, Neovim, Emacs) can drive zap. Full plan in
+`docs/roadmap/acp.md`; ships as v0.16.0 once the remaining steps land.
+
+`zap acp` speaks JSON-RPC over stdio using the official `agent-client-protocol`
+crate (2.2, the one Zed uses). Only **ACP v1** is implemented — v2 is still a
+draft — so a client offering v2 is answered with v1, per the spec's negotiation
+rule. `initialize` returns `agentInfo` (`zap` + version) and empty capabilities;
+sessions and prompts come in later steps.
+
+**Stdio isolation** is the load-bearing part: zap has ~500 `println!` sites
+outside the TUI plus child processes (shell tool, LSP, MCP) that inherit fd 0/1,
+and any stray byte on stdout corrupts the protocol. Rather than auditing every
+call site, `acp::stdio::isolate()` runs first: it takes private close-on-exec
+duplicates of fd 0/1 for the protocol, points fd 1 at stderr and fd 0 at the
+null device (Unix: `fcntl(F_DUPFD_CLOEXEC)` + `dup2`; Windows: CRT `_dup`/`_dup2`,
+which also update the Win32 std handles). E2E tests cover the handshake, v2→v1
+negotiation, stdout carrying only JSON-RPC, exit on stdin EOF, and — via the
+`ZAP_ACP_TEST_STRAY_OUTPUT` hook — that a stray `println!` and a child's echo
+both land on stderr.
+
+**Files:** `src/acp/mod.rs`, `src/acp/stdio.rs`, `src/cli.rs`, `src/lib.rs`, `tests/acp_e2e.rs`, `docs/roadmap/acp.md`, `Cargo.toml`
+
+---
+
 ### fix(deps): bump h2 to 0.4.16 for RUSTSEC-2026-0258 (v0.15.142 patch)
 
 CI security audit (`cargo audit`) started failing after RustSec published

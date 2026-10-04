@@ -61,3 +61,4 @@ tokio-util = { version = "0.7", features = ["compat"] }
 axum = { version = "0.7", features = ["ws"] }
 futures-util = "0.3"
 tempfile = "3"
+agent-client-protocol = "2.2"

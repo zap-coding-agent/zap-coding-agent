@@ -97,6 +97,9 @@ pub enum Commands {
         #[command(subcommand)]
         action: SkillAction,
     },
+    /// Run as an Agent Client Protocol (ACP) agent over stdio, for editors
+    /// such as Zed, JetBrains IDEs and VS Code (via an ACP extension).
+    Acp,
 }
 
 #[derive(Subcommand, Debug)]
@@ -344,6 +347,11 @@ pub async fn run() -> Result<()> {
             }
             SkillAction::List => crate::skill_installer::list(),
         };
+    }
+
+    // ACP takes over stdio before config loading or anything else can print.
+    if let Some(Commands::Acp) = args.command {
+        return crate::acp::run().await;
     }
 
     crate::log::rotate_logs(); // trim llm.log + llm_requests/ to last 24 h (background)
