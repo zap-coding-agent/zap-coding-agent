@@ -1,7 +1,7 @@
 {
   "id": "zap",
   "name": "Zap",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Skill-first Rust coding agent: injects only the context your task needs, AST code index, any provider (Claude, OpenAI, Gemini, local models).",
   "repository": "https://github.com/zap-coding-agent/zap-coding-agent",
   "website": "https://zap.justpush.cloud",
@@ -13,28 +13,28 @@
   "distribution": {
     "binary": {
       "darwin-aarch64": {
-        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.0/zap-macos-arm64.tar.gz",
+        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.1/zap-macos-arm64.tar.gz",
         "cmd": "./zap",
         "args": [
           "acp"
         ]
       },
       "darwin-x86_64": {
-        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.0/zap-macos-x86_64.tar.gz",
+        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.1/zap-macos-x86_64.tar.gz",
         "cmd": "./zap",
         "args": [
           "acp"
         ]
       },
       "linux-aarch64": {
-        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.0/zap-linux-arm64.tar.gz",
+        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.1/zap-linux-arm64.tar.gz",
         "cmd": "./zap",
         "args": [
           "acp"
         ]
       },
       "linux-x86_64": {
-        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.0/zap-linux-x86_64.tar.gz",
+        "archive": "https://github.com/zap-coding-agent/zap-coding-agent/releases/download/v0.16.1/zap-linux-x86_64.tar.gz",
         "cmd": "./zap",
         "args": [
           "acp"

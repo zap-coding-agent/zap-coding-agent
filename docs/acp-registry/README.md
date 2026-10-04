@@ -4,10 +4,10 @@ Files for listing zap in the [ACP Registry](https://github.com/agentclientprotoc
 which Zed and JetBrains use for one-click agent installs. `zap/agent.json`
 validates against the registry's `agent.schema.json`.
 
-## Submitting (after the v0.16.0 GitHub release exists)
+## Submitting (after the v0.16.1 GitHub release exists)
 
 1. Check the archive URLs in `zap/agent.json` resolve (they point at the
-   `v0.16.0` release assets).
+   `v0.16.1` release assets).
 2. Optionally pin checksums — add `"sha256"` to each platform entry:
    `curl -sL <archive-url> | shasum -a 256`.
 3. Fork `agentclientprotocol/registry`, copy the `zap/` folder to the repo root,

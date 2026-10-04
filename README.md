@@ -1007,11 +1007,30 @@ Then pick **Zap** from the Agent Panel's new-thread menu. To debug, run `dev: op
 | Tool calls | kind, file locations, edit/write diffs, live status |
 | Permissions | Allow / Always allow / Reject, mapped onto zap's ask mode |
 | Modes | `ask`, `auto`, `read-only` — switch from the editor |
-| Sessions | new, resume (`session/load` replays history), cancel |
+| Sessions | new, resume (`session/load` replays history), list (zap sessions show in the editor's thread history), cancel |
+| Slash commands | offered in the editor's `/` menu — see below |
 | MCP | stdio MCP servers configured in the editor are added to the session (lazy-loaded) |
 | Conformance | passes the official [ACP TCK](https://github.com/agentclientprotocol/acp-tck) v1 suite (all mandatory requirements) |
 
-Limits: one prompt runs at a time per `zap acp` process, and editor file-system / terminal delegation is not used — zap edits files and runs commands itself.
+**Slash commands in the editor.** Type `/` in the agent panel. Commands print their result into the chat; ones that open a picker in the terminal take arguments instead:
+
+| In the terminal | In the editor |
+|---|---|
+| `/init` wizard | `/init [languages]` — detects the language, indexes, writes `ZAP.md` |
+| `/provider` picker | `/provider` lists configured providers · `/provider <name> [model]` switches |
+| `/model` picker | `/model` lists models · `/model <name>` switches for this thread |
+| `/sessions` picker | `/sessions` lists them; resume from the editor's thread history |
+| `/context` viewer | `/context` prints a per-turn token summary |
+| `/diff` viewer | `/diff` prints the staged and unstaged diff |
+| `/tasks` picker | `/tasks` lists · `/tasks <session> <n>` runs a task |
+| `/goal <condition>` | same — runs turn after turn until done; stop with the editor's stop button |
+| `/<skill-name> …` | same — runs that skill for one turn |
+
+Everything else (`/index`, `/compact`, `/undo`, `/cost`, `/config`, `/skill`, `/memory`, `/branch`, `/switch`, `/merge`, `/mcp`, `/hooks`, `/tools`, `/models`, `/audit`, `/run`, `/think`, `/permissions`, `/attach`, `/cd`, `/clear`, `/help` …) works as in the terminal.
+
+Terminal-only: `/schedule`, `/unschedule`, `/bg`, `/agents`, `/remote` — they need the agent to act between prompts, which the protocol does not allow. To add a new provider or API key, run `zap` in a terminal.
+
+Limits: one prompt runs at a time per `zap acp` process; editor file-system / terminal delegation is not used — zap edits files and runs commands itself; a new editor thread starts with an empty conversation (the terminal UI auto-resumes the previous one).
 
 ---
 

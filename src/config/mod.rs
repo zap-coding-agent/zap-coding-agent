@@ -320,11 +320,18 @@ impl Config {
 
     /// Priority (highest wins): env vars → ~/.agent.toml → built-in defaults.
     pub fn load() -> Result<Self> {
+        Self::load_with_provider(None)
+    }
+
+    /// Like [`Config::load`], but with `provider` as the active provider —
+    /// resolving its key, model and endpoint from `~/.agent.toml`. Used to
+    /// switch to an already-configured provider without an interactive picker.
+    pub fn load_with_provider(provider: Option<&str>) -> Result<Self> {
         let file = FileConfig::load();
 
         // ── provider slug ─────────────────────────────────────────────────────
-        let provider_slug = env::var("AGENT_PROVIDER")
-            .ok()
+        let provider_slug = provider.map(str::to_string)
+            .or_else(|| env::var("AGENT_PROVIDER").ok())
             .or(file.provider.clone())
             .unwrap_or_else(|| "lm_studio".to_string());
 

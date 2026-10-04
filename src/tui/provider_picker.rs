@@ -3,7 +3,7 @@ use crate::config::Config;
 
 /// Return the selectable model list for the currently active provider.
 /// Priority: live-fetch (local/gomodel) → TOML models map → static fallback per slug.
-pub(super) fn models_for_current_provider(config: &Config) -> Vec<String> {
+pub(crate) fn models_for_current_provider(config: &Config) -> Vec<String> {
     let slug = &config.provider_slug;
     if let Some(entry) = config.all_providers.get(slug) {
         if let Some(ref url) = entry.base_url {

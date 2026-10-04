@@ -16,7 +16,7 @@ mod background_handler;
 mod git_info;
 mod goal;
 mod lifecycle;
-mod provider_picker;
+pub(crate) mod provider_picker;
 mod schedule_handler;
 mod startup;
 mod text_parse;

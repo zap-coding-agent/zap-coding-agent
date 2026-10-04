@@ -78,7 +78,9 @@ old/new text for edit tools — the undo snapshot already has the "before".
 
 - Client file-system (`fs/*`) and terminal (`terminal/*`) delegation — optional
   in v1 and **removed in v2**; zap keeps its own file and shell tools.
-- Slash commands over ACP (`available_commands_update`) — follow-up.
+- ~~Slash commands over ACP~~ — done in v0.16.1 (`acp::commands`); only
+  `/schedule`, `/unschedule`, `/bg`, `/agents`, `/remote` stay terminal-only
+  (they need agent-initiated turns).
 - ACP v2.
 
 ## Steps (one commit each, tests with each)

@@ -93,3 +93,86 @@ mod imp {
         }
     }
 }
+
+/// Captures everything written to fd 1 while alive, so commands that report
+/// through `println!` (zap's CLI-style slash commands) can be shown in the
+/// client. Output goes to an unlinked temp file rather than a pipe — a command
+/// can print any amount without blocking on a reader.
+pub struct Capture {
+    #[cfg(unix)]
+    saved_stdout: libc::c_int,
+    file: File,
+    read_pos: u64,
+}
+
+impl Capture {
+    #[cfg(unix)]
+    pub fn start() -> io::Result<Self> {
+        use std::io::Write as _;
+        use std::os::fd::AsRawFd;
+        let file = tempfile::tempfile()?;
+        io::stdout().flush()?;
+        // SAFETY: fd syscalls on our own descriptors; `saved_stdout` is restored
+        // and closed exactly once, in `finish`/`Drop`.
+        unsafe {
+            let saved_stdout = libc::fcntl(libc::STDOUT_FILENO, libc::F_DUPFD_CLOEXEC, 3);
+            if saved_stdout < 0 || libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { saved_stdout, file, read_pos: 0 })
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn start() -> io::Result<Self> {
+        Ok(Self { file: tempfile::tempfile()?, read_pos: 0 })
+    }
+
+    /// Output written since the last call. Only whole lines unless `all`, so a
+    /// chunk never ends mid-line (or mid UTF-8 sequence).
+    pub fn read_new(&mut self, all: bool) -> String {
+        use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+        let _ = io::stdout().flush();
+        let mut buf = Vec::new();
+        if self.file.seek(SeekFrom::Start(self.read_pos)).is_err()
+            || self.file.read_to_end(&mut buf).is_err()
+        {
+            return String::new();
+        }
+        if !all {
+            match buf.iter().rposition(|b| *b == b'\n') {
+                Some(i) => buf.truncate(i + 1),
+                None => buf.clear(),
+            }
+        }
+        self.read_pos += buf.len() as u64;
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    fn restore(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: see `start`.
+        unsafe {
+            use std::io::Write as _;
+            if self.saved_stdout >= 0 {
+                let _ = io::stdout().flush();
+                libc::dup2(self.saved_stdout, libc::STDOUT_FILENO);
+                libc::close(self.saved_stdout);
+                self.saved_stdout = -1;
+            }
+        }
+    }
+
+    /// Stop capturing and return whatever is left.
+    pub fn finish(mut self) -> String {
+        let rest = self.read_new(true);
+        self.restore();
+        rest
+    }
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        self.restore();
+    }
+}

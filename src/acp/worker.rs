@@ -7,6 +7,8 @@
 //! [`Peer`]. Because the channel is global, prompts are serialized: one turn
 //! runs at a time per process, across all sessions.
 
+use super::commands::{self, Next};
+use super::stdio::Capture;
 use super::translate::{self, Translator};
 use crate::config::{Config, PermissionMode};
 use crate::session::Session;
@@ -90,6 +92,12 @@ pub enum Command {
     Load { session_id: String, cwd: PathBuf, mcp_servers: Vec<Value>, reply: Reply<Opened> },
     Prompt { session_id: String, prompt: Vec<Value>, reply: Reply<StopReason> },
     SetMode { session_id: String, mode: String, reply: Reply<()> },
+    /// The `available_commands_update` payload for a session.
+    Commands { session_id: String, reply: Reply<Value> },
+    /// Saved sessions for a project directory, as ACP `SessionInfo` objects.
+    List { cwd: Option<PathBuf>, reply: Reply<Vec<Value>> },
+    /// The client disconnected: run session-end hooks before the process exits.
+    Shutdown { reply: Reply<()> },
 }
 
 #[derive(Clone)]
@@ -122,6 +130,12 @@ impl Handle {
         let (tx, rx) = oneshot::channel();
         self.cmd.send(make(tx)).map_err(|_| anyhow!("zap worker stopped"))?;
         rx.await.map_err(|_| anyhow!("zap worker dropped the request"))?
+    }
+
+    /// Tell the worker the client is gone; waits briefly for session-end hooks.
+    pub async fn shutdown(&self) {
+        let call = self.call(|reply| Command::Shutdown { reply });
+        let _ = tokio::time::timeout(Duration::from_secs(3), call).await;
     }
 
     /// Cancel the running turn of `session_id`, if any. Bypasses the command
@@ -180,11 +194,40 @@ async fn run(
                 };
                 let _ = reply.send(r);
             }
+            Command::Commands { session_id, reply } => {
+                let r = sessions.get(&session_id)
+                    .map(|e| commands::available(&e.session))
+                    .ok_or_else(|| anyhow!("unknown session {session_id}"));
+                let _ = reply.send(r);
+            }
+            Command::List { cwd, reply } => {
+                let _ = reply.send(list_sessions(cwd));
+            }
+            Command::Shutdown { reply } => {
+                for entry in sessions.values() {
+                    entry.session.save_context();
+                    entry.session.hooks.fire_session_end();
+                }
+                let _ = reply.send(Ok(()));
+                return;
+            }
             Command::Prompt { session_id, prompt, reply } => {
                 let r = match sessions.get_mut(&session_id) {
                     None => Err(anyhow!("unknown session {session_id}")),
                     Some(entry) => {
-                        run_prompt(&peer, &session_id, entry, &prompt, &mut ev_rx, &mut cancel_rx).await
+                        // A panic in a turn or command must not take the worker
+                        // (and with it every other thread in the editor) down.
+                        use futures::FutureExt as _;
+                        let work = run_prompt(&peer, &session_id, entry, &prompt, &mut ev_rx, &mut cancel_rx);
+                        match std::panic::AssertUnwindSafe(work).catch_unwind().await {
+                            Ok(r) => r,
+                            Err(panic) => {
+                                let msg = panic.downcast_ref::<&str>().map(|s| s.to_string())
+                                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                                    .unwrap_or_else(|| "unknown panic".to_string());
+                                Err(anyhow!("zap hit an internal error: {msg}"))
+                            }
+                        }
                     }
                 };
                 // A cancel that raced the end of the turn must not kill the next one.
@@ -193,6 +236,26 @@ async fn run(
             }
         }
     }
+}
+
+fn list_sessions(cwd: Option<PathBuf>) -> Result<Vec<Value>> {
+    let cwd = match cwd {
+        Some(c) => c,
+        None => std::env::current_dir()?,
+    };
+    // Sessions are keyed by the resolved cwd (what `current_dir()` reported
+    // when they were created); a client may send a symlinked spelling.
+    let cwd = std::fs::canonicalize(&cwd).unwrap_or(cwd).display().to_string();
+    let store = crate::persistence::init()?;
+    Ok(store.recent_sessions_for_cwd(&cwd, 50)?
+        .into_iter()
+        .map(|(id, goal, _model, created_at)| json!({
+            "sessionId": id.to_string(),
+            "cwd": cwd,
+            "title": goal,
+            "updatedAt": created_at,
+        }))
+        .collect())
 }
 
 fn load_config() -> Result<Config> {
@@ -210,6 +273,11 @@ async fn open(cwd: &PathBuf, mcp_servers: &[Value]) -> Result<Entry> {
     std::env::set_current_dir(cwd).map_err(|e| anyhow!("cannot use cwd {}: {e}", cwd.display()))?;
     let config = load_config()?;
     let mut session = Session::new(&config).await?;
+    // The TUI auto-resumes the previous conversation into a new session (and
+    // offers /new to drop it). An editor thread is a fresh conversation the
+    // user can see in full, so hidden history from another thread must not
+    // ride along; the "last session" handoff in the system prompt stays.
+    session.messages.clear();
 
     let servers = translate::mcp_servers(mcp_servers);
     if !servers.is_empty() {
@@ -241,7 +309,100 @@ async fn load(peer: &dyn Peer, session_id: &str, cwd: &PathBuf, mcp_servers: &[V
     entry.session.turn_count = messages.iter().filter(|m| m.role == "user").count();
     entry.session.messages = messages;
     entry.session.session_id = id;
+    // Unlike session/new, the client already knows this session id — and
+    // everything belonging to a load must arrive before its response.
+    peer.update(session_id, commands::available(&entry.session));
     Ok(entry)
+}
+
+/// Per-prompt plumbing: where output goes and what can interrupt the work.
+struct Io<'a> {
+    peer: &'a Arc<dyn Peer>,
+    session_id: &'a str,
+    tr: Translator,
+    ev_rx: &'a mut mpsc::UnboundedReceiver<channel::TuiEvent>,
+    cancel_rx: &'a mut mpsc::UnboundedReceiver<String>,
+    /// A ```text fence is open for captured terminal output.
+    fence_open: bool,
+    emitted: bool,
+}
+
+impl Io<'_> {
+    fn chunk(&mut self, s: &str) {
+        self.emitted = true;
+        self.peer.update(self.session_id, json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": s },
+        }));
+    }
+
+    fn close_fence(&mut self) {
+        if self.fence_open {
+            self.fence_open = false;
+            self.chunk("```\n");
+        }
+    }
+
+    /// Markdown text from zap itself (command results, status lines).
+    fn text(&mut self, s: &str) {
+        self.close_fence();
+        self.chunk(s);
+    }
+
+    /// Captured terminal output — kept in a code block so columns stay aligned.
+    fn raw(&mut self, s: &str) {
+        let s = translate::strip_ansi(s);
+        if s.trim().is_empty() && !self.fence_open { return; }
+        if !self.fence_open {
+            self.fence_open = true;
+            self.chunk("```text\n");
+        }
+        self.chunk(&s);
+    }
+
+    fn event(&mut self, ev: &channel::TuiEvent) {
+        for u in self.tr.event(ev) {
+            self.close_fence();
+            self.emitted = true;
+            self.peer.update(self.session_id, u);
+        }
+    }
+
+    /// Run `work` to completion, forwarding events, permission requests and
+    /// (when `capture` is set) terminal output as they happen. `None` means the
+    /// client cancelled — `work` is dropped, which is how zap cancels a turn.
+    async fn drive<T>(
+        &mut self,
+        work: impl std::future::Future<Output = T>,
+        mut capture: Option<&mut Capture>,
+    ) -> Option<T> {
+        let mut poll = tokio::time::interval(Duration::from_millis(25));
+        tokio::pin!(work);
+        let outcome = loop {
+            tokio::select! {
+                biased;
+                Some(id) = self.cancel_rx.recv() => {
+                    if id == self.session_id { break None; }
+                }
+                Some(ev) = self.ev_rx.recv() => self.event(&ev),
+                r = &mut work => break Some(r),
+                _ = poll.tick() => {
+                    if let Some(req) = channel::take_perm_request() {
+                        self.close_fence();
+                        ask_permission(self.peer, self.session_id, &mut self.tr, req);
+                    }
+                    if let Some(c) = capture.as_deref_mut() {
+                        let out = c.read_new(false);
+                        if !out.is_empty() { self.raw(&out); }
+                    }
+                }
+            }
+        };
+        // Events emitted just before the work finished.
+        while let Ok(ev) = self.ev_rx.try_recv() { self.event(&ev); }
+        let _ = channel::take_perm_request();
+        outcome
+    }
 }
 
 async fn run_prompt(
@@ -263,41 +424,101 @@ async fn run_prompt(
     while ev_rx.try_recv().is_ok() {}
     let _ = channel::take_perm_request();
 
-    let mut tr = Translator::new(entry.cwd.clone());
-    let mut perm_poll = tokio::time::interval(Duration::from_millis(25));
-
-    let outcome = {
-        let turn = entry.session.handle_user_turn(&text);
-        tokio::pin!(turn);
-        loop {
-            tokio::select! {
-                biased;
-                Some(id) = cancel_rx.recv() => {
-                    if id == session_id { break None; } // dropping `turn` cancels it
-                }
-                Some(ev) = ev_rx.recv() => {
-                    for u in tr.event(&ev) { peer.update(session_id, u); }
-                }
-                r = &mut turn => break Some(r),
-                _ = perm_poll.tick() => {
-                    if let Some(req) = channel::take_perm_request() {
-                        ask_permission(peer, session_id, &mut tr, req);
-                    }
-                }
-            }
-        }
+    let mut io = Io {
+        peer,
+        session_id,
+        tr: Translator::new(entry.cwd.clone()),
+        ev_rx,
+        cancel_rx,
+        fence_open: false,
+        emitted: false,
     };
 
-    // Events emitted just before the turn finished.
-    while let Ok(ev) = ev_rx.try_recv() {
-        for u in tr.event(&ev) { peer.update(session_id, u); }
-    }
-    let _ = channel::take_perm_request();
+    let mode_before = mode_id(&entry.session.permissions.mode);
+    let result = if text.starts_with('/') {
+        run_slash(&mut io, entry, &text).await
+    } else {
+        run_turn(&mut io, entry, &text).await
+    };
+    io.close_fence();
 
-    match outcome {
+    // The TUI writes .zap/context.md (goal, files touched) when it exits; an
+    // editor just drops the connection, so keep it current after every turn.
+    if matches!(result, Ok(StopReason::EndTurn)) {
+        entry.session.save_context();
+    }
+
+    // A command (/permissions) may have changed the mode behind the client's back.
+    let mode_after = mode_id(&entry.session.permissions.mode);
+    if mode_after != mode_before {
+        peer.update(session_id, json!({ "sessionUpdate": "current_mode_update", "currentModeId": mode_after }));
+    }
+    result
+}
+
+async fn run_turn(io: &mut Io<'_>, entry: &mut Entry, text: &str) -> Result<StopReason> {
+    match io.drive(entry.session.handle_user_turn(text), None).await {
         None => Ok(StopReason::Cancelled),
         Some(Ok(())) => Ok(StopReason::EndTurn),
         Some(Err(e)) => Err(e),
+    }
+}
+
+/// A prompt that starts with `/`: a skill, a zap command, or a goal loop.
+async fn run_slash(io: &mut Io<'_>, entry: &mut Entry, text: &str) -> Result<StopReason> {
+    use crate::tui::commands::{could_be_skill_command, resolve_skill_command};
+
+    // `/<skill-name> …` pins that skill for one turn, like the TUI.
+    if could_be_skill_command(text) {
+        let names: Vec<String> = entry.session.skills.iter().map(|s| s.name.clone()).collect();
+        if let Some(skill) = resolve_skill_command(text, &names) {
+            let pinned_here = entry.session.pinned_skills.insert(skill.clone());
+            let r = run_turn(io, entry, &text[1..]).await;
+            if pinned_here { entry.session.pinned_skills.remove(&skill); }
+            return r;
+        }
+    }
+
+    let next = {
+        let mut out = |s: &str| io.text(s);
+        commands::run(&mut entry.session, &mut entry.cwd, text, &mut out).await
+    };
+    match next {
+        Next::Done => Ok(StopReason::EndTurn),
+        Next::Turn(prompt) => run_turn(io, entry, &prompt).await,
+        Next::Goal { condition, max_turns } => {
+            for n in 1..=max_turns {
+                io.text(&format!("\n\n**Goal — turn {n}/{max_turns}**\n\n"));
+                let prompt = commands::goal_prompt(n, max_turns, &condition);
+                if run_turn(io, entry, &prompt).await? == StopReason::Cancelled {
+                    return Ok(StopReason::Cancelled);
+                }
+                if commands::goal_done(&entry.session) {
+                    io.text(&format!("\n\n✓ Goal complete in {n} turn{}.", if n == 1 { "" } else { "s" }));
+                    return Ok(StopReason::EndTurn);
+                }
+            }
+            io.text(&format!("\n\n⏹ Goal stopped: {max_turns} turn limit reached."));
+            Ok(StopReason::EndTurn)
+        }
+        // CLI-style command: it reports through println!, so capture stdout.
+        Next::Fallback => {
+            let mut capture = Capture::start().ok();
+            let config = entry.session.config.clone();
+            let done = io.drive(entry.session.handle_slash(text, &config), capture.as_mut()).await;
+            if let Some(c) = capture {
+                let rest = c.finish();
+                if !rest.is_empty() { io.raw(&rest); }
+            }
+            io.close_fence();
+            if done.is_none() {
+                return Ok(StopReason::Cancelled);
+            }
+            if !io.emitted {
+                io.text("Done.");
+            }
+            Ok(StopReason::EndTurn)
+        }
     }
 }
 

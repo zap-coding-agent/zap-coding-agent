@@ -241,6 +241,13 @@ pub fn mcp_servers(servers: &[Value]) -> Vec<(String, crate::mcp::McpServerConfi
         .collect()
 }
 
+/// Remove ANSI escape sequences (colours, cursor moves) from terminal output.
+pub fn strip_ansi(s: &str) -> String {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\r").expect("ansi regex"));
+    re.replace_all(s, "").into_owned()
+}
+
 /// Replay a stored conversation as `session/update`s for `session/load`.
 pub fn history(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
@@ -366,6 +373,13 @@ mod tests {
         assert!(text.starts_with("explain @/proj/a.rs"));
         assert!(text.contains("<file uri=\"file:///proj/b.rs\">\nfn b() {}\n</file>"));
         assert_eq!(images, vec![("image/png".to_string(), "AAAA".to_string())]);
+    }
+
+    #[test]
+    fn strip_ansi_removes_colours_and_carriage_returns() {
+        assert_eq!(strip_ansi("\x1b[2m── ok ──\x1b[0m\r\n"), "── ok ──\n");
+        assert_eq!(strip_ansi("\x1b[38;2;100;210;255mblue\x1b[0m"), "blue");
+        assert_eq!(strip_ansi("plain"), "plain");
     }
 
     #[test]

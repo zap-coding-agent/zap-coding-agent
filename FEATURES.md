@@ -7,7 +7,7 @@ Update this file whenever a feature ships or a plan changes — no code scanning
 
 ## Implemented ✅
 
-### feat(acp): `zap acp` — run zap inside Zed, JetBrains and VS Code (v0.16.0)
+### feat(acp): `zap acp` — run zap inside Zed, JetBrains and VS Code (v0.16.0 – v0.16.1)
 
 zap now speaks the [Agent Client Protocol](https://agentclientprotocol.com):
 `zap acp` runs it as a native agent in any ACP client — Zed, JetBrains IDEs,
@@ -45,15 +45,42 @@ servers are added to the session's lazy MCP pool. A `terminal` auth method
   onboarding and ACP; `spawn_background_indexer` starts at most one indexer per
   directory per process (ACP opens a `Session` per editor thread).
 
-**Verification:** 16 unit tests (every emitted update shape round-trips through
-the crate's typed structs), 12 e2e tests that drive the real binary over stdio
+**Slash commands (v0.16.1):** in the TUI these are handled by the front-end, not the agent
+loop, so ACP needed its own routing (`acp::commands`). The command list is sent
+as `available_commands_update` (built-ins + every skill as `/<skill>`), then:
+- inline commands that already return text reuse `tui::commands::handle_inline`;
+- CLI-style commands that `println!` run through `Session::handle_slash` with
+  stdout captured (`acp::stdio::Capture` — fd 1 redirected to a temp file,
+  polled every 25 ms, ANSI stripped, streamed into a fenced block) inside the
+  same event/permission/cancel loop as a prompt turn;
+- picker/wizard commands get argument-driven versions: `/init [languages]`,
+  `/provider [name [model]]` (via new `Config::load_with_provider`), `/model`,
+  `/sessions`, `/context`, `/diff`, `/tasks [session n]`, `/goal` (turn loop
+  until `✓ DONE` or `--max`);
+- `/schedule`, `/unschedule`, `/bg`, `/agents`, `/remote` answer "terminal only":
+  they need agent-initiated turns, which ACP v1 has no way to express.
+`/permissions` pushes a `current_mode_update` so the editor's mode selector stays
+in sync. `session/list` exposes zap's saved sessions to the editor's history.
+
+**Editor-specific behaviour:** a new thread starts with an empty conversation
+(the TUI auto-resumes the previous one — hidden history must not leak across
+editor threads); `.zap/context.md` is saved after every turn and `SessionEnd`
+hooks fire on disconnect, since an editor never "exits" a session; a panic inside
+a turn or command is caught and returned as an error instead of killing the
+worker thread.
+
+**Verification:** 21 unit tests (every emitted update shape round-trips through
+the crate's typed structs), 24 e2e tests that drive the real binary over stdio
 against a scripted fake OpenAI-compatible server in a temp HOME (handshake,
 stdout isolation incl. a mutation check, streaming, tool call + permission +
 diff + file written, reject, cancel within 5 s while the LLM hangs,
-`auth_required`, set_mode, load across a process restart), and the official
-**ACP TCK v1 suite: CONFORMANT** (21/21 mandatory, 0 failures).
+`auth_required`, set_mode, load across a process restart, command announcement,
+inline / captured / terminal-only commands, `/init`, `/goal` to completion and
+to its turn limit, `/provider`, `/model`, session list, fresh-thread history),
+and the official **ACP TCK v1 suite: CONFORMANT** (21/21 mandatory, 44 passed,
+0 failures).
 
-**Files:** `src/acp/{mod,stdio,worker,translate}.rs`, `src/cli.rs`, `src/lib.rs`, `src/tui/channel.rs`, `src/tui/app.rs`, `src/session/tools.rs`, `src/config/mod.rs`, `src/tui/startup.rs`, `src/code_index/mod.rs`, `tests/acp_e2e.rs`, `docs/roadmap/acp.md`, `README.md`, `Cargo.toml`
+**Files:** `src/acp/{mod,stdio,worker,translate,commands}.rs`, `src/cli.rs`, `src/lib.rs`, `src/tui/channel.rs`, `src/tui/app.rs`, `src/session/tools.rs`, `src/config/mod.rs`, `src/tui/startup.rs`, `src/tui/mod.rs`, `src/tui/provider_picker.rs`, `src/code_index/mod.rs`, `tests/acp_e2e.rs`, `tests/acp_commands_e2e.rs`, `tests/acp_support/mod.rs`, `docs/roadmap/acp.md`, `README.md`, `Cargo.toml`
 
 ---
 

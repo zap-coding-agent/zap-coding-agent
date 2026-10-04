@@ -1,19 +1,19 @@
-//! ACP mode end-to-end tests.
+//! ACP mode end-to-end tests: handshake, stdio isolation and session turns.
 //!
 //! Spawn the compiled `zap acp` binary and speak JSON-RPC over stdio, the way
 //! Zed does. Turns run against a scripted fake OpenAI-compatible server on
 //! localhost, with HOME pointed at a temp dir — no API key, no network, and the
 //! user's real ~/.zap and ~/.agent.toml are never touched.
+//! Slash commands are covered in `acp_commands_e2e.rs`.
 
+mod acp_support;
+
+use acp_support::{text_reply, tool_reply, AcpClient, FakeLlm, ZAP};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Read as _, Write as _};
-use std::net::TcpListener;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::io::{Read as _, Write as _};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const ZAP: &str = env!("CARGO_BIN_EXE_zap");
 const INIT_V1: &str = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"acp-e2e","version":"0"}}}"#;
 
 // ── one-shot runs (handshake / stdio isolation) ──────────────────────────────
@@ -118,216 +118,6 @@ fn stray_prints_and_child_output_go_to_stderr() {
     assert!(err.contains("stray println"), "println! not redirected to stderr: {err:?}");
     assert!(err.contains("stray child"), "child stdout not redirected to stderr: {err:?}");
     json_lines(&out); // and the protocol stream is still clean
-}
-
-// ── fake LLM ─────────────────────────────────────────────────────────────────
-
-/// A canned OpenAI chat-completions reply.
-fn text_reply(text: &str) -> Value {
-    json!({
-        "choices": [{ "message": { "role": "assistant", "content": text }, "finish_reason": "stop" }],
-        "usage": { "prompt_tokens": 10, "completion_tokens": 5 }
-    })
-}
-
-fn tool_reply(id: &str, name: &str, args: Value) -> Value {
-    json!({
-        "choices": [{ "message": { "role": "assistant", "content": null, "tool_calls": [{
-            "id": id, "type": "function",
-            "function": { "name": name, "arguments": args.to_string() }
-        }]}, "finish_reason": "tool_calls" }],
-        "usage": { "prompt_tokens": 10, "completion_tokens": 5 }
-    })
-}
-
-/// Serves scripted replies in order (the last one repeats, so zap's auxiliary
-/// calls — summaries, titles — also get an answer). `delay` holds every reply.
-struct FakeLlm {
-    url: String,
-}
-
-impl FakeLlm {
-    fn start(script: Vec<Value>, delay: Duration) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
-        let script = Arc::new(Mutex::new(script));
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { break };
-                let script = script.clone();
-                std::thread::spawn(move || {
-                    let mut reader = BufReader::new(stream.try_clone().unwrap());
-                    let mut len = 0usize;
-                    loop {
-                        let mut line = String::new();
-                        if reader.read_line(&mut line).unwrap_or(0) == 0 { return; }
-                        if line == "\r\n" { break; }
-                        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                            len = v.trim().parse().unwrap_or(0);
-                        }
-                    }
-                    let mut body = vec![0u8; len];
-                    let _ = reader.read_exact(&mut body);
-                    std::thread::sleep(delay);
-                    let reply = {
-                        let mut s = script.lock().unwrap();
-                        if s.len() > 1 { s.remove(0) } else { s[0].clone() }
-                    };
-                    let body = reply.to_string();
-                    let _ = write!(
-                        stream,
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                        body.len(), body
-                    );
-                });
-            }
-        });
-        Self { url }
-    }
-}
-
-// ── interactive client ───────────────────────────────────────────────────────
-
-/// A minimal ACP client: writes requests, collects every inbound message, and
-/// can answer the agent's own requests (permission prompts).
-struct AcpClient {
-    _child: KillOnDrop,
-    stdin: ChildStdin,
-    rx: mpsc::Receiver<Value>,
-    seen: Vec<Value>,
-    next_id: u64,
-    _home: tempfile::TempDir,
-    project: tempfile::TempDir,
-}
-
-impl AcpClient {
-    /// `llm`: None = no provider configured at all.
-    fn spawn(llm: Option<&FakeLlm>, extra_env: &[(&str, &str)]) -> Self {
-        Self::spawn_in(tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), llm, extra_env)
-    }
-
-    fn spawn_in(home: tempfile::TempDir, project: tempfile::TempDir, llm: Option<&FakeLlm>, extra_env: &[(&str, &str)]) -> Self {
-        let mut cmd = Command::new(ZAP);
-        cmd.arg("acp")
-            .current_dir(project.path())
-            .env("HOME", home.path())
-            .env("XDG_CONFIG_HOME", home.path().join(".config"))
-            .env_remove("ANTHROPIC_API_KEY")
-            .env_remove("OPENAI_API_KEY")
-            .env_remove("GOOGLE_API_KEY")
-            .env_remove("AGENT_API_KEY")
-            .env_remove("AGENT_PROVIDER")
-            .env_remove("AGENT_MODEL")
-            .env_remove("AGENT_BASE_URL")
-            .env_remove("AGENT_PERMISSION_MODE")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        if let Some(llm) = llm {
-            cmd.env("AGENT_PROVIDER", "openai")
-                .env("AGENT_BASE_URL", &llm.url)
-                .env("AGENT_API_KEY", "test-key")
-                .env("AGENT_MODEL", "fake-model")
-                .env("AGENT_DISABLE_STREAM", "1");
-        }
-        cmd.envs(extra_env.iter().copied());
-        let mut child = cmd.spawn().expect("spawn zap acp");
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                let v: Value = serde_json::from_str(&line)
-                    .unwrap_or_else(|e| panic!("non-JSON on stdout ({e}): {line:?}"));
-                if tx.send(v).is_err() { break; }
-            }
-        });
-        let mut c = Self { _child: KillOnDrop(child), stdin, rx, seen: vec![], next_id: 1, _home: home, project };
-        c.request("initialize", json!({ "protocolVersion": 1, "clientCapabilities": {} }));
-        c
-    }
-
-    fn send(&mut self, msg: Value) {
-        writeln!(self.stdin, "{msg}").unwrap();
-        self.stdin.flush().unwrap();
-    }
-
-    fn notify(&mut self, method: &str, params: Value) {
-        self.send(json!({ "jsonrpc": "2.0", "method": method, "params": params }));
-    }
-
-    /// Send a request and return its id without waiting.
-    fn start(&mut self, method: &str, params: Value) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
-        id
-    }
-
-    /// Wait for the response to `id`, answering permission prompts with `allow`.
-    fn wait(&mut self, id: u64, allow: Option<&str>) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            let left = deadline.saturating_duration_since(Instant::now());
-            let msg = self.rx.recv_timeout(left)
-                .unwrap_or_else(|_| panic!("no response to request {id}; seen: {:#?}", self.seen));
-            self.seen.push(msg.clone());
-            if msg["method"] == "session/request_permission" {
-                let option = allow.expect("unexpected permission prompt");
-                let outcome = json!({ "outcome": "selected", "optionId": option });
-                self.send(json!({ "jsonrpc": "2.0", "id": msg["id"], "result": { "outcome": outcome } }));
-                continue;
-            }
-            if msg["id"] == id && msg.get("method").is_none() {
-                return msg;
-            }
-        }
-    }
-
-    fn request(&mut self, method: &str, params: Value) -> Value {
-        let id = self.start(method, params);
-        self.wait(id, None)
-    }
-
-    fn new_session(&mut self) -> String {
-        let cwd = self.project.path().to_string_lossy().to_string();
-        let r = self.request("session/new", json!({ "cwd": cwd, "mcpServers": [] }));
-        r["result"]["sessionId"].as_str().unwrap_or_else(|| panic!("session/new failed: {r}")).to_string()
-    }
-
-    fn prompt_params(sid: &str, text: &str) -> Value {
-        json!({ "sessionId": sid, "prompt": [{ "type": "text", "text": text }] })
-    }
-
-    fn updates(&self, kind: &str) -> Vec<&Value> {
-        self.seen.iter()
-            .filter(|m| m["method"] == "session/update" && m["params"]["update"]["sessionUpdate"] == kind)
-            .map(|m| &m["params"]["update"])
-            .collect()
-    }
-
-    fn message_text(&self) -> String {
-        self.updates("agent_message_chunk").iter()
-            .filter_map(|u| u["content"]["text"].as_str())
-            .collect()
-    }
-
-    /// Stop the agent and hand back its HOME and project dirs for a restart.
-    fn finish(self) -> (tempfile::TempDir, tempfile::TempDir) {
-        drop(self._child);
-        (self._home, self.project)
-    }
-}
-
-/// Kills the agent when a test ends — including when it panics.
-struct KillOnDrop(Child);
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
 }
 
 // ── session scenarios ────────────────────────────────────────────────────────
@@ -452,4 +242,20 @@ fn load_session_replays_history() {
         .filter_map(|u| u["content"]["text"].as_str()).collect();
     assert!(user.contains("first message"), "replayed user text: {user:?}");
     assert!(c.message_text().contains("Remember me"));
+}
+
+#[test]
+fn new_thread_starts_with_an_empty_conversation() {
+    // In the TUI a new session auto-resumes the previous conversation; an
+    // editor thread must not inherit another thread's hidden history.
+    let llm = FakeLlm::start(vec![text_reply("ok")], Duration::ZERO);
+    let mut c = AcpClient::spawn(Some(&llm), &[]);
+    let first = c.new_session();
+    c.say(&first, "a question from the first thread");
+    let (home, project) = c.finish();
+
+    let mut c = AcpClient::spawn_in(home, project, Some(&llm), &[]);
+    let second = c.new_session();
+    let out = c.say(&second, "/history");
+    assert!(out.contains("0 messages in history"), "new thread inherited history: {out:?}");
 }

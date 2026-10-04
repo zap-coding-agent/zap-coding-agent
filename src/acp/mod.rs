@@ -7,13 +7,15 @@
 //! JSON-RPC methods onto the `worker` thread that owns zap's sessions, and
 //! `translate` holds the pure zap ⇄ ACP conversions.
 
+pub mod commands;
 pub mod stdio;
 pub mod translate;
 pub mod worker;
 
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest,
-    InitializeResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, NewSessionRequest,
     NewSessionResponse, PromptRequest, PromptResponse, RequestPermissionRequest,
     SessionNotification, SetSessionModeRequest, SetSessionModeResponse,
 };
@@ -76,6 +78,7 @@ fn initialize_response(req: &InitializeRequest) -> Result<InitializeResponse, Er
             "loadSession": true,
             "promptCapabilities": { "image": true, "embeddedContext": true },
             "mcpCapabilities": { "http": false, "sse": false },
+            "sessionCapabilities": { "list": {} },
         },
         "authMethods": auth_methods,
         "agentInfo": { "name": "zap", "title": "Zap", "version": VERSION },
@@ -156,6 +159,37 @@ where
     })
 }
 
+/// Like [`respond_later`] for `session/new`: once the client has the session
+/// id, tell it which slash commands the session offers. (`session/load` sends
+/// them before its response instead — see `worker::load`.)
+fn respond_then_announce<T, F>(
+    cx: &ConnectionTo<Client>,
+    responder: Responder<T>,
+    worker: Handle,
+    work: F,
+) -> Result<(), Error>
+where
+    T: agent_client_protocol::JsonRpcResponse + Send + 'static,
+    F: std::future::Future<Output = Result<(T, String), Error>> + Send + 'static,
+{
+    let peer = AcpPeer { cx: cx.clone() };
+    cx.spawn(async move {
+        match work.await {
+            Ok((response, session_id)) => {
+                responder.respond(response)?;
+                let commands = worker
+                    .call(|reply| Command::Commands { session_id: session_id.clone(), reply })
+                    .await;
+                if let Ok(update) = commands {
+                    peer.update(&session_id, update);
+                }
+                Ok(())
+            }
+            Err(e) => responder.respond_with_error(e),
+        }
+    })
+}
+
 pub async fn run() -> Result<()> {
     // Must happen before anything can print — see `stdio` module docs.
     let io = stdio::isolate()?;
@@ -174,7 +208,9 @@ pub async fn run() -> Result<()> {
         tokio::fs::File::from_std(io.stdin).compat(),
     );
     let state = State::default();
-    let (s1, s2, s3, s4, s5) = (state.clone(), state.clone(), state.clone(), state.clone(), state);
+    let shutdown_state = state.clone();
+    let (s1, s2, s3, s4, s5, s6) =
+        (state.clone(), state.clone(), state.clone(), state.clone(), state.clone(), state);
 
     let result = Agent
         .builder()
@@ -199,7 +235,7 @@ pub async fn run() -> Result<()> {
             async move |req: NewSessionRequest, responder, cx| {
                 let worker = s1.worker(&cx);
                 let req = to_json(&req);
-                respond_later(&cx, responder, async move {
+                respond_then_announce(&cx, responder, worker.clone(), async move {
                     let opened = worker
                         .call(|reply| Command::New {
                             cwd: req["cwd"].as_str().unwrap_or(".").into(),
@@ -208,10 +244,11 @@ pub async fn run() -> Result<()> {
                         })
                         .await
                         .map_err(acp_error)?;
-                    typed::<NewSessionResponse>(json!({
+                    let response = typed::<NewSessionResponse>(json!({
                         "sessionId": opened.session_id,
                         "modes": worker::modes_json(opened.mode),
-                    }))
+                    }))?;
+                    Ok((response, opened.session_id))
                 })
             },
             agent_client_protocol::on_receive_request!(),
@@ -275,6 +312,20 @@ pub async fn run() -> Result<()> {
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            async move |req: ListSessionsRequest, responder, cx| {
+                let worker = s6.worker(&cx);
+                let req = to_json(&req);
+                respond_later(&cx, responder, async move {
+                    let sessions = worker
+                        .call(|reply| Command::List { cwd: req["cwd"].as_str().map(Into::into), reply })
+                        .await
+                        .map_err(acp_error)?;
+                    typed::<ListSessionsResponse>(json!({ "sessions": sessions }))
+                })
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .on_receive_notification(
             async move |n: CancelNotification, cx| {
                 s5.worker(&cx).cancel(to_json(&n)["sessionId"].as_str().unwrap_or_default());
@@ -289,6 +340,9 @@ pub async fn run() -> Result<()> {
     // alive; the client is gone, so leave now.
     if let Err(e) = &result {
         tracing::error!("ACP connection error: {e}");
+    }
+    if let Some(worker) = shutdown_state.worker.get() {
+        worker.shutdown().await;
     }
     std::process::exit(if result.is_ok() { 0 } else { 1 });
 }
@@ -354,5 +408,12 @@ mod tests {
         }
         typed::<NewSessionResponse>(json!({ "sessionId": "1", "modes": worker::modes_json("ask") })).unwrap();
         typed::<PromptResponse>(json!({ "stopReason": "cancelled" })).unwrap();
+        typed::<SessionNotification>(json!({ "sessionId": "1", "update": {
+            "sessionUpdate": "current_mode_update", "currentModeId": "auto" } })).unwrap();
+        typed::<SessionNotification>(json!({ "sessionId": "1", "update": {
+            "sessionUpdate": "available_commands_update", "availableCommands": [
+                { "name": "init", "description": "set up project", "input": { "hint": "arguments (optional)" } }] } })).unwrap();
+        typed::<ListSessionsResponse>(json!({ "sessions": [
+            { "sessionId": "7", "cwd": "/p", "title": "fix bug", "updatedAt": "2026-10-04T10:00:00+00:00" }] })).unwrap();
     }
 }
